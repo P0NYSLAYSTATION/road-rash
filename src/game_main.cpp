@@ -1,3 +1,5 @@
+#include "presentation.hpp"
+#include "port_config.hpp"
 #include "rr_build_info.hpp"
 #include "net/client.hpp"
 #include "net/compat.hpp"
@@ -122,10 +124,10 @@ template <class Work> auto load_with_indicator(SDL_Renderer* renderer, const cha
 }
 
 // Plan 11a Task 1 Step 5: debug driver that hunts the oncoming lane, forcing
-// rider–car contact so a headless run logs at least one reason-2 crash.
+// riderâ€“car contact so a headless run logs at least one reason-2 crash.
 // Holds a fixed bias (~150 world units left of the road centre), inside the
 // oncoming-traffic lanes but clear of the wall stand-in: the constant-left
-// predecessor rode the shoulder clamp (x ≈ -723, wall hits every tick),
+// predecessor rode the shoulder clamp (x â‰ˆ -723, wall hits every tick),
 // which crashed the rider at speed > 4000 (reason 0) before traffic
 // arrived. Hands off entirely while crashed (controls 0): the crash-walk
 // back to the bike only converges with no steering input (0x0040a600
@@ -240,7 +242,7 @@ void play_video(const rr::Assets& assets, const std::string& path, SDL_Renderer*
                 throw std::runtime_error(SDL_GetError());
             running = false;
         }
-        SDL_RenderPresent(renderer);
+        rr::present_frame(renderer);
         display.maybe_toggle();
         if (ticks >= 0) running = false;
     }
@@ -911,7 +913,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
             }
             running = false;
         }
-        SDL_RenderPresent(renderer);
+        rr::present_frame(renderer);
         display.maybe_toggle();
         // The original loading postcard is a Select prompt, not asynchronous
         // loading. On phones show it once, then start without a second tap.
@@ -1068,7 +1070,7 @@ int main(int argc, char** argv) {
     try {
         rr::platform::set_startup_hints(); // plan 33a: app ID/name, Steam on-screen keyboard
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) throw std::runtime_error(SDL_GetError());
-        if (!SDL_CreateWindowAndRenderer("Road Rash Native", 960, 720,
+        if (!rr::create_game_window_renderer("Road Rash Native", 960, 720,
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
                                          &renderer))
             throw std::runtime_error(SDL_GetError());
@@ -1111,14 +1113,14 @@ int main(int argc, char** argv) {
 #endif
         }
         if (print_wiring && !rr::Assets(root).exists("ROADRASH.EXE")) {
-            SDL_DestroyRenderer(renderer);
+            rr::destroy_game_renderer(renderer);
             SDL_DestroyWindow(window);
             SDL_Quit();
             return 77;
         } // plan 26 Task 3: skip without the disc
         if (!rr::Assets(root).exists("ROADRASH.EXE")) {
             if (!rr::run_import_screen(window, renderer, root, screenshot, first_run_smoke, import_browse)) {
-                SDL_DestroyRenderer(renderer);
+                rr::destroy_game_renderer(renderer);
                 SDL_DestroyWindow(window);
                 SDL_Quit();
                 return 0;
@@ -1129,7 +1131,7 @@ int main(int argc, char** argv) {
             boot.frame = 0;
             boot.apply(480);
             play_video(assets, video, renderer, screenshot, run_ticks, boot);
-            SDL_DestroyRenderer(renderer);
+            rr::destroy_game_renderer(renderer);
             SDL_DestroyWindow(window);
             SDL_Quit();
             return 0;
@@ -1210,7 +1212,7 @@ int main(int argc, char** argv) {
                             int(w.crash_library), int(w.ride_library), int(w.nitro), int(w.finish),
                             int(w.personalities), g.race().riders().size());
                 std::fflush(stdout);
-                SDL_DestroyRenderer(renderer);
+                rr::destroy_game_renderer(renderer);
                 SDL_DestroyWindow(window);
                 SDL_Quit();
                 return 0;
@@ -1351,7 +1353,7 @@ int main(int argc, char** argv) {
 #endif
         result = 1;
     }
-    SDL_DestroyRenderer(renderer);
+    rr::destroy_game_renderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return result;

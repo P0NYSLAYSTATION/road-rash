@@ -1,3 +1,4 @@
+#include "presentation.hpp"
 #include "import_ui.hpp"
 #include "system_fonts.hpp"
 #include "importer.hpp"
@@ -538,7 +539,7 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
             }
             SDL_DestroySurface(pixels);
         }
-        SDL_RenderPresent(renderer);
+        rr::present_frame(renderer);
         if (smoke || (!screenshot.empty() && screenshot_frames == 0)) break;
         SDL_Delay(16);
     }
@@ -563,6 +564,6 @@ void draw_loading_screen(SDL_Renderer* renderer, const char* stage) {
     ui.text(ui.fonts.body, 18, cx, mid + 22, stage, 150, 156, 168);
     ui.fill({cx - 140, mid + 44, 280, 4}, 38, 41, 50);
     ui.fill({cx - 140 + float((SDL_GetTicks() / 4) % 224), mid + 44, 56, 4}, 255, 196, 0);
-    SDL_RenderPresent(renderer);
+    rr::present_frame(renderer);
 }
 } // namespace rr

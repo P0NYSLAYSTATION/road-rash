@@ -1,3 +1,4 @@
+#include "presentation.hpp"
 // Plan 28 Task 4: RaceScreen implementation (moved from run_race, split in two).
 #include "race_screen.hpp"
 #include "offline_capture.hpp"
@@ -581,7 +582,7 @@ bool RaceScreen::iterate(uint64_t now_ns) {
     }
     {
         ProfileScope ps(prof, FrameProfile::present);
-        if (!SDL_RenderPresent(renderer_)) throw std::runtime_error(SDL_GetError());
+        if (!rr::present_frame(renderer_)) throw std::runtime_error(SDL_GetError());
     }
     display_.maybe_toggle();
     if (opt_.bench) {

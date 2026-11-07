@@ -1,4 +1,5 @@
 #include "display.hpp"
+#include "presentation.hpp"
 #include "view.hpp"
 #ifdef RR_WEB_BROWSER
 #include <emscripten/html5.h>
@@ -63,7 +64,7 @@ void apply_display(SDL_Window* window, SDL_Renderer* renderer, const DisplayConf
     SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, &mode);
     if (lw != c.logical_w || lh != c.logical_h || mode != c.presentation)
         SDL_SetRenderLogicalPresentation(renderer, c.logical_w, c.logical_h, c.presentation);
-    SDL_SetRenderVSync(renderer, c.vsync);
+    presentation_vsync(renderer, c.vsync);
 }
 
 void apply_texture_scale(SDL_Texture* texture, const DisplayConfig& c) {
