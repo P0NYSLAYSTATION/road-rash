@@ -1,3 +1,6 @@
+#ifdef _WIN32
+#include "net/direct_tcp.hpp"
+#endif
 #include "atomic_file.hpp"
 #include "utf8_path.hpp"
 #include <cstdlib>
@@ -294,6 +297,17 @@ uint32_t Frontend::next_random() {
 
 const std::string& Frontend::str(int slot) const {
     static const std::string empty;
+    if (slot >= ns::binding_first && slot < ns::binding_first + 10) {
+        const int i = slot - ns::binding_first;
+        const bool pad = screen_ == screen_id::native_gamepad;
+        const bool capturing = pad ? capture_pad_action_ == i : capture_action_ == binding_actions[size_t(i)];
+        binding_rows_[size_t(i)] =
+            native_string(slot) + ": " +
+            (capturing ? "Press a key or control..."
+             : pad ? controller_binding_name(i, settings_.controller_bindings[size_t(i)], pad_labels_.xinput)
+                   : key_name(binding_actions[size_t(i)]));
+        return binding_rows_[size_t(i)];
+    }
     if (slot >= ns::pad_map1 && slot <= ns::pad_map4) {
         // Element-wise copy keeps the returned string objects in place.
         const auto rows = gamepad_rows(pad_labels_, settings_.swap_punch_kick);
@@ -814,6 +828,7 @@ void Frontend::prepare_screen(int previous, int screen) {
 }
 
 void Frontend::enter(int screen) {
+    capture_action_ = capture_pad_action_ = -1;
     if (screen >= 1 && screen <= 5) { // count 0: PostQuitMessage(course) starts the race (0x00448200)
         events_.push_back({FrontendEvent::Kind::start_race, {}, screen});
         return;
@@ -919,7 +934,9 @@ int Frontend::native_current(uint32_t popup) const {
     case native_popup::touch:
         return settings_.touch_opacity / 25 + 1;
     case native_popup::resolution:
-        return settings_.render_scale + 1; // match = 1, 1x..4x = 2..5
+        return settings_.render_scale == -1   ? 6
+               : settings_.render_scale == -2 ? 7
+                                              : settings_.render_scale + 1; // match = 1, 1x..4x = 2..5
     case native_popup::widescreen:
         return int(settings_.widescreen) + 1;
     case native_popup::visual_style:
@@ -1055,8 +1072,10 @@ std::string Frontend::native_value_text(int caption) const {
     case ns::haptics:
         return native_string(settings_.haptics ? ns::on : ns::off);
     case ns::render_resolution: // plan 19 Task 8: match + 640x480..2560x1920
-        return settings_.render_scale == 0 ? native_string(ns::res_match)
-                                           : native_string(ns::scale_1x + settings_.render_scale - 1);
+        return settings_.render_scale == -1   ? native_string(ns::res_low)
+               : settings_.render_scale == -2 ? native_string(ns::res_original)
+               : settings_.render_scale == 0  ? native_string(ns::res_match)
+                                              : native_string(ns::scale_1x + settings_.render_scale - 1);
     case ns::widescreen:
         return native_string(ns::wide_off + int(settings_.widescreen));
     case ns::visual_style:
@@ -1107,8 +1126,11 @@ std::string Frontend::key_name(int action) const {
     // Plan 18 Task 7: label text for the 0x12 key-label rows. Custom keyboard
     // codes store low-byte-first (0x0040e760); the byte is the keyboard code.
     // Plan 33b Task 4: the name the current keyboard layout prints on that key.
-    if (action < 0 || action > 8) return "?";
-    if (settings_.custom_controls) return key_label(settings_.controls[size_t(action)] & 0xff);
+    if (action < 0 || action > 10) return "?";
+    if (settings_.custom_controls)
+        return key_label(settings_.controls[size_t(action)] < SDL_SCANCODE_COUNT
+                             ? settings_.controls[size_t(action)]
+                             : default_key_scancode(action));
     return key_label(default_key_scancode(action));
 }
 
@@ -1455,6 +1477,14 @@ void Frontend::ensure_wide_bg(int wide_w) const {
 // Item handlers by original address (0x00423200 calls +0x2c, else enters +4).
 int Frontend::run_handler(size_t index) {
     MenuItem& m = items_[index];
+    if (m.caption >= ns::binding_first && m.caption < ns::binding_first + 10) {
+        const int action = m.caption - ns::binding_first;
+        if (screen_ == screen_id::native_gamepad)
+            capture_pad_action_ = action;
+        else
+            capture_action_ = binding_actions[size_t(action)];
+        return 0;
+    }
     switch (m.handler) {
     case 0:
         return m.target;
@@ -1487,12 +1517,16 @@ int Frontend::run_handler(size_t index) {
         if (net_in_room()) {
             FrontendEvent e;
             e.kind = FrontendEvent::Kind::copy_text;
+#ifdef _WIN32
+            e.text = net_direct_ ? net::direct_invite(net_->room()->code) : net_->room()->code;
+#else
             e.text = net_->room()->code;
+#endif
             events_.push_back(std::move(e));
         }
         return 0;
     case native_action::net_code:
-        net_ensure();
+        if (!net_direct_) net_ensure();
         editing_code_ = true;
         net_code_buffer_.clear();
         return 0;
@@ -1785,9 +1819,11 @@ int Frontend::run_handler(size_t index) {
             return 0;
         }
         const int setter = popup_setter_;
-        if(setter==set_load && (target==10001||target==10002)){
-            const size_t page=target==10001?(save_page_?save_page_-1:0):save_page_+1;
-            close_popup();open_load_list(page);return 0;
+        if (setter == set_load && (target == 10001 || target == 10002)) {
+            const size_t page = target == 10001 ? (save_page_ ? save_page_ - 1 : 0) : save_page_ + 1;
+            close_popup();
+            open_load_list(page);
+            return 0;
         }
         std::string load_path;
         if (setter == set_load && target >= 1 && size_t(target) <= save_list_.size())
@@ -1880,9 +1916,11 @@ int Frontend::run_handler(size_t index) {
             apply_native_setting();
             break;
         case native_setter::render_resolution:
-            settings_.render_scale = std::min(4, std::max(0, target - 1));
-            settings_.high_resolution = true;
-            settings_.inset = false;
+            settings_.render_scale = target == 6 ? -1 : target == 7 ? -2 : std::clamp(target - 1, 0, 4);
+            if (target != 7) {
+                settings_.high_resolution = target != 6;
+                settings_.inset = false;
+            }
             apply_native_setting();
             break;
         case native_setter::widescreen:
@@ -1965,7 +2003,7 @@ bool Frontend::toggle_opponent_list() {
 void Frontend::rebind_key(size_t action, uint16_t code) {
     // 0x0040fbf0 conflict rule via apply_rebind: same-code rows are cleared.
     if (!settings_.custom_controls) {
-        settings_.controls = default_keyboard_controls();
+        settings_.controls = modern_keyboard_controls();
         settings_.custom_controls = true;
     }
     apply_rebind(settings_.controls, action, code);
@@ -2114,6 +2152,39 @@ void Frontend::update(const MenuInput& raw_in, uint64_t now_ms) {
             return;
         }
     }
+    if (capture_pad_action_ >= 0) {
+        if (in.capture_scancode == SDL_SCANCODE_ESCAPE || (in.back && !in.capture_controller))
+            capture_pad_action_ = -1;
+        else if (in.capture_controller > 0) {
+            for (size_t i = 0; i < settings_.controller_bindings.size(); ++i) {
+                int& binding = settings_.controller_bindings[i];
+                int action = int(i);
+                if (settings_.swap_punch_kick && (i == 7 || i == 8)) action = 15 - int(i);
+                const int effective =
+                    binding < 0 ? controller_default_binding(action, pad_labels_.xinput) : binding;
+                if (effective == in.capture_controller) binding = 0;
+            }
+            settings_.controller_bindings[size_t(capture_pad_action_)] = in.capture_controller;
+            capture_pad_action_ = -1;
+            apply_native_setting();
+        }
+        return;
+    }
+    if (capture_action_ >= 0) {
+        if (in.capture_scancode != 0) {
+            if (in.capture_scancode != SDL_SCANCODE_ESCAPE && in.capture_scancode < SDL_SCANCODE_COUNT) {
+                if (!settings_.custom_controls) {
+                    settings_.controls = modern_keyboard_controls();
+                    settings_.custom_controls = true;
+                }
+                apply_rebind(settings_.controls, size_t(capture_action_), uint16_t(in.capture_scancode));
+                strings_[size_t(160 + capture_action_)] = key_name(capture_action_);
+                apply_native_setting();
+            }
+            capture_action_ = -1;
+        }
+        return;
+    }
     if (in.alternate_artwork && !editing_name_) {
         settings_.alternate_artwork = !settings_.alternate_artwork;
         if ((screen_ == 10 || screen_ == 12 || screen_ == 0x1b) && focus_ >= 0) {
@@ -2122,20 +2193,6 @@ void Frontend::update(const MenuInput& raw_in, uint64_t now_ms) {
         }
     }
     if (in.opponent_key && !editing_name_) toggle_opponent_list();
-    if (capture_action_ >= 0 && in.capture_scancode != 0) {
-        // Plan 18 Task 7 press-a-key (`0x0040e760`): Escape cancels with no change;
-        // any other key stores low-byte-first (key,0) via the 0x0040fbf0 conflict rule.
-        if (in.capture_scancode != SDL_SCANCODE_ESCAPE && in.capture_scancode < 256) {
-            if (!settings_.custom_controls) {
-                settings_.controls = default_keyboard_controls();
-                settings_.custom_controls = true;
-            }
-            apply_rebind(settings_.controls, size_t(capture_action_), uint16_t(in.capture_scancode));
-            strings_[size_t(160 + capture_action_)] = key_name(capture_action_); // 0x0040e7b0 relabel
-        }
-        capture_action_ = -1; // 0x0040e6d0 disarm
-        return;
-    }
     if (focus_ < 0) return;
     if (in.pointer_moved || in.pointer_click) {
         for (size_t i = items_.size(); i-- > 0;) {

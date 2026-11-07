@@ -52,6 +52,7 @@ inline uint64_t local_fingerprint() {
 // happens at import/startup before any Hello is sent.
 // Reports only successfully verified files; failures never advance progress.
 using VerificationProgress = std::function<void(size_t completed, size_t total)>;
+DataDigest gameplay_data_digest(const Assets&, const VerificationProgress& progress = {});
 DataDigest verified_data_digest(const Assets&, const VerificationProgress& progress = {});
 DataDigest digest_from_table(const std::vector<std::pair<std::string, std::string>>& rows);
 

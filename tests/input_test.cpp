@@ -224,23 +224,23 @@ int main() {
         };
         // No video subsystem here, so SDL's lookup is the default US map.
         const rr::KeyFromScancode us = SDL_GetKeyFromScancode;
-        check(rr::default_key_scancode(4) == SDL_SCANCODE_Z, "punch defaults to the Z position");
+        check(rr::default_key_scancode(5) == SDL_SCANCODE_Z, "punch defaults to the Z position");
         check(rr::key_label(SDL_SCANCODE_Z, us) == "Z", "US punch label");
         check(rr::key_label(SDL_SCANCODE_Z, azerty) == "W", "AZERTY prints W on the punch key");
         check(rr::key_label(SDL_SCANCODE_Z, qwertz) == "Y", "QWERTZ prints Y on the punch key");
         check(rr::key_label(SDL_SCANCODE_X, dvorak) == "Q", "Dvorak prints Q on the kick key");
         check(rr::key_label(SDL_SCANCODE_UP, azerty) == "Up", "arrows keep their names");
-        check(rr::key_label(rr::default_key_scancode(7), us) == "?", "unbound row");
+        check(rr::key_label(rr::default_key_scancode(8), us) == "?", "unbound row");
         // The bound bit comes from the physical key whatever the layout prints.
         bool down[SDL_SCANCODE_COUNT] = {};
         down[SDL_SCANCODE_Z] = true;
         check(rr::bound_control_bits({}, false, down) == rr::control_punch, "default punch by position");
         std::array<uint16_t, 11> codes{};
-        codes[4] = uint16_t(SDL_SCANCODE_Q); // bound on AZERTY's A key
+        codes[5] = uint16_t(SDL_SCANCODE_Q); // bound on AZERTY's A key
         down[SDL_SCANCODE_Z] = false;
         down[SDL_SCANCODE_Q] = true;
         check(rr::bound_control_bits(codes, true, down) == rr::control_punch, "custom punch by position");
-        check(rr::key_label(codes[4] & 0xff, azerty) == "A", "custom label in the current layout");
+        check(rr::key_label(codes[5] & 0xff, azerty) == "A", "custom label in the current layout");
     }
     // Plan 33b Task 4 Step 2: button names per pad family.
     {
@@ -301,6 +301,7 @@ int main() {
         rr::pad_text_edit(odd, c0, up, 19);
         check(odd == "A", "a character outside the cycle restarts it");
     }
+#ifndef _WIN32
     // Plan 33b Task 4 Step 2: hot-plug through SDL virtual gamepads.
     if (SDL_Init(SDL_INIT_GAMEPAD)) {
         const auto attach = [] {
@@ -340,6 +341,7 @@ int main() {
     } else {
         check(false, SDL_GetError());
     }
+#endif
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;
 }

@@ -1,3 +1,4 @@
+#include "native_controllers.hpp"
 #include "presentation.hpp"
 // Plan 28 Task 4: RaceScreen implementation (moved from run_race, split in two).
 #include "race_screen.hpp"
@@ -23,6 +24,8 @@ namespace rr {
 void DisplayDriver::apply(int logical_h) {
     config = display_config(*settings, logical_h, kMobileDisplay);
     apply_display(window, renderer, config);
+    presentation_low_resolution(renderer, settings->render_scale == -1 ||
+                                              (settings->render_scale == -2 && !settings->high_resolution));
     int dw = 0, dh = 0;
     SDL_GetWindowSize(window, &dw, &dh);
     render_scale = effective_render_scale(*settings, dw, dh, kMobileDisplay);
@@ -144,7 +147,7 @@ RaceActionContext RaceScreen::ctx_now() const {
     c.pause_message = g_.pause_message;
     c.has_menu = !opt_.online && opt_.menu != nullptr;
     c.menu_open = !opt_.online && opt_.menu && opt_.menu->pause_open();
-    c.pad = pad_ ? SDL_GetGamepadID(pad_.get()) : 0;
+    c.pad = pad_ ? controller_id(pad_.get()) : 0;
     return c;
 }
 
@@ -383,7 +386,7 @@ bool RaceScreen::iterate(uint64_t now_ns) {
     // pause menu; controllers that re-enumerated on resume are picked up.
     const bool own_freeze = g_.quitting || g_.pause_message || (opt_.menu && opt_.menu->pause_open());
     if (!opt_.capture && !opt_.bench && !opt_.online && lifecycle_.state.frame(now, own_freeze)) {
-        if (pad_ && !SDL_GamepadConnected(pad_.get())) pad_.reset();
+        if (pad_ && !controller_connected(pad_.get())) pad_.reset();
         if (!pad_) pad_ = open_first_gamepad();
     }
     FrameProfile* prof = opt_.bench ? &opt_.bench->current : nullptr;
@@ -428,34 +431,17 @@ bool RaceScreen::iterate(uint64_t now_ns) {
     if (!running_) return false;
     PlayerInput in = touch_.current();
     const bool* keys = SDL_GetKeyboardState(nullptr);
-    // Plan 18 Task 7: custom tables are honored via bound_control_bits below;
-    // defaults use the hardcoded keys (touch_/gamepad layer through `in` either way).
-    if (!opt_.custom_keys) {
-        in.accelerate |= keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W];
-        in.brake |= keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S];
-        in.left |= keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A];
-        in.right |= keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D];
-        in.punch |= keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_LCTRL];
-        in.kick |= keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_LALT];
-        in.backhand |= keys[SDL_SCANCODE_C];
-    }
-    const int zone = opt_.stick_deadzone * 32768 / 100;
-    if (pad_) {
-        const auto south = SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_SOUTH);
-        const auto west = SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_WEST);
-        const auto north = SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_NORTH);
-        in.accelerate |= south || SDL_GetGamepadAxis(pad_.get(), SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000;
-        in.brake |= SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_EAST) ||
-                    SDL_GetGamepadAxis(pad_.get(), SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000;
-        in.left |= SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-        in.right |= SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
-        in.steer_axis = SDL_GetGamepadAxis(pad_.get(), SDL_GAMEPAD_AXIS_LEFTX);
-        in.punch |= opt_.swap_punch_kick ? north : west;
-        in.kick |= opt_.swap_punch_kick ? west : north;
-        in.backhand |= SDL_GetGamepadButton(pad_.get(), SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    }
-    uint32_t controls = opt_.auto_drive ? autopilot(g_.race(), g_.traffic()) : controls_from(in, zone);
-    if (!opt_.auto_drive && opt_.custom_keys) controls |= bound_control_bits(opt_.key_codes, true, keys);
+    Settings current;
+    current.controls = opt_.key_codes;
+    current.custom_controls = opt_.custom_keys;
+    current.stick_deadzone = opt_.stick_deadzone;
+    current.swap_punch_kick = opt_.swap_punch_kick;
+    const Settings& bindings = opt_.settings ? *opt_.settings : current;
+    uint32_t controls = opt_.auto_drive
+                            ? autopilot(g_.race(), g_.traffic())
+                            : controls_from(in, bindings.stick_deadzone * 32768 / 100) |
+                                  bound_control_bits(bindings.controls, bindings.custom_controls, keys) |
+                                  controller_control_bits(pad_.get(), bindings);
 
     if (lifecycle_.state.take_clock_reset()) {
         reset_clock(now);

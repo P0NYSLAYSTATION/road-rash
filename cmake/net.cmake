@@ -102,6 +102,12 @@ if(NOT RR_NETD_STANDALONE)
     add_subdirectory(${RR_NET_ROOT}/server ${CMAKE_BINARY_DIR}/server)
 endif()
 
+if(WIN32 AND NOT RR_NETD_STANDALONE)
+    add_library(rr-direct-net STATIC ${RR_NET_ROOT}/src/net/direct_tcp.cpp)
+    target_link_libraries(rr-direct-net PUBLIC rr-netd-core ws2_32 Threads::Threads)
+    target_link_libraries(rr-resource PUBLIC rr-direct-net)
+endif()
+
 if(NOT RR_NETD_STANDALONE)
     target_sources(rr-resource PRIVATE ${RR_NET_ROOT}/src/net/client.cpp ${RR_NET_ROOT}/src/net/compat.cpp ${RR_NET_ROOT}/src/net/mano.cpp ${RR_NET_ROOT}/src/frontend_net.cpp)
     target_link_libraries(rr-resource PUBLIC rr-net)

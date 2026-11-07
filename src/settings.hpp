@@ -48,6 +48,7 @@ struct Settings {
     // 0x16-byte "Controls" registry block (0x0040e710 writes, 0x0040e5c0 reads).
     std::array<uint16_t, 11> controls{}; // empty = EXE defaults below
     bool custom_controls = false;
+    std::array<int, 10> controller_bindings{{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
     int music_group = 0, music_track = 0; // "Group"/"Track" (jukebox)
     bool swap_punch_kick = false;         // plan 18 Task 7: native gamepad page
     int stick_deadzone = 37;              // plan 18 Task 7: percent, 10..40 (≈ legacy 12000 units)
@@ -64,7 +65,7 @@ struct Settings {
     bool vsync = true;
     bool show_fps = false;
     bool network_hud = false, smooth_remote = true; // plan 34 presentation options
-    int render_scale = 1;                           // plan 19 Task 8: 0 = match display, 1..4 fixed
+    int render_scale = -2;                          // plan 19 Task 8: 0 = match display, 1..4 fixed
     Widescreen widescreen = Widescreen::off;        // plan 21 Task 8: Hor+ logical width
     int texture_detail = 0;                         // plan 20 Task 3: 0 original, 1 enhanced (MMPX)
     Enhancements enhancements;                      // plan 21 Task 1: all off = original renderer
@@ -73,7 +74,11 @@ struct Settings {
     // Plan 34 Task 7: online lobby persistence. net_server is the WebSocket
     // URL of rr-netd; net_seat is the 128-bit seat token (32 hex chars) kept
     // for the life of the room; net_room is the last room code.
+#ifdef _WIN32
+    std::string net_server = "tcp://127.0.0.1:27995";
+#else
     std::string net_server = "wss://road-rash.archit.xyz/net";
+#endif
     std::string net_seat;
     std::string net_room;
     std::array<std::string, 8> net_chat{};

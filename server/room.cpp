@@ -56,6 +56,13 @@ void Server::emit(const std::string& event, const std::string& fields) {
     if (log) log("{\"event\":\"" + event + "\"" + (fields.empty() ? "" : "," + fields) + "}");
 }
 
+net::RoomListReply Server::public_room_list() const {
+    net::RoomListReply result;
+    for (const auto& [code, room] : rooms_)
+        if (room.options.is_public && result.rooms.size() < 8) result.rooms.push_back(list_entry(code, room));
+    return result;
+}
+
 std::string Server::health_json(uint64_t) const {
     size_t rtc_open = 0;
     for (const auto& [id, c] : conns_) rtc_open += c.reliable->transport_stats().rtc_open;
@@ -90,7 +97,8 @@ net::RoomListEntry Server::list_entry(const std::string& code, const Room& r) co
     e.code = code;
     e.host = r.seats[size_t(r.host)].alias;
     e.level = r.options.level;
-    e.humans = uint8_t(std::count_if(r.seats.begin(), r.seats.end(), [](const Seat& s) { return s.occupied; }));
+    e.humans =
+        uint8_t(std::count_if(r.seats.begin(), r.seats.end(), [](const Seat& s) { return s.occupied; }));
     e.status = r.race ? net::RoomStatus::racing
                       : (e.humans >= net::max_seats ? net::RoomStatus::full : net::RoomStatus::lobby);
     return e;
@@ -313,8 +321,10 @@ void Server::handle(Conn& c, const net::Message& m, uint64_t now) {
     if (std::holds_alternative<net::RoomLeave>(m)) return on_leave(c, now);
     Room* r = room_of(c);
     if (!r) {
-        if (std::holds_alternative<net::Input>(m)) ++counters_.wrong_seat_inputs;
-        else if (std::holds_alternative<net::Hash>(m) || std::holds_alternative<net::Result>(m)) ++counters_.invalid;
+        if (std::holds_alternative<net::Input>(m))
+            ++counters_.wrong_seat_inputs;
+        else if (std::holds_alternative<net::Hash>(m) || std::holds_alternative<net::Result>(m))
+            ++counters_.invalid;
         return;
     }
     if (const auto* x = std::get_if<net::Chat>(&m)) return on_chat(c, *x);
@@ -541,8 +551,10 @@ void Server::on_hash(Conn& c, const net::Hash& m) {
     int best = 0, ties = 0;
     for (const auto& [h, n] : votes) {
         if (n > best || (n == best && h == at.begin()->second)) majority = h;
-        if (n > best) best = n, ties = 1;
-        else if (n == best) ++ties;
+        if (n > best)
+            best = n, ties = 1;
+        else if (n == best)
+            ++ties;
     }
     ++counters_.desyncs;
     r->race->record.desync_ticks.push_back(m.tick);

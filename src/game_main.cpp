@@ -1,3 +1,7 @@
+#ifdef _WIN32
+#include "net/direct_tcp.hpp"
+#endif
+#include "native_controllers.hpp"
 #include "presentation.hpp"
 #include "port_config.hpp"
 #include "rr_build_info.hpp"
@@ -108,6 +112,7 @@ template <class Work> auto load_with_indicator(SDL_Renderer* renderer, const cha
     bool quit = false;
     while (pending.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
         SDL_Event event;
+        rr::controller_poll();
         while (SDL_PollEvent(&event))
             if (event.type == SDL_EVENT_QUIT) quit = true;
         draw_loading(renderer, stage);
@@ -124,10 +129,10 @@ template <class Work> auto load_with_indicator(SDL_Renderer* renderer, const cha
 }
 
 // Plan 11a Task 1 Step 5: debug driver that hunts the oncoming lane, forcing
-// rider–car contact so a headless run logs at least one reason-2 crash.
+// Rider/car contact lets a headless run record a reason-2 crash.
 // Holds a fixed bias (~150 world units left of the road centre), inside the
 // oncoming-traffic lanes but clear of the wall stand-in: the constant-left
-// predecessor rode the shoulder clamp (x ≈ -723, wall hits every tick),
+// The predecessor stayed on the shoulder clamp, hitting the wall each tick.
 // which crashed the rider at speed > 4000 (reason 0) before traffic
 // arrived. Hands off entirely while crashed (controls 0): the crash-walk
 // back to the bike only converges with no steering input (0x0040a600
@@ -175,6 +180,7 @@ void play_video(const rr::Assets& assets, const std::string& path, SDL_Renderer*
 #endif
     while (running) {
         SDL_Event e;
+        rr::controller_poll();
         while (SDL_PollEvent(&e)) {
             if (!rr::lifecycle_event(e.type)) lifecycle.state.handle(e);
             if (!mixer.handle(e)) SDL_Log("Audio reopen failed: %s", SDL_GetError());
@@ -198,7 +204,7 @@ void play_video(const rr::Assets& assets, const std::string& path, SDL_Renderer*
                     player.skip();
             }
             if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && pad &&
-                SDL_GetGamepadID(pad.get()) == e.gbutton.which) {
+                rr::controller_id(pad.get()) == e.gbutton.which) {
                 if (e.gbutton.button == SDL_GAMEPAD_BUTTON_START) {
                     if (lifecycle.state.paused())
                         lifecycle.state.resume();
@@ -224,7 +230,7 @@ void play_video(const rr::Assets& assets, const std::string& path, SDL_Renderer*
         // Plan 33a Task 5 Step 6: a system suspend pauses the video (any key,
         // tap or Start resumes) and picks up re-enumerated controllers.
         if (ticks < 0 && lifecycle.state.frame(SDL_GetTicksNS())) {
-            if (pad && !SDL_GamepadConnected(pad.get())) pad.reset();
+            if (pad && !rr::controller_connected(pad.get())) pad.reset();
             if (!pad) pad = rr::open_first_gamepad();
         }
         player.pause(lifecycle.state.paused());
@@ -303,6 +309,7 @@ rr::RaceEnd run_race(rr::Game& g, SDL_Renderer* renderer, const rr::RaceOptions&
 #endif
     for (;;) {
         SDL_Event e;
+        rr::controller_poll();
         while (SDL_PollEvent(&e)) {
             // Offline takes no keyboard, controller, focus or resize input.
             if (!opt.capture || e.type == SDL_EVENT_QUIT) screen.event(e);
@@ -348,7 +355,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
     rr::add_native_screens(frontend_data, rr::kMobileDisplay);
     rr::Frontend fe(assets, text, strings, rr::credit_lines(resources), std::move(frontend_data), tables,
                     career, settings, rr::save_directory());
-#ifdef RR_NET_TRANSPORT
+#if defined(_WIN32) || defined(RR_NET_TRANSPORT)
     try {
         const auto hello = load_with_indicator(renderer, "Verifying game files...", [&] {
 #if defined(__EMSCRIPTEN__)
@@ -362,24 +369,34 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
 #else
         constexpr auto platform=rr::net::Platform::linux_desktop;
 #endif
-            const auto digest = rr::net::verified_data_digest(assets, [](size_t completed, size_t total) {
+#ifdef _WIN32
+            const auto digest = rr::net::gameplay_data_digest(
+#else
+            const auto digest = rr::net::verified_data_digest(
+#endif
+                assets, [](size_t completed, size_t total) {
 #ifdef RR_WEB_BROWSER
-                rr::web_loading("Verifying game files...", int(completed), int(total));
-                // Cached/local reads may resolve without a frame. Let the browser
-                // paint completed work even when there is no network wait.
-                emscripten_sleep(0);
+                    rr::web_loading("Verifying game files...", int(completed), int(total));
+                    // Cached/local reads may resolve without a frame. Let the browser
+                    // paint completed work even when there is no network wait.
+                    emscripten_sleep(0);
 #else
                 (void)completed;
                 (void)total;
 #endif
-            });
+                });
             return rr::net::make_hello(settings.alias, platform, digest);
         });
+#ifdef _WIN32
+        if (!settings.net_server.starts_with("tcp://")) settings.net_server = "tcp://127.0.0.1:27995";
+        fe.net_attach([&settings] { return rr::net::direct_connect(settings.net_server); }, hello, true);
+#else
         fe.net_attach(
             [&settings, rtc] {
                 return rr::net::ws_connect(settings.net_server, rr::net::RtcOptions{.enabled = rtc});
             },
             hello);
+#endif
     } catch (const std::exception& error) {
         SDL_Log("Multiplayer unavailable: %s", error.what());
     }
@@ -702,7 +719,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
             in.text += rr::to_cp1252(u);
         };
         // Nested race/video loops may have consumed the removal notification.
-        if (pad && !SDL_GamepadConnected(pad.get())) {
+        if (pad && !rr::controller_connected(pad.get())) {
             pad = rr::open_first_gamepad();
             menu_stick.suspend();
             lifecycle.state.pause();
@@ -710,6 +727,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
         fe.set_pad_labels(rr::pad_labels(pad.get())); // plan 33b Task 4: Gamepad page names
         SDL_Event e;
         bool menu_input = false;
+        rr::controller_poll();
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) running = false;
             if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
@@ -724,6 +742,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
                      (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION &&
                       (e.gaxis.value > 16000 || e.gaxis.value < -16000)))
                 pad_last = true;
+            if (const int binding = rr::controller_capture_binding(e)) in.capture_controller = binding;
             if (!rr::lifecycle_event(e.type)) lifecycle.state.handle(e);
             if (!mixer.handle(e)) SDL_Log("Audio reopen failed: %s", SDL_GetError());
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
@@ -807,7 +826,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
                 lifecycle.state.pause();
             }
             if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && pad &&
-                SDL_GetGamepadID(pad.get()) == e.gbutton.which) {
+                rr::controller_id(pad.get()) == e.gbutton.which) {
                 switch (e.gbutton.button) {
                 case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
                     in.left = true;
@@ -842,14 +861,14 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
                     if (fe.screen() == 7 || fe.screen() == 0x23) in.select = true;
                     int w = 0, h = 0;
                     SDL_GetWindowSize(window, &w, &h);
-                    SDL_RenderCoordinatesFromWindow(renderer, e.tfinger.x * float(w), e.tfinger.y * float(h),
-                                                    &x, &y);
+                    rr::presentation_coordinates_from_window(renderer, e.tfinger.x * float(w),
+                                                             e.tfinger.y * float(h), &x, &y);
                 } else if (e.type == SDL_EVENT_MOUSE_MOTION) {
                     if (e.motion.which == SDL_TOUCH_MOUSEID) continue;
-                    SDL_RenderCoordinatesFromWindow(renderer, e.motion.x, e.motion.y, &x, &y);
+                    rr::presentation_coordinates_from_window(renderer, e.motion.x, e.motion.y, &x, &y);
                 } else {
                     if (e.button.which == SDL_TOUCH_MOUSEID) continue;
-                    SDL_RenderCoordinatesFromWindow(renderer, e.button.x, e.button.y, &x, &y);
+                    rr::presentation_coordinates_from_window(renderer, e.button.x, e.button.y, &x, &y);
                 }
                 in.pointer_x = int(x);
                 in.pointer_y = int(y);
@@ -870,8 +889,8 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
         }
         if (!lifecycle.state.paused() && pad) {
             const auto stick =
-                menu_stick.update(SDL_GetGamepadAxis(pad.get(), SDL_GAMEPAD_AXIS_LEFTX),
-                                  SDL_GetGamepadAxis(pad.get(), SDL_GAMEPAD_AXIS_LEFTY), SDL_GetTicks());
+                menu_stick.update(rr::controller_axis(pad.get(), SDL_GAMEPAD_AXIS_LEFTX),
+                                  rr::controller_axis(pad.get(), SDL_GAMEPAD_AXIS_LEFTY), SDL_GetTicks());
             in.left |= stick.left;
             in.right |= stick.right;
             in.up |= stick.up;
@@ -1069,10 +1088,15 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         rr::platform::set_startup_hints(); // plan 33a: app ID/name, Steam on-screen keyboard
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) throw std::runtime_error(SDL_GetError());
+        if (!SDL_Init(SDL_INIT_VIDEO
+#ifndef _WIN32
+                      | SDL_INIT_GAMEPAD
+#endif
+                      ))
+            throw std::runtime_error(SDL_GetError());
         if (!rr::create_game_window_renderer("Road Rash Native", 960, 720,
-                                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
-                                         &renderer))
+                                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
+                                             &renderer))
             throw std::runtime_error(SDL_GetError());
         // Plan 33a Task 5 Step 4: a first run on a Steam Deck or under
         // gamescope starts fullscreen with the display-matched layout.

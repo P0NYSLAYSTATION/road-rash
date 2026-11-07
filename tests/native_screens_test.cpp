@@ -44,10 +44,10 @@ int main(int argc, char** argv) {
     bool linked = false;
     for (const auto& m : data.screens[0x13].items) linked |= m.target == rr::screen_id::native_display;
     const auto& pad = data.screens[rr::screen_id::native_gamepad];
-    check(pad.items.size() == 7, "gamepad page: 4 mapping rows, swap, dead zone, back");
+    check(pad.items.size() == 12, "gamepad page: 4 mapping rows, swap, dead zone, back");
     check(pad.title == rr::ns::gamepad_title, "gamepad title");
-    check(pad.items[5].caption == rr::ns::pad_deadzone, "dead zone slider row");
-    check(pad.items[6].target == 0x12, "gamepad back returns to Configure Input");
+    check(pad.items[10].caption == rr::ns::pad_deadzone, "dead zone slider row");
+    check(pad.items[11].target == 0x12, "gamepad back returns to Configure Input");
     const auto& touch = data.screens[rr::screen_id::native_touch];
     check(touch.items.size() == 3 && touch.title == rr::ns::touch_title, "touch page rows");
     const auto& pause = data.screens[rr::screen_id::native_pause];
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     check(pause.items[1].target == rr::screen_id::native_sound, "pause SOUND enters the sound screen");
     check(pause.items[2].target == rr::screen_id::native_display, "pause DISPLAY enters the display screen");
     check(pause.items[3].target == 0x12, "pause CONTROLS enters Configure Input");
-    check(data.screens[0x12].items.size() == 23, "desktop 0x12 gains the gamepad link");
+    check(data.screens[0x12].items.size() == 12, "desktop 0x12 gains the gamepad link");
     check(mobile.screens[0x12].items.size() == 24, "mobile 0x12 gains gamepad and touch links");
     bool pad_linked = false, desk_touch = false;
     for (const auto& m : data.screens[0x12].items) {

@@ -3857,3 +3857,5 @@ messages or rate limits; UDP 40001; startup checks neither disabled nor skipped.
   121/121 passed.
 - Not run: Android/Linux/Windows font paths, debug-font fallback on screen,
   the loading screen inside a live `rr-game` run (it shows for under a second).
+
+Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).

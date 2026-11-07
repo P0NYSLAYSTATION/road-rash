@@ -1,3 +1,5 @@
+#include "presentation.hpp"
+#include "native_controllers.hpp"
 // Plan 28 Task 4: shared race helpers (moved unchanged from game_main.cpp).
 #include "race_helpers.hpp"
 #include <cstdlib>
@@ -12,12 +14,7 @@
 
 namespace rr {
 GamepadPtr open_first_gamepad() {
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    GamepadPtr pad;
-    for (int i = 0; ids && i < count && !pad; ++i) pad.reset(SDL_OpenGamepad(ids[i]));
-    SDL_free(ids);
-    return pad;
+    return controller_first();
 }
 
 // Demo/smoke driver for --autopilot (native, not the original AI). Picks a
@@ -364,6 +361,7 @@ RgbImage capture_race_frame(SDL_Renderer* renderer) {
 // menu loop's mapping (arrows + Enter/Escape, d-pad + A/B, pointer/touch).
 void pause_event(Frontend* menu, const SDL_Event& e, GamepadPtr& pad, SDL_Renderer* renderer) {
     MenuInput in;
+    in.capture_controller = controller_capture_binding(e);
     if (e.type == SDL_EVENT_GAMEPAD_ADDED || e.type == SDL_EVENT_GAMEPAD_REMOVED) {
         track_gamepad(pad, e);
         if (menu) menu->set_pad_labels(pad_labels(pad.get()));
@@ -405,7 +403,7 @@ void pause_event(Frontend* menu, const SDL_Event& e, GamepadPtr& pad, SDL_Render
             break;
         }
     } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && pad &&
-               SDL_GetGamepadID(pad.get()) == e.gbutton.which) {
+               controller_id(pad.get()) == e.gbutton.which) {
         switch (e.gbutton.button) {
         case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
             in.left = true;
@@ -437,13 +435,14 @@ void pause_event(Frontend* menu, const SDL_Event& e, GamepadPtr& pad, SDL_Render
             int w = 0, h = 0;
             SDL_Window* window = SDL_GetRenderWindow(renderer);
             if (window) SDL_GetWindowSize(window, &w, &h);
-            SDL_RenderCoordinatesFromWindow(renderer, e.tfinger.x * float(w), e.tfinger.y * float(h), &x, &y);
+            presentation_coordinates_from_window(renderer, e.tfinger.x * float(w), e.tfinger.y * float(h), &x,
+                                                 &y);
         } else if (e.type == SDL_EVENT_MOUSE_MOTION) {
             if (e.motion.which == SDL_TOUCH_MOUSEID) return;
-            SDL_RenderCoordinatesFromWindow(renderer, e.motion.x, e.motion.y, &x, &y);
+            presentation_coordinates_from_window(renderer, e.motion.x, e.motion.y, &x, &y);
         } else {
             if (e.button.which == SDL_TOUCH_MOUSEID) return;
-            SDL_RenderCoordinatesFromWindow(renderer, e.button.x, e.button.y, &x, &y);
+            presentation_coordinates_from_window(renderer, e.button.x, e.button.y, &x, &y);
         }
         in.pointer_x = int(x);
         in.pointer_y = int(y);

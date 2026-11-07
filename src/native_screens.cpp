@@ -51,6 +51,8 @@ std::vector<MenuItem> build_popup(const std::vector<MenuItem>& tpl, int header_c
         choice.h = 26;
         out.push_back(choice);
     }
+    const int lift = std::max(0, out.back().y + out.back().h - 472);
+    for (auto& row : out) row.y -= lift;
     return out;
 }
 } // namespace
@@ -152,9 +154,14 @@ void add_native_screens(FrontendData& data, bool mobile) {
         rtpl, ns::touch_opacity,
         {{1, ns::touch_0}, {2, ns::touch_25}, {3, ns::touch_50}, {4, ns::touch_75}, {5, ns::touch_100}});
     // Plan 19 Task 8: match + 1x..4x. Choice index maps to render_scale - 1 (see the setter).
-    data.popups[native_popup::resolution] = build_popup(
-        rtpl, ns::render_resolution,
-        {{1, ns::res_match}, {2, ns::scale_1x}, {3, ns::scale_2x}, {4, ns::scale_3x}, {5, ns::scale_4x}});
+    data.popups[native_popup::resolution] = build_popup(rtpl, ns::render_resolution,
+                                                        {{1, ns::res_match},
+                                                         {2, ns::scale_1x},
+                                                         {3, ns::scale_2x},
+                                                         {4, ns::scale_3x},
+                                                         {5, ns::scale_4x},
+                                                         {6, ns::res_low},
+                                                         {7, ns::res_original}});
     // Plan 21 Task 8: 4:3 + 16:10/16:9/match.
     data.popups[native_popup::widescreen] =
         build_popup(rtpl, ns::widescreen,
@@ -504,5 +511,33 @@ void add_native_screens(FrontendData& data, bool mobile) {
         rooms.items.push_back(back);
         chain(rooms);
     }
+#ifdef _WIN32
+    // Keep turn and lean directions independently bindable.
+    if (!mobile)
+        for (int id : {0x12, screen_id::native_gamepad}) {
+            auto& page = data.screens[id];
+            column(page, id == 0x12 ? ns::keyboard_bindings : ns::gamepad_title);
+            for (int i = 0; i < 10; ++i) {
+                auto row = button(100 + i * 26, ns::binding_first + i, 0, 0x0040e580, 0, 0);
+                row.x = 40;
+                row.w = 560;
+                row.h = 24;
+                page.items.push_back(row);
+            }
+            if (id == 0x12) {
+                auto row = button(360, ns::gamepad_title, 0, 0, screen_id::native_gamepad, 0);
+                row.h = 24;
+                page.items.push_back(row);
+            } else {
+                auto row = button(360, ns::pad_deadzone, 0, 0, 0, item_flag::native_slider);
+                row.h = 24;
+                page.items.push_back(row);
+            }
+            auto back = button(394, ns::back, 0, 0, id == 0x12 ? 0x13 : 0x12, item_flag::escape);
+            back.h = 24;
+            page.items.push_back(back);
+            chain(page);
+        }
+#endif
 }
 } // namespace rr

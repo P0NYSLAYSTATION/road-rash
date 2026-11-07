@@ -66,7 +66,8 @@ struct MenuInput {
     bool home = false, end = false, select = false, back = false, backspace = false;
     bool alternate_artwork = false; // 'A' key (0x004227d0)
     bool opponent_key = false;      // '/' key toggles the opponent list (0x00423777)
-    int capture_scancode = 0;       // plan 18 Task 7: raw SDL scancode of this keydown (0 none)
+    int capture_controller = 0;
+    int capture_scancode = 0; // plan 18 Task 7: raw SDL scancode of this keydown (0 none)
     bool pointer_moved = false, pointer_click = false;
     int pointer_x = -1, pointer_y = -1; // 640x480 coordinates
     std::string text;                   // typed characters (Windows-1252)
@@ -136,7 +137,7 @@ class Frontend {
     // (the room client is created lazily on the first Host/Join so the Hello
     // alias is current); the main-menu mano item stays disabled until then.
     using RoomClientFactory = net::RoomClient::Factory;
-    void net_attach(RoomClientFactory, net::Hello hello);
+    void net_attach(RoomClientFactory, net::Hello hello, bool direct = false);
     bool net_attached() const { return (bool)net_factory_; }
     bool net_in_room() const;
     net::RoomClient* net_client() { return net_.get(); }
@@ -227,7 +228,7 @@ class Frontend {
     bool confirm_unsaved(int then); // 0x004450e0; false while a dialog is pending
     void save_current();
     void save_new();
-    void open_load_list(size_t page=0);
+    void open_load_list(size_t page = 0);
     // Plan 34 Task 7: online lobby driver (polled from update()).
     void net_ensure();        // create the room client on first Host/Join
     void net_update();        // poll, dialogs, Start events, roster refresh
@@ -253,6 +254,8 @@ class Frontend {
     Career& career_;
     Settings& settings_;
     std::string save_dir_, save_file_;
+    int capture_pad_action_ = -1;
+    mutable std::array<std::string, 10> binding_rows_;
     int capture_action_ = -1;   // plan 18 Task 7: press-a-key arming (-1 idle)
     bool pause_open_ = false;   // plan 18 Task 8: in-race pause menu showing
     bool pause_return_ = false; // plan 18 Task 8: sub-screen Back returns to native_pause
@@ -305,13 +308,14 @@ class Frontend {
     int name_cursor_ = -1;
     void pad_name_edit(const MenuInput&);
     std::vector<std::string> save_list_;
-    size_t save_page_=0;
+    size_t save_page_ = 0;
     std::vector<Standing> standings_;
     RaceReport report_;
     bool standings_ready_ = false; // 0x22 rows/title/darken set by the 0x00421290 handler
     // Plan 34 Task 7: online lobby state. net_ owns the room connection for
     // the life of the room visit (lent to net::Client during races).
     RoomClientFactory net_factory_;
+    bool net_direct_ = false;
     net::Hello net_hello_;
     std::unique_ptr<net::RoomClient> net_;
     net::RoomOptions net_pending_options_{};

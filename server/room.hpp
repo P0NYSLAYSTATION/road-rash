@@ -40,7 +40,7 @@ struct ServerConfig {
     double fanout_burst = 8;
     int max_spectators = 16; // per room
     int hash_every = 60;     // Hash cadence; matches net::Rollback's default
-    uint64_t seed = 0;                  // 0: seed from std::random_device
+    uint64_t seed = 0;       // 0: seed from std::random_device
 };
 
 struct Counters {
@@ -77,6 +77,7 @@ class Server {
     int room_count() const { return int(rooms_.size()); }
     int connection_count() const { return int(conns_.size()); }
     int player_count() const;
+    net::RoomListReply public_room_list() const;
     std::string health_json(uint64_t now_ms) const;
     // Called with every finished race (the server's log sink).
     std::function<void(const RaceRecord&)> on_race_finished;
@@ -100,7 +101,7 @@ class Server {
         std::string room; // code, empty when not in a room
         int seat = -1;    // -1 spectator / none
         RateBucket bucket;
-        RateBucket fanout; // tokens/last_ms only
+        RateBucket fanout;  // tokens/last_ms only
         int32_t acked = -1; // highest contiguous sealed tick the client holds
         uint64_t next_rtc_send_ms = 0;
         int32_t sent_upto = -1; // reliable stream: highest tick already sent

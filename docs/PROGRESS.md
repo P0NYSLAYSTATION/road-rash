@@ -2802,3 +2802,5 @@ frontend and all six MIDI arrangement tests also pass. Both installer audio
 paths launch and render race audio. No commercial assets enter the fork or
 release. Detailed scope and DSP fidelity boundaries: [FORK_AUDIO.md](FORK_AUDIO.md).
 Evidence and build commands: [FORK_WORK.md](FORK_WORK.md).
+
+Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).

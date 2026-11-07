@@ -1,6 +1,7 @@
 #pragma once
 #include "bike.hpp"
 #include "sdl_handles.hpp"
+#include "native_controllers.hpp"
 #include <SDL3/SDL_events.h>
 #include <array>
 #include <map>
@@ -11,6 +12,8 @@ namespace rr {
 struct PlayerInput {
     bool accelerate = false, brake = false, left = false, right = false;
     bool punch = false, kick = false, backhand = false;
+    bool nitro = false;
+    bool lean_left = false, lean_right = false;
     int steer_axis = 0; // gamepad stick, -32768..32767
 };
 // Analog-control path as traced (0x0044f880 joystick branch): the original picks
@@ -37,12 +40,16 @@ class MenuStickInput {
 };
 // Dead-zone override in SDL axis units (plan 18 Task 7 stick setting);
 // the default keeps current feel for existing callers.
+inline constexpr std::array<int, 10> binding_actions = {0, 1, 2, 9, 3, 10, 4, 5, 6, 7};
+std::array<uint16_t, 11> modern_keyboard_controls();
+struct Settings;
+uint32_t controller_control_bits(ControllerDevice*, const Settings&);
+int controller_default_binding(int action, bool xinput);
+int controller_capture_binding(const SDL_Event&);
+std::string controller_binding_name(int action, int binding, bool xinput);
 uint32_t controls_from(const PlayerInput&, int dead_zone = steer_dead_zone);
-// Rebindable keyboard map (plan 18 Task 7): native control bit per action row
-// 0..10 (row 8 is dead in the original too, rows 7/10 have no native bit).
-// Custom tables store the SDL scancode in the high byte (native capture format);
-// the traced defaults keep their internal-id bytes and are honored through the
-// default scancode sets below (current game feel, unchanged).
+// Original eleven-action table order, with independent turn/lean directions.
+// Custom bindings contain complete SDL scancodes; zero is unbound.
 uint32_t bound_control_bits(const std::array<uint16_t, 11>& codes, bool custom, const bool* down);
 // Plan 33b Task 4: race keys are physical positions (scancodes), so AZERTY,
 // QWERTZ and Dvorak keep the same layout; the label is what the current
@@ -58,10 +65,11 @@ struct PadLabels {
     std::string south = "South", east = "East", west = "West", north = "North";
     std::string start = "Start", back = "Back", left_trigger = "LT", right_trigger = "RT",
                 right_shoulder = "RB";
+    bool xinput = true;
 };
 PadLabels pad_labels(SDL_GamepadType, SDL_GamepadButtonLabel south, SDL_GamepadButtonLabel east,
                      SDL_GamepadButtonLabel west, SDL_GamepadButtonLabel north);
-PadLabels pad_labels(SDL_Gamepad*); // null: positional names
+PadLabels pad_labels(ControllerDevice*); // null: positional names
 // The four mapping rows of the Gamepad page, matching race_screen's mapping.
 std::array<std::string, 4> gamepad_rows(const PadLabels&, bool swap_punch_kick);
 // Hot-plug for every loop: opens a pad when one is added and none is open;

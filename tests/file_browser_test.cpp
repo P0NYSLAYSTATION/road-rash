@@ -227,6 +227,7 @@ int main() {
               "without folder access only Choose ISO exists");
     }
 
+#ifndef _WIN32
     // A hot-plugged pad (SDL virtual gamepad) drives the import screen.
     if (SDL_Init(SDL_INIT_GAMEPAD)) {
         SDL_VirtualJoystickDesc desc;
@@ -272,6 +273,7 @@ int main() {
     } else {
         check(false, SDL_GetError());
     }
+#endif
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;
 }

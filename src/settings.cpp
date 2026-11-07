@@ -94,7 +94,7 @@ Settings parse_settings(const std::string& text) {
             flag(s.alternate_artwork);
         else if (k == "mini_dash") {
             if (parse_int(v, 0, 2, x)) s.mini_dash = x;
-        } else if (k == "controls") {
+        } else if ((k == "controls" || k == "key_bindings")) {
             // 44 hex chars (full u16 per action, high byte first); legacy 22-char
             // files carry the low byte only. Malformed input ignored. Unknown codes
             // fall back to that action's keyboard default only: high byte 0 with a
@@ -127,7 +127,10 @@ Settings parse_settings(const std::string& text) {
                         t[i] = uint16_t(hi * 16 + lo);
                 }
             }
-            if (ok) {
+            if (ok && k == "key_bindings") {
+                s.controls = t;
+                s.custom_controls = true;
+            } else if (ok) {
                 static constexpr uint8_t kJoy[] = {0x00, 0x01, 0x02, 0x25, 0x26, 0x27, 0x28};
                 const auto known_joy = [&](uint8_t b) {
                     for (uint8_t j : kJoy)
@@ -140,6 +143,27 @@ Settings parse_settings(const std::string& text) {
                 s.controls = t;
                 s.custom_controls = true;
             }
+        } else if (k == "controller_bindings") {
+            std::istringstream values(v);
+            std::array<int, 10> bindings{};
+            bool ok = true;
+            for (size_t i = 0; i < bindings.size(); ++i) {
+                std::string token;
+                if (!std::getline(values, token, ',')) {
+                    ok = false;
+                    break;
+                }
+                int value = 0;
+                if (!parse_int(token, -1, 1012, value) ||
+                    !((value >= -1 && value <= 160) || (value >= 1001 && value <= 1012))) {
+                    ok = false;
+                    break;
+                }
+                bindings[i] = value;
+            }
+            std::string extra;
+            if (std::getline(values, extra, ',')) ok = false;
+            if (ok) s.controller_bindings = bindings;
         } else if (k == "music_group") {
             if (parse_int(v, 0, 31, x)) s.music_group = x;
         } else if (k == "music_track") {
@@ -179,7 +203,7 @@ Settings parse_settings(const std::string& text) {
         else if (k == "show_fps")
             flag(s.show_fps);
         else if (k == "render_scale") {
-            if (parse_int(v, 0, 4, x)) s.render_scale = x;
+            if (parse_int(v, -2, 4, x)) s.render_scale = x;
         } else if (k == "widescreen") {
             if (parse_int(v, 0, 3, x)) s.widescreen = Widescreen(x);
         } else if (k == "texture_detail") {
@@ -245,7 +269,7 @@ std::string format_settings(const Settings& s) {
     if (s.custom_controls) {
         // Full u16 per action (4 hex chars, high byte first). The pre-Task-7
         // writer emitted only the low byte (22 chars); the reader still takes it.
-        o << "\ncontrols=";
+        o << "\nkey_bindings=";
         for (uint16_t c : s.controls)
             o << "0123456789abcdef"[(c >> 12) & 15] << "0123456789abcdef"[(c >> 8) & 15]
               << "0123456789abcdef"[(c >> 4) & 15] << "0123456789abcdef"[c & 15];
@@ -271,6 +295,9 @@ std::string format_settings(const Settings& s) {
       << "\nleft_handed=" << s.left_handed << "\nalias=" << s.alias << "\nnet_server=" << s.net_server
       << "\nnet_seat=" << s.net_seat << "\nnet_room=" << s.net_room << "\n";
     for (size_t i = 0; i < s.net_chat.size(); ++i) o << "net_chat_" << i + 1 << "=" << s.net_chat[i] << "\n";
+    o << "controller_bindings=";
+    for (size_t i = 0; i < s.controller_bindings.size(); ++i) o << (i ? "," : "") << s.controller_bindings[i];
+    o << "\n";
     return o.str();
 }
 

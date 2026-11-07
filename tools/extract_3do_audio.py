@@ -99,7 +99,7 @@ def extract(image,output,ffmpeg,fluidsynth=None,soundfont=None):
         if is_stream:
             target_wav=output/'cinematics'/pathlib.Path(path).relative_to('/Rash/Streams').with_suffix('.wav')
             target_wav.parent.mkdir(parents=True,exist_ok=True)
-            result=subprocess.run([ffmpeg,'-v','error','-y','-i',str(target),'-map','0:a:0','-vn','-c:a','pcm_s16le',str(target_wav)],capture_output=True,text=True)
+            result=subprocess.run([ffmpeg,'-v','error','-y','-i',str(target),'-map','0:a:0','-vn','-c:a','pcm_s16le',str(target_wav)],capture_output=True,text=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             row={'source':path,'wav':str(target_wav.relative_to(output)),'decoded':result.returncode==0}
             if result.returncode and b'SNDS' not in data:
                 row={'source':path,'decoded':False,'silent_video':True,'note':'Video-only stream; engine preview is generated live, not stored as audio.'}
@@ -146,7 +146,7 @@ def extract(image,output,ffmpeg,fluidsynth=None,soundfont=None):
                 if end<=len(b):
                     index+=1;name=p.stem.replace('.','_')+'_%02d'%index
                     aiff=extras/(name+'.aiff');wav=extras/(name+'.wav');aiff.write_bytes(b[pos:end])
-                    result=subprocess.run([ffmpeg,'-v','error','-y','-i',str(aiff),'-c:a','pcm_s16le',str(wav)],capture_output=True,text=True)
+                    result=subprocess.run([ffmpeg,'-v','error','-y','-i',str(aiff),'-c:a','pcm_s16le',str(wav)],capture_output=True,text=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
                     if result.returncode:raise RuntimeError(result.stderr)
                     manifest['extra_audio'].append({'source':str(p.relative_to(native)),'wav':str(wav.relative_to(output))})
             pos+=4
@@ -159,7 +159,7 @@ def extract(image,output,ffmpeg,fluidsynth=None,soundfont=None):
              'note':'EAMS is a sequence, not recorded audio. WAV preview uses the selected GM bank, not the original SCON DSP instruments.'}
         if fluidsynth and soundfont:
             wav=midi.with_suffix('.wav')
-            result=subprocess.run([fluidsynth,'-ni','-r','44100','-F',str(wav),str(soundfont),str(midi)],capture_output=True,text=True)
+            result=subprocess.run([fluidsynth,'-ni','-r','44100','-F',str(wav),str(soundfont),str(midi)],capture_output=True,text=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             if result.returncode:raise RuntimeError(result.stderr)
             row['wav']=str(wav.relative_to(output))
         manifest['sequenced_scores'].append(row)

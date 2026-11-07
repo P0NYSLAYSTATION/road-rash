@@ -100,6 +100,57 @@ DataDigest digest_from_table(const std::vector<std::pair<std::string, std::strin
         digest[i] = uint8_t(std::stoul(hex.substr(i * 2, 2), nullptr, 16));
     return digest;
 }
+DataDigest gameplay_data_digest(const Assets& assets, const VerificationProgress& progress) {
+    std::vector<std::pair<std::string, std::string>> rows;
+    std::vector<std::string> paths;
+    for (const auto& reference : reference_hashes())
+        if (reference.path == "ROADRASH.EXE" || reference.path.starts_with("DATA/"))
+            paths.push_back(reference.path);
+    if (progress) progress(0, paths.size());
+    for (size_t n = 0; n < paths.size(); ++n) {
+        const auto& path = paths[n];
+        auto bytes = assets.read(path);
+        if (path == "ROADRASH.EXE") {
+            // The port reads static game tables, not the original executable's
+            // machine code, imports, artwork or relocation data. Common legacy
+            // compatibility patches must not reject otherwise identical tables.
+            auto word = [&](size_t at) -> uint16_t {
+                if (at + 2 > bytes.size()) throw std::runtime_error("Invalid PC executable");
+                return uint16_t(bytes[at] | (uint16_t(bytes[at + 1]) << 8));
+            };
+            auto dword = [&](size_t at) -> uint32_t {
+                return uint32_t(word(at)) | (uint32_t(word(at + 2)) << 16);
+            };
+            if (word(0) != 0x5a4d) throw std::runtime_error("Invalid PC executable");
+            const size_t pe = dword(0x3c);
+            if (dword(pe) != 0x4550) throw std::runtime_error("Invalid PC executable");
+            const auto count = word(pe + 6), optional = word(pe + 20);
+            if (count > 96) throw std::runtime_error("Invalid PE sections");
+            bool found = false;
+            for (size_t i = 0; i < count; ++i) {
+                const size_t section = pe + 24 + optional + i * 40;
+                if (section + 40 > bytes.size()) throw std::runtime_error("Invalid PE section");
+                std::string name(reinterpret_cast<const char*>(bytes.data() + section), 8);
+                name.resize(name.find('\0') == name.npos ? name.size() : name.find('\0'));
+                if (name != ".data" && name != ".rdata") continue;
+                const size_t size = dword(section + 16), start = dword(section + 20);
+                if (start > bytes.size() || size > bytes.size() - start)
+                    throw std::runtime_error("Invalid PE data");
+                std::vector<uint8_t> data(bytes.begin() + ptrdiff_t(section + 8),
+                                          bytes.begin() + ptrdiff_t(section + 16));
+                data.insert(data.end(), bytes.begin() + ptrdiff_t(start),
+                            bytes.begin() + ptrdiff_t(start + size));
+                rows.emplace_back(path + ":" + name, sha256(data));
+                found = true;
+            }
+            if (!found) throw std::runtime_error("PC executable has no supported static data sections");
+        } else
+            rows.emplace_back(path, sha256(bytes));
+        if (progress) progress(n + 1, paths.size());
+    }
+    return digest_from_table(rows);
+}
+
 DataDigest verified_data_digest(const Assets& assets, const VerificationProgress& progress) {
     std::vector<std::pair<std::string, std::string>> rows;
     const auto& references = reference_hashes();

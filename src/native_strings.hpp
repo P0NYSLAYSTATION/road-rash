@@ -152,6 +152,19 @@ enum : int {
     d_net_lobby,
     net_unofficial,
     d_net_host,
+    res_low,
+    res_original,
+    keyboard_bindings,
+    binding_first,
+    binding_1,
+    binding_2,
+    binding_3,
+    binding_4,
+    binding_5,
+    binding_6,
+    binding_7,
+    binding_8,
+    binding_9,
     count
 };
 }

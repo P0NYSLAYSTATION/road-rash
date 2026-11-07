@@ -1,3 +1,6 @@
+#ifdef _WIN32
+#include "net/direct_tcp.hpp"
+#endif
 #include "frontend.hpp"
 #include "native_screens.hpp"
 #include "native_strings.hpp"
@@ -16,7 +19,8 @@ std::string substitute(std::string text, std::initializer_list<std::string> args
     return text;
 }
 } // namespace
-void Frontend::net_attach(RoomClientFactory factory, net::Hello hello) {
+void Frontend::net_attach(RoomClientFactory factory, net::Hello hello, bool direct) {
+    net_direct_ = direct;
     net_factory_ = std::move(factory);
     net_hello_ = std::move(hello);
     for (auto& item : data_.screens[9].items)
@@ -47,16 +51,48 @@ void Frontend::net_show_error() {
 }
 void Frontend::net_open_host() {
     if (!net_factory_) return;
+#ifdef _WIN32
+    if (net_direct_) {
+        try {
+            const auto port = net::direct_start_host();
+            settings_.net_server = "tcp://127.0.0.1:" + std::to_string(port);
+            net_.reset();
+        } catch (const std::exception& e) {
+            show_dialog(e.what(), 3, {{205, 0}});
+            return;
+        }
+    }
+#endif
     net_pending_options_ = {};
     open_popup(data_.popups.at(native_popup::net_level), 1, native_setter::net_level);
 }
 void Frontend::net_open_rooms() {
+#ifdef _WIN32
+    if (net_direct_) {
+        net::direct_refresh_discovery();
+        net_.reset();
+        enter(screen_id::net_rooms);
+        return;
+    }
+#endif
     net_ensure();
     net_->request_list();
     enter(screen_id::net_rooms);
 }
 void Frontend::net_join_shown(int index) {
     if (index < 0 || size_t(index) >= net_shown_rooms_.size()) return;
+#ifdef _WIN32
+    if (net_direct_) {
+        auto endpoint = net::direct_room_endpoint(net_shown_rooms_[size_t(index)].code);
+        if (endpoint.empty()) {
+            net_open_rooms();
+            return;
+        }
+        settings_.net_server = endpoint;
+        net_.reset();
+        net_ensure();
+    }
+#endif
     net_->join_room_text(net_shown_rooms_[size_t(index)].code, net_spectate_);
     net_connecting_ = true;
     show_dialog(str(ns::net_connecting), 4, {{204, 0}});
@@ -77,6 +113,21 @@ void Frontend::net_join_invite(const std::string& text) {
         net_spectate_ = true;
         join.erase(0, 7);
     }
+#ifdef _WIN32
+    if (net_direct_) {
+        if (auto invite = net::direct_parse_invite(join)) {
+            settings_.net_server = invite->first;
+            join = invite->second;
+            net_.reset();
+        } else if (auto code = net::parse_room_code(join)) {
+            auto address = net::direct_room_endpoint(*code);
+            if (!address.empty()) {
+                settings_.net_server = address;
+                net_.reset();
+            }
+        }
+    }
+#endif
     net_ensure();
     net_->join_room_text(join, net_spectate_);
     enter(0x0b);
@@ -101,7 +152,12 @@ void Frontend::net_prepare_lobby() {
     screen.items[8].enabled = screen.items[9].enabled = screen.items[10].enabled = net_in_room();
 }
 void Frontend::net_prepare_rooms() {
-    net_shown_rooms_ = net_ ? net_->rooms() : std::vector<net::RoomListEntry>{};
+#ifdef _WIN32
+    if (net_direct_)
+        net_shown_rooms_ = net::direct_discovered_rooms();
+    else
+#endif
+        net_shown_rooms_ = net_ ? net_->rooms() : std::vector<net::RoomListEntry>{};
     auto& rows = data_.screens[screen_id::net_rooms].items;
     for (size_t i = 0; i < 8; ++i) {
         rows[i].w = 300;
@@ -118,6 +174,16 @@ void Frontend::net_prepare_rooms() {
     data_.screens[screen_id::net_rooms].title = ns::net_rooms_title;
 }
 void Frontend::net_update() {
+#ifdef _WIN32
+    if (net_direct_ && screen_ == screen_id::net_rooms && now_ >= net_lobby_at_) {
+        net_lobby_at_ = now_ + 250;
+        const int focused = focus_;
+        net_prepare_rooms();
+        items_ = data_.screens[size_t(screen_)].items;
+        if (focused >= 0 && size_t(focused) < items_.size() && items_[size_t(focused)].enabled)
+            set_focus(size_t(focused));
+    }
+#endif
     if (!net_) return;
     net_->update(now_);
     net_show_error();
@@ -205,7 +271,10 @@ bool Frontend::net_edit_input(const MenuInput& in) {
     }
     if (in.select) {
         if (editing_code_) {
-            net_->join_room_text(buffer, net_spectate_);
+            if (net_direct_)
+                net_join_invite(buffer);
+            else
+                net_->join_room_text(buffer, net_spectate_);
             editing_code_ = false;
             net_connecting_ = true;
             show_dialog(str(ns::net_connecting), 4, {{204, 0}});

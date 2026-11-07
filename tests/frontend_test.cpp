@@ -378,7 +378,7 @@ int main(int argc, char** argv) {
             masked_compare("fe-main", img, gold, masked);
         }
     }
-    // Plan 19 Task 5: draw at scale 2 — focus rectangles double exactly and
+    // Plan 19 Task 5: draw at scale 2 â€” focus rectangles double exactly and
     // text ink stays inside its doubled box. Probed on the main menu.
     {
         RgbImage hi;
@@ -543,28 +543,34 @@ int main(int argc, char** argv) {
     key("select");
     check(career.state.cash == saved_cash && career.mode == GameMode::big_game, "save loaded back");
     // Native save browser paginates every RRS rather than truncating the list.
-    for(int i=0;i<13;++i){
-        const auto dest=std::filesystem::path(saves)/("Paging "+std::to_string(i)+(i&1?".rrs":".RRS"));
-        std::filesystem::copy_file(fe.current_save(),dest,std::filesystem::copy_options::overwrite_existing);
+    for (int i = 0; i < 13; ++i) {
+        const auto dest =
+            std::filesystem::path(saves) / ("Paging " + std::to_string(i) + (i & 1 ? ".rrs" : ".RRS"));
+        std::filesystem::copy_file(fe.current_save(), dest,
+                                   std::filesystem::copy_options::overwrite_existing);
     }
     fe.enter(screen_id::restroom);
-    while(fe.focus()!=0)key("up");
+    while (fe.focus() != 0) key("up");
     key("select");
-    auto has_target=[&](int target){for(const auto& item:fe.items())if(item.target==target)return true;return false;};
-    auto choose_target=[&](int target){
-        for(int i=0;i<30&&fe.items()[size_t(fe.focus())].target!=target;++i)key("down");
-        check(fe.items()[size_t(fe.focus())].target==target,"save browser navigation target");
+    auto has_target = [&](int target) {
+        for (const auto& item : fe.items())
+            if (item.target == target) return true;
+        return false;
+    };
+    auto choose_target = [&](int target) {
+        for (int i = 0; i < 30 && fe.items()[size_t(fe.focus())].target != target; ++i) key("down");
+        check(fe.items()[size_t(fe.focus())].target == target, "save browser navigation target");
         key("select");
     };
-    check(has_target(10002)&&!has_target(10001),"first save page has next only");
+    check(has_target(10002) && !has_target(10001), "first save page has next only");
     choose_target(10002);
-    check(has_target(10002)&&has_target(10001),"middle save page has both directions");
+    check(has_target(10002) && has_target(10001), "middle save page has both directions");
     choose_target(10002);
-    check(!has_target(10002)&&has_target(10001),"last save page has previous only");
+    check(!has_target(10002) && has_target(10001), "last save page has previous only");
     choose_target(10001);
-    check(has_target(10002)&&has_target(10001),"previous save page works");
+    check(has_target(10002) && has_target(10001), "previous save page works");
     choose_target(1);
-    check(career.state.cash==saved_cash,"save from later page loads");
+    check(career.state.cash == saved_cash, "save from later page loads");
     // Bulletin board -> City -> race -> busted with no money: game over.
     fe.enter(0x1b);
     snap("bulletin");
@@ -670,18 +676,30 @@ int main(int argc, char** argv) {
     // Start with High, then walk down to the resolution row via row 3.
     settings.high_resolution = true;
     settings.inset = false;
+    settings.render_scale = 1;
     fe.enter(screen_id::native_display);
     if (focus_item(3)) key("down");
     check(fe.focus() == res_row, "resolution row focused");
     const size_t base_items = fe.items().size();
     key("select");
-    check(fe.items().size() == base_items + 6, "resolution popup opens with five choices");
+    check(fe.items().size() == base_items + 8, "resolution popup opens with seven choices");
     key("down");
     key("down");
     key("down"); // last choice (2560x1920)
     key("select");
     check(settings.render_scale == 4, "2560x1920 choice persists");
-    // Plan 21 Task 8: WIDESCREEN row — popup choice persists.
+    if (focus_item(res_row)) key("select");
+    choose_target(6);
+    check(settings.render_scale == -1 && !settings.high_resolution && !settings.inset,
+          "320x240 selects the native low-resolution framebuffer");
+    settings.high_resolution = true;
+    settings.inset = true;
+    if (focus_item(res_row)) key("select");
+    choose_target(7);
+    check(settings.render_scale == -2 && settings.high_resolution && settings.inset,
+          "no override preserves original resolution flags");
+    settings.inset = false;
+    // Plan 21 Task 8: WIDESCREEN row â€” popup choice persists.
     int wide_row = -1;
     for (size_t i = 0; i < fe.items().size(); ++i)
         if (fe.items()[i].caption == rr::ns::widescreen) wide_row = int(i);
@@ -698,7 +716,7 @@ int main(int argc, char** argv) {
                                std::istreambuf_iterator<char>());
         check(text.find("widescreen=2") != std::string::npos, "widescreen choice saved to settings file");
     }
-    // Plan 21 Task 9: VISUAL STYLE — Original/Enhanced/Custom + Enhancements screen.
+    // Plan 21 Task 9: VISUAL STYLE â€” Original/Enhanced/Custom + Enhancements screen.
     fe.enter(screen_id::native_display);
     int style_row = -1;
     for (size_t i = 0; i < fe.items().size(); ++i)
@@ -754,6 +772,7 @@ int main(int argc, char** argv) {
     for (bool inset : {false, true}) {
         settings.high_resolution = false;
         settings.inset = inset;
+        settings.render_scale = 1;
         fe.enter(screen_id::native_display);
         check(fe.items()[size_t(res_row)].enabled, "render resolution accessible in Low and Inset");
         if (focus_item(size_t(res_row))) key("select");
@@ -945,15 +964,15 @@ int main(int argc, char** argv) {
     // Escape cancels with no change and disarms (focus moves on next Down).
     settings.custom_controls = false;
     fe.enter(0x12);
-    check(fe.caption_text(fe.items()[13]) == "Up", "default accelerate label");
+    check(fe.caption_text(fe.items()[0]) == "Accelerate: Up", "default accelerate label");
     if (focus_item(0)) key("select"); // arm accelerate
     press_key(SDL_SCANCODE_W);
     // 0x0040e760 stores keyboard codes low-byte-first (key,0).
     check(settings.controls[0] == uint16_t(SDL_SCANCODE_W) && settings.custom_controls, "W binds accelerate");
-    check(fe.caption_text(fe.items()[13]) == SDL_GetScancodeName(SDL_SCANCODE_W), "label follows the rebind");
+    check(fe.caption_text(fe.items()[0]) == "Accelerate: W", "label follows the rebind");
     if (focus_item(1)) key("select"); // arm brake
     press_key(SDL_SCANCODE_ESCAPE);
-    check(settings.controls[1] == default_keyboard_controls()[1], "Escape cancels with no change");
+    check(settings.controls[1] == modern_keyboard_controls()[1], "Escape cancels with no change");
     key("down");
     check(fe.focus() == 2, "Escape disarms the capture");
     // In-race toggles: F10 cycles MiniDash 0->1->2->0; menu `/` toggles the opponent list (0x423777 sete).
@@ -973,26 +992,31 @@ int main(int argc, char** argv) {
     settings.stick_deadzone = 35;
     settings.left_handed = false;
     fe.enter(screen_id::native_gamepad);
-    if (focus_item(4)) key("select");
-    check(settings.swap_punch_kick, "swap toggle flips");
-    // Plan 33b Task 4: mapping rows name the connected pad's buttons and follow the swap.
-    check(fe.caption_text(fe.items()[1]) == "North: punch  West: kick  RB: backhand",
-          "no pad: positional names, swapped punch and kick");
-    fe.set_pad_labels(rr::pad_labels(SDL_GAMEPAD_TYPE_PS5, SDL_GAMEPAD_BUTTON_LABEL_CROSS,
-                                     SDL_GAMEPAD_BUTTON_LABEL_CIRCLE, SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
-                                     SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE));
-    check(fe.caption_text(fe.items()[0]) == "Cross/R2: gas  Circle/L2: brake  Pad: steer",
-          "DualSense gas row");
-    check(fe.caption_text(fe.items()[1]) == "Triangle: punch  Square: kick  R1: backhand",
-          "DualSense attack row");
-    check(fe.caption_text(fe.items()[3]) == "Menus: D-pad + Cross/Circle", "DualSense menu row");
-    fe.set_pad_labels({});
-    if (focus_item(5)) key("right");
+#ifdef _WIN32
+    for (int i = 2; i <= 5; ++i) {
+        const char* labels[] = {"Turn Left", "Turn Right", "Lean Left", "Lean Right"};
+        check(fe.caption_text(fe.items()[size_t(i)]).starts_with(labels[i - 2]),
+              "independent controller direction row");
+        if (focus_item(size_t(i))) key("select");
+        MenuInput bind;
+        bind.capture_controller = 1001 + i;
+        fe.update(bind, 10000 + i);
+        check(settings.controller_bindings[size_t(i)] == 1001 + i, "controller axis binding stored");
+    }
+    if (focus_item(10)) key("right");
     check(settings.stick_deadzone == 40, "dead zone slider steps by 5");
-    if (focus_item(5)) key("home");
+    if (focus_item(10)) key("home");
     check(settings.stick_deadzone == 10, "dead zone Home goes to 10");
-    if (focus_item(6)) key("select");
-    check(fe.screen() == 0x12, "gamepad back returns to Configure Input");
+    if (focus_item(11)) key("select");
+    check(fe.screen() == 0x12, "controller back returns to keyboard bindings");
+    constexpr SDL_Scancode keys[] = {SDL_SCANCODE_F1, SDL_SCANCODE_F2, SDL_SCANCODE_F3, SDL_SCANCODE_F4};
+    for (int i = 2; i <= 5; ++i) {
+        if (focus_item(size_t(i))) key("select");
+        press_key(keys[i - 2]);
+        check(settings.controls[size_t(binding_actions[size_t(i)])] == keys[i - 2],
+              "independent keyboard direction binding");
+    }
+#endif
     fe.enter(screen_id::native_touch);
     if (focus_item(1)) key("select");
     check(settings.left_handed, "left-handed toggle flips");

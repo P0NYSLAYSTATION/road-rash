@@ -164,12 +164,12 @@ int main() {
               "enhanced preset matches the measured set");
     }
     {
-        // Plan 19 Task 8: render_scale round-trips; 5 and -1 fall back to default.
+        // Resolution overrides include 320x240 (-1) and no override (-2).
         rr::Settings p;
         p.render_scale = 3;
         const rr::Settings q = rr::parse_settings(rr::format_settings(p));
         check(q.render_scale == 3, "render_scale round trips");
-        const rr::Settings bad = rr::parse_settings("render_scale=5\nrender_scale=-1\n");
+        const rr::Settings bad = rr::parse_settings("render_scale=5\nrender_scale=-3\n");
         check(bad.render_scale == rr::default_settings().render_scale,
               "render_scale rejects out-of-range values");
     }

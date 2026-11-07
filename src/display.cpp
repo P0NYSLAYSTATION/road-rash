@@ -27,7 +27,7 @@ DisplayConfig display_config(const Settings& s, int logical_h, bool mobile) {
 
 int effective_render_scale(const Settings& s, int drawable_w, int drawable_h, bool mobile) {
     (void)mobile;
-    if (!s.high_resolution || s.inset) return 1; // original Low/Inset choice
+    if (s.render_scale < 0 || !s.high_resolution || s.inset) return 1; // original Low/Inset choice
     if (s.render_scale >= 1 && s.render_scale <= 4) return s.render_scale;
     int best = 1;
     for (int q = 4; q >= 1; --q)

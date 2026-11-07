@@ -1,3 +1,4 @@
+#include "settings.hpp"
 #include "input.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -41,6 +42,9 @@ uint32_t controls_from(const PlayerInput& in, int dead_zone) {
     if (in.punch) c |= control_punch;
     if (in.kick) c |= control_kick;
     if (in.backhand) c |= control_backhand;
+    if (in.nitro) c |= control_nitro;
+    if (in.lean_left) c |= control_lean_down;
+    if (in.lean_right) c |= control_lean_up;
     if (in.left || in.steer_axis < -dead_zone)
         c |= control_left;
     else if (in.right || in.steer_axis > dead_zone)
@@ -49,34 +53,22 @@ uint32_t controls_from(const PlayerInput& in, int dead_zone) {
 }
 
 namespace {
-// Native control bit per action row 0..10 (rows 7/8/10 have no native bit).
-constexpr uint32_t kActionBits[11] = {
-    control_accelerate,
-    control_brake,
-    control_left,
-    control_right,
-    control_punch,
-    control_kick,
-    control_backhand,
-    0,
-    0,
-    control_nitro,
-    0,
-};
-// Default keyboard scancodes per action (current game feel; row 8 dead, 7/9/10 unbound).
-constexpr int kDefaultKeys[11][2] = {
-    {SDL_SCANCODE_UP, SDL_SCANCODE_W},
-    {SDL_SCANCODE_DOWN, SDL_SCANCODE_S},
-    {SDL_SCANCODE_LEFT, SDL_SCANCODE_A},
-    {SDL_SCANCODE_RIGHT, SDL_SCANCODE_D},
-    {SDL_SCANCODE_Z, SDL_SCANCODE_LCTRL},
-    {SDL_SCANCODE_X, SDL_SCANCODE_LALT},
-    {SDL_SCANCODE_C, -1},
-    {-1, -1},
-    {-1, -1},
-    {-1, -1},
-    {-1, -1},
-};
+// Original action-table order; the unused dismount row has no native bit.
+constexpr uint32_t kActionBits[11] = {control_accelerate, control_brake,    control_left,
+                                      control_lean_down,  control_nitro,    control_punch,
+                                      control_kick,       control_backhand, 0,
+                                      control_right,      control_lean_up};
+constexpr int kDefaultKeys[11][2] = {{SDL_SCANCODE_UP, SDL_SCANCODE_W},
+                                     {SDL_SCANCODE_DOWN, SDL_SCANCODE_S},
+                                     {SDL_SCANCODE_LEFT, SDL_SCANCODE_A},
+                                     {SDL_SCANCODE_Q, -1},
+                                     {SDL_SCANCODE_SPACE, -1},
+                                     {SDL_SCANCODE_Z, SDL_SCANCODE_LCTRL},
+                                     {SDL_SCANCODE_X, SDL_SCANCODE_LALT},
+                                     {SDL_SCANCODE_C, -1},
+                                     {-1, -1},
+                                     {SDL_SCANCODE_RIGHT, SDL_SCANCODE_D},
+                                     {SDL_SCANCODE_E, -1}};
 bool pressed(const bool* down, int sc) {
     return sc > 0 && sc < SDL_SCANCODE_COUNT && down[sc];
 }
@@ -90,11 +82,107 @@ uint32_t bound_control_bits(const std::array<uint16_t, 11>& codes, bool custom, 
             if (pressed(down, kDefaultKeys[i][0]) || pressed(down, kDefaultKeys[i][1]))
                 bits |= kActionBits[i];
         } else {
-            // Custom keyboard codes store low-byte-first (0x0040e760).
-            if (pressed(down, codes[size_t(i)] & 0xff)) bits |= kActionBits[i];
+            // Custom tables store complete SDL scancodes.
+            if (pressed(down, codes[size_t(i)] < SDL_SCANCODE_COUNT ? codes[size_t(i)] : kDefaultKeys[i][0]))
+                bits |= kActionBits[i];
         }
     }
     return bits;
+}
+
+std::array<uint16_t, 11> modern_keyboard_controls() {
+    std::array<uint16_t, 11> out{};
+    for (int i = 0; i < 11; ++i)
+        if (kDefaultKeys[i][0] > 0) out[size_t(i)] = uint16_t(kDefaultKeys[i][0]);
+    return out;
+}
+int controller_capture_binding(const SDL_Event& e) {
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) return int(e.gbutton.button) + 1;
+    if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(int(e.gaxis.value)) > 18000)
+        return 1001 + int(e.gaxis.axis) * 2 + (e.gaxis.value > 0 ? 1 : 0);
+    return 0;
+}
+int controller_default_binding(int action, bool xinput) {
+    constexpr int defaults[] = {1012,
+                                1010,
+                                1001,
+                                1002,
+                                1005,
+                                1006,
+                                SDL_GAMEPAD_BUTTON_LEFT_SHOULDER + 1,
+                                SDL_GAMEPAD_BUTTON_WEST + 1,
+                                SDL_GAMEPAD_BUTTON_NORTH + 1,
+                                SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER + 1};
+    if (!xinput) {
+        if (action == 0) return SDL_GAMEPAD_BUTTON_SOUTH + 1;
+        if (action == 1) return SDL_GAMEPAD_BUTTON_EAST + 1;
+        if (action == 4) return SDL_GAMEPAD_BUTTON_DPAD_LEFT + 1;
+        if (action == 5) return SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1;
+    }
+    return action >= 0 && action < 10 ? defaults[action] : 0;
+}
+uint32_t controller_control_bits(ControllerDevice* pad, const Settings& settings) {
+    if (!pad || !controller_connected(pad)) return 0;
+    const bool xinput = controller_xinput(pad);
+    uint32_t result = 0;
+    for (size_t i = 0; i < binding_actions.size(); ++i) {
+        int code = settings.controller_bindings[i];
+        if (code < 0) {
+            int action = int(i);
+            if (settings.swap_punch_kick && (i == 7 || i == 8)) action = i == 7 ? 8 : 7;
+            code = controller_default_binding(action, xinput);
+        }
+        bool pressed = false;
+        if (code > 0 && code <= 160)
+            pressed = controller_button(pad, code - 1);
+        else if (code >= 1001 && code < 1001 + SDL_GAMEPAD_AXIS_COUNT * 2) {
+            const int axis = (code - 1001) / 2;
+            const int sign = (code - 1001) % 2 ? 1 : -1;
+            const int zone =
+                axis >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? 8000 : settings.stick_deadzone * 32768 / 100;
+            pressed = int(controller_axis(pad, SDL_GamepadAxis(axis))) * sign > zone;
+        }
+        if (pressed) result |= kActionBits[size_t(binding_actions[i])];
+    }
+    return result;
+}
+std::string controller_binding_name(int action, int code, bool xinput) {
+    if (code < 0) code = controller_default_binding(action, xinput);
+    if (!code) return "Unbound";
+    if (code >= 1001) {
+        constexpr const char* names[] = {"Left stick left",
+                                         "Left stick right",
+                                         "Left stick up",
+                                         "Left stick down",
+                                         "Right stick left",
+                                         "Right stick right",
+                                         "Right stick up",
+                                         "Right stick down",
+                                         "LT -",
+                                         "LT",
+                                         "RT -",
+                                         "RT"};
+        const int index = code - 1001;
+        return index >= 0 && index < 12 ? names[index] : "Axis";
+    }
+    const int button = code - 1;
+    if (xinput) {
+        constexpr const char* names[] = {"A",     "B",        "X",          "Y",          "Back",
+                                         "Guide", "Start",    "L stick",    "R stick",    "LB",
+                                         "RB",    "D-pad up", "D-pad down", "D-pad left", "D-pad right"};
+        if (button < int(std::size(names))) return names[button];
+    }
+    if (!xinput) {
+        constexpr int map[] = {SDL_GAMEPAD_BUTTON_SOUTH,         SDL_GAMEPAD_BUTTON_EAST,
+                               SDL_GAMEPAD_BUTTON_WEST,          SDL_GAMEPAD_BUTTON_NORTH,
+                               SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                               SDL_GAMEPAD_BUTTON_BACK,          SDL_GAMEPAD_BUTTON_START,
+                               SDL_GAMEPAD_BUTTON_LEFT_STICK,    SDL_GAMEPAD_BUTTON_RIGHT_STICK};
+        for (int i = 0; i < 10; ++i)
+            if (map[i] == button) return "Button " + std::to_string(i + 1);
+        if (button >= 32) return "Button " + std::to_string(button - 32 + 11);
+    }
+    return "Button " + std::to_string(code);
 }
 
 std::string key_label(int scancode, KeyFromScancode lookup) {
@@ -168,12 +256,19 @@ PadLabels pad_labels(SDL_GamepadType type, SDL_GamepadButtonLabel south, SDL_Gam
     return l;
 }
 
-PadLabels pad_labels(SDL_Gamepad* pad) {
+PadLabels pad_labels(ControllerDevice* pad) {
+#ifdef _WIN32
+    if (!pad) return {};
+    if (controller_xinput(pad)) return {"A", "B", "X", "Y", "Start", "Back", "LT", "RT", "RB"};
+    return {"Button 1", "Button 2", "Button 3", "Button 4", "Button 8",
+            "Button 7", "Button 2", "Button 1", "Button 6", false};
+#else
     if (!pad) return {};
     return pad_labels(SDL_GetGamepadType(pad), SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH),
                       SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST),
                       SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_WEST),
                       SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_NORTH));
+#endif
 }
 
 std::array<std::string, 4> gamepad_rows(const PadLabels& l, bool swap) {
@@ -190,17 +285,12 @@ std::array<std::string, 4> gamepad_rows(const PadLabels& l, bool swap) {
 
 bool track_gamepad(GamepadPtr& pad, const SDL_Event& e) {
     if (e.type == SDL_EVENT_GAMEPAD_ADDED && !pad) {
-        pad.reset(SDL_OpenGamepad(e.gdevice.which));
+        pad = controller_open(e.gdevice.which);
         return false;
     }
-    if (e.type != SDL_EVENT_GAMEPAD_REMOVED || !pad || SDL_GetGamepadID(pad.get()) != e.gdevice.which)
+    if (e.type != SDL_EVENT_GAMEPAD_REMOVED || !pad || controller_id(pad.get()) != e.gdevice.which)
         return false;
-    pad.reset();
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    for (int i = 0; ids && i < count && !pad; ++i)
-        if (ids[i] != e.gdevice.which) pad.reset(SDL_OpenGamepad(ids[i]));
-    SDL_free(ids);
+    pad = controller_first();
     return true;
 }
 

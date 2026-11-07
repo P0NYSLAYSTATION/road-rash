@@ -58,7 +58,7 @@ const std::array<std::string, ns::count - native_slot_base> kNativeStrings = {
     "50%",
     "75%",
     "100%",
-    "GAMEPAD",
+    "CONTROLLERS",
     // pad_map1..4: Frontend::str builds these from the connected pad (gamepad_rows).
     "South/RT: gas  East/LT: brake  Pad: steer",
     "West: punch  North: kick  RB: backhand",
@@ -74,7 +74,8 @@ const std::array<std::string, ns::count - native_slot_base> kNativeStrings = {
     "Render Resolution",
     "Match display",
     "Race and menu resolution. 640x480 is original; higher values cost more GPU time.",
-    "Selecting a value switches Race Resolution from Low or Inset to High.",
+    "Choose 320x240 or a higher render resolution. Don't override follows the original Race Resolution "
+    "setting.",
     "Widescreen",
     "Off (4:3)",
     "16:10",
@@ -114,8 +115,8 @@ const std::array<std::string, ns::count - native_slot_base> kNativeStrings = {
     "Host",
     "Join",
     "Room list",
-    "Enter code",
-    "Copy code",
+    "Enter invite",
+    "Copy invite",
     "Vote course",
     "Chat",
     "Leave room",
@@ -144,13 +145,27 @@ const std::array<std::string, ns::count - native_slot_base> kNativeStrings = {
     "The request failed. Leave the room and try again.",
     "The connection timed out. Check the network and retry.",
     "The connection failed. Check the network and retry.",
-    "Room code copied.",
+    "Room invite copied.",
     "The server closed the connection. Reconnect to take the seat back.",
-    "Online rooms on the game server. No accounts, no port forwarding.",
+    "LAN hosts appear automatically. For Internet play, paste a host invite; hosts forward TCP port 27995.",
     "The race results are unofficial.", // as wide as ENU 441 "...are now official."
     // Replaces ENU 295, which also asks for "a connection mechanism".
     "Host a mano-\xe0-mano game. Pick a level, the bikers, the traffic and who can join, and a character, "
     "then wait for your friends!",
+    "320x240",
+    "Don't override",
+    "Keyboard bindings",
+    "Accelerate",
+    "Brake",
+    "Turn Left",
+    "Turn Right",
+    "Lean Left",
+    "Lean Right",
+    "Nitro Boost",
+    "Punch",
+    "Kick",
+    "Backhand",
+
 };
 const std::string kEmpty;
 } // namespace

@@ -5,20 +5,38 @@ built-in MIDI synthesis, DirectX 9 presentation and file menus inside the game.
 
 **[Download the installer](https://github.com/P0NYSLAYSTATION/road-rash/releases/latest)**
 
-Point setup at your original PC installation. Optionally select the extracted
-3DO WAV folder containing `resource01.wav` through `resource19.wav`.
-Without a complete 3DO bank, setup selects PC audio automatically. Both audio
-modes are available in setup; `rr-port.ini` also allows switching afterward.
-Your original installation is copied, not modified.
+Setup accepts an existing PC installation, the original PC CD drive/folder,
+or an ISO. It imports assets without running the original installer. Optionally
+select a 3DO disc archive containing BIN/CUE (ZIP, 7z or RAR); extraction and WAV
+conversion run offline with bundled tools. With no 3DO bank, setup uses PC audio.
+Existing installations update in place and retain settings, saves, soundfonts
+and previously imported audio. Your source installation is not modified.
+Only the normal `VIDEO` folder is imported; `VIDEO BAK` is ignored.
 
-The installer includes no copyrighted game assets, disc images or soundfonts.
-Supply your own PC and optional 3DO assets. Extraction commands and the precise
-fidelity boundaries are documented in [FORK_AUDIO.md](docs/FORK_AUDIO.md).
-The 3DO mode is an adaptation, not a bit-exact 3DO DSP emulator.
+Display options include 320x240 and **Don't override**, which follows the original
+Race Resolution setting. Integer scaling preserves centered, whole-pixel sizing
+and black borders through the DirectX 9 presentation path.
 
-Saves are enumerated in the game's own menus from `saves/` beside the executable.
-Setup imports existing `.rrs` files. Put a custom `.sf2`, `.sf3` or `.dls` bank
-beside the executable or in `soundfonts/`; otherwise MIDI uses Windows `gm.dls`.
+Windows input uses native XInput and DirectInput. Keyboard and controller menus
+have independent **Turn Left**, **Turn Right**, **Lean Left** and **Lean Right**
+bindings. Default keyboard steering uses arrows/A/D and leaning uses Q/E.
+XInput uses the left stick for turning and right stick for leaning; DirectInput
+uses X for turning and the POV left/right for leaning. Select any action to bind
+a key, button or axis direction. Bindings survive restart and apply during races.
+
+LAN play uses built-in TCP hosting and UDP discovery. Both players need this port
+and matching gameplay assets/builds. For Internet play, the host forwards TCP
+27995 and shares `tcp://HOST:27995/ROOMCODE` (replace HOST with a reachable address).
+There is no hosted matchmaking/NAT relay. Original/Steam OKPlay v0.8.3 uses a
+different game-message protocol and cannot join this port's sessions.
+
+No game assets, disc images, licensed soundtrack or soundfonts are distributed.
+Supply your own PC and optional 3DO discs. [FORK_AUDIO.md](docs/FORK_AUDIO.md)
+documents extraction and fidelity boundaries; this is a 3DO audio adaptation.
+
+Saves are listed in the game's menus from `saves/` beside the executable.
+Put a custom `.sf2`, `.sf3` or `.dls` bank beside the executable or in
+`soundfonts/`; otherwise MIDI uses Windows `gm.dls`.
 
 ### Windows development
 
@@ -30,10 +48,12 @@ Ninja, Git and Python 3, then:
 python tools/windows_dependencies.py --openssl --installer
 powershell -ExecutionPolicy Bypass -File tools/build-local.ps1 -Configuration Release
 ctest --preset windows-local-release --output-on-failure
-python tools/build_fork_installer.py --version 1.0.0
+python tools/build_installer_helpers.py
+python tools/build_fork_installer.py --version 1.1.0
 ```
 
-The dependency helper fetches only pinned open-source runtimes/build tools.
+The dependency helpers fetch pinned open-source runtimes/build tools. The installer
+helper needs MSYS2 UCRT64 GCC/Make to build its minimal LGPL FFmpeg converter.
 The release preset retains multiplayer transport support. The Debug preset
 omits its optional transport dependencies for faster local development.
 See [FORK_WORK.md](docs/FORK_WORK.md) for implementation and validation records.

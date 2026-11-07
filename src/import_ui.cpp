@@ -1,3 +1,4 @@
+#include "native_controllers.hpp"
 #include "presentation.hpp"
 #include "import_ui.hpp"
 #include "system_fonts.hpp"
@@ -210,8 +211,7 @@ struct ImportUI {
     std::mutex mutex;
     std::string selected, message;
     ImportProgress progress{};
-    std::atomic<bool> working{false}, complete{false},
-        cancel{false};
+    std::atomic<bool> working{false}, complete{false}, cancel{false};
     // Plan 33a Task 5 Step 3: disc discovery runs on its own thread.
     std::vector<DiscCandidate> found;
     std::atomic<bool> discovery_done{false}, stop_discovery{false};
@@ -243,13 +243,7 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
     const auto roots = folder_buttons ? platform::browse_roots() : std::vector<platform::BrowseRoot>{};
     ImportMenu menu(roots, read_directory, folder_buttons);
     NavInput nav;
-    GamepadPtr pad;
-    {
-        int count = 0;
-        SDL_JoystickID* ids = SDL_GetGamepads(&count);
-        if (ids && count > 0) pad.reset(SDL_OpenGamepad(ids[0]));
-        SDL_free(ids);
-    }
+    GamepadPtr pad = controller_first();
     const uint64_t started = SDL_GetTicks();
     // Screenshot mode presents a few frames first: a Wayland window learns its
     // scale only after its first commit (plan 33a, Weston at scale 2).
@@ -301,6 +295,7 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
     while (running && !state->complete) {
         const uint64_t now = SDL_GetTicks();
         SDL_Event event;
+        controller_poll();
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) running = false;
             if (track_gamepad(pad, event)) nav.release();
@@ -338,7 +333,7 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
                     y = event.tfinger.y * float(h);
                 }
                 float lx, ly;
-                SDL_RenderCoordinatesFromWindow(renderer, x, y, &lx, &ly);
+                presentation_coordinates_from_window(renderer, x, y, &lx, &ly);
                 const bool click = event.type != SDL_EVENT_MOUSE_MOTION;
                 if (browsing) {
                     const int row = int(std::floor((ly - list_top) / list_row));
