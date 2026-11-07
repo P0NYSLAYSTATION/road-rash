@@ -304,8 +304,9 @@ const std::string& Frontend::str(int slot) const {
         binding_rows_[size_t(i)] =
             native_string(slot) + ": " +
             (capturing ? "Press a key or control..."
-             : pad ? controller_binding_name(i, settings_.controller_bindings[size_t(i)], pad_labels_.xinput)
-                   : key_name(binding_actions[size_t(i)]));
+             : pad     ? controller_binding_name(settings_.swap_punch_kick && (i == 7 || i == 8) ? 15 - i : i,
+                                                 settings_.controller_bindings[size_t(i)], pad_labels_.xinput)
+                       : key_name(binding_actions[size_t(i)]));
         return binding_rows_[size_t(i)];
     }
     if (slot >= ns::pad_map1 && slot <= ns::pad_map4) {

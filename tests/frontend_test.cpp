@@ -1003,6 +1003,13 @@ int main(int argc, char** argv) {
         fe.update(bind, 10000 + i);
         check(settings.controller_bindings[size_t(i)] == 1001 + i, "controller axis binding stored");
     }
+    if (focus_item(4)) key("select");
+    MenuInput button_bind;
+    button_bind.capture_controller = SDL_GAMEPAD_BUTTON_WEST + 1;
+    fe.update(button_bind, 11000);
+    check(settings.controller_bindings[4] == SDL_GAMEPAD_BUTTON_WEST + 1 &&
+              settings.controller_bindings[7] == 0,
+          "controller capture unbinds a conflicting default action");
     if (focus_item(10)) key("right");
     check(settings.stick_deadzone == 40, "dead zone slider steps by 5");
     if (focus_item(10)) key("home");
