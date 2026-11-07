@@ -1299,27 +1299,52 @@ void Frontend::save_new() {
 }
 
 void Frontend::open_load_list(size_t page) {
-    std::vector<std::pair<std::filesystem::file_time_type,std::string>> files;
+    std::vector<std::pair<std::filesystem::file_time_type, std::string>> files;
     std::error_code ec;
-    for(std::filesystem::directory_iterator it(path_from_utf8(save_dir_),ec),end;!ec&&it!=end;it.increment(ec)){
-        auto ext=path_to_utf8(it->path().extension());for(auto& c:ext)c=char(std::toupper(static_cast<unsigned char>(c)));
-        if(it->is_regular_file(ec)&&ext==".RRS")files.emplace_back(it->last_write_time(ec),path_to_utf8(it->path()));
+    for (std::filesystem::directory_iterator it(path_from_utf8(save_dir_), ec), end; !ec && it != end;
+         it.increment(ec)) {
+        auto ext = path_to_utf8(it->path().extension());
+        for (auto& c : ext) c = char(std::toupper(static_cast<unsigned char>(c)));
+        if (it->is_regular_file(ec) && ext == ".RRS")
+            files.emplace_back(it->last_write_time(ec), path_to_utf8(it->path()));
     }
     // total-order: newest timestamp first, with full path breaking equal timestamps.
-    std::sort(files.begin(),files.end(),[](const auto&a,const auto&b){return a.first!=b.first?a.first>b.first:a.second<b.second;});
-    if(files.empty()){show_dialog(format_c(str(368),{A(save_dir_)}),dialog_message,{{205,0}});return;}
-    constexpr size_t per_page=6;save_page_=std::min(page,(files.size()-1)/per_page);
-    struct Row{std::string label;int target;};std::vector<Row> rows;save_list_.clear();
-    const size_t begin=save_page_*per_page,finish=std::min(begin+per_page,files.size());
-    for(size_t i=begin;i<finish;++i){save_list_.push_back(files[i].second);rows.push_back({path_to_utf8(path_from_utf8(files[i].second).stem()),int(save_list_.size())});}
-    if(save_page_)rows.push_back({"Previous page",10001});
-    if(finish<files.size())rows.push_back({"Next page",10002});
-    auto popup=data_.popups.at(popup_mode);popup.resize(1);
-    for(size_t i=0;i<rows.size();++i){auto m=data_.popups.at(popup_mode)[1];
-        m.y=240+int(i)*30;m.target=rows[i].target;m.caption=label_slot+int(i);
-        const auto prev=uint8_t(i?i:rows.size()),next=uint8_t(i+1<rows.size()?i+2:1);
-        m.nav={uint8_t(i+1),uint8_t(i+1),prev,next,next,prev,0,0};strings_[size_t(label_slot)+i]=rows[i].label;popup.push_back(m);
-    }last_focus_[0]=focus_;open_popup(popup,1,set_load);
+    std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    if (files.empty()) {
+        show_dialog(format_c(str(368), {A(save_dir_)}), dialog_message, {{205, 0}});
+        return;
+    }
+    constexpr size_t per_page = 6;
+    save_page_ = std::min(page, (files.size() - 1) / per_page);
+    struct Row {
+        std::string label;
+        int target;
+    };
+    std::vector<Row> rows;
+    save_list_.clear();
+    const size_t begin = save_page_ * per_page, finish = std::min(begin + per_page, files.size());
+    for (size_t i = begin; i < finish; ++i) {
+        save_list_.push_back(files[i].second);
+        rows.push_back({path_to_utf8(path_from_utf8(files[i].second).stem()), int(save_list_.size())});
+    }
+    if (save_page_) rows.push_back({"Previous page", 10001});
+    if (finish < files.size()) rows.push_back({"Next page", 10002});
+    auto popup = data_.popups.at(popup_mode);
+    popup.resize(1);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        auto m = data_.popups.at(popup_mode)[1];
+        m.y = 240 + int(i) * 30;
+        m.target = rows[i].target;
+        m.caption = label_slot + int(i);
+        const auto prev = uint8_t(i ? i : rows.size()), next = uint8_t(i + 1 < rows.size() ? i + 2 : 1);
+        m.nav = {uint8_t(i + 1), uint8_t(i + 1), prev, next, next, prev, 0, 0};
+        strings_[size_t(label_slot) + i] = rows[i].label;
+        popup.push_back(m);
+    }
+    last_focus_[0] = focus_;
+    open_popup(popup, 1, set_load);
 }
 
 std::string Frontend::format_standing(size_t place, const Standing& s) const {

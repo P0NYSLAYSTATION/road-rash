@@ -109,7 +109,7 @@ void Audio3DO::voice(int slot, int resource, int pitch, int gain, int pan) {
     else
         v = mixer_.play_3do(&samples_[size_t(resource)], gain, pan, pitch, true);
 }
-void Audio3DO::update(Race& race) {
+void Audio3DO::update(const Race& race) {
     auto& riders = race.riders();
     if (riders.empty()) return;
     if (rpm_.size() != riders.size()) {
@@ -209,7 +209,7 @@ bool Audio3DO::event(const SoundEventRecord& e) {
     if (e.code == SoundEvent::nitro_off) {
         boost_ = false;
         rpm_.clear();
-    previous_speed_.clear();
+        previous_speed_.clear();
         return true;
     }
     const int code = int(e.code);

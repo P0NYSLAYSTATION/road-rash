@@ -15,7 +15,7 @@ class Audio3DO {
     void start();
     void stop();
     void levels(const SoundLevels&);
-    void update(Race&);
+    void update(const Race&);
     bool event(const SoundEventRecord&);
 
   private:

@@ -2789,3 +2789,16 @@ messages or rate limits; UDP 40001; startup checks neither disabled nor skipped.
   loading overlay.
 - Remaining: Android, Linux, Windows and the debug-font fallback were not
   seen on screen.
+
+## Windows 3DO audio fork — November 7, 2026
+
+The Windows fork adds selectable native 3DO sample processing, built-in MIDI
+with local SF2/SF3/DLS discovery and Windows gm.dls fallback, Direct3D 9 through
+the main HWND, in-game import/save browsing with complete save pagination,
+and an asset-free installer importing user-owned PC/optional 3DO files.
+Release compilation succeeds with networking enabled. The 138-test Release
+run has 102 passed, 36 fixture-dependent skips and no failures; real-asset
+frontend and all six MIDI arrangement tests also pass. Both installer audio
+paths launch and render race audio. No commercial assets enter the fork or
+release. Detailed scope and DSP fidelity boundaries: [FORK_AUDIO.md](FORK_AUDIO.md).
+Evidence and build commands: [FORK_WORK.md](FORK_WORK.md).

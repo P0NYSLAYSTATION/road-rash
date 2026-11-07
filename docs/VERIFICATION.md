@@ -1,5 +1,36 @@
 # Verification log (all sessions September 28, 2026)
 
+## Windows fork — November 7, 2026
+
+`powershell -ExecutionPolicy Bypass -File tools/build-local.ps1 -Configuration Release`
+and `ctest --preset windows-local-release --output-on-failure -j 6` succeed:
+138 tests, 102 passed, 36 explicitly skipped, zero failed. Debug also compiles
+and passes its enabled tests. Reference/corpus skips require original oracle
+fixtures absent from this checkout; a skip is not parity evidence.
+
+Additional real-asset runs:
+
+- `frontend-test.exe path/to/imported/game`: passes, including save creation,
+  reload, mixed-case RRS enumeration and forward/backward three-page browsing.
+  Historical screenshot-golden comparisons skip when their PNGs are absent.
+- `fork-audio-test.exe race-midi path/to/PC/assets`: all five GRUNGE songs and
+  Klown produce nonzero PCM using the actual built-in MIDI sequencer.
+- `fork-audio-test.exe mixer`: raw-frequency stepping, sustain-loop bounds,
+  quiet/full amplitude, interpolation, pan endpoints and integer angle quadrants.
+- `fork-audio-test.exe midi`: synthesizer output, Windows gm.dls fallback and
+  local DLS bank priority.
+- `fork-audio-test.exe dx9`: real Windows Direct3D 9 device, hidden main window,
+  present, resize/reset, no child HWND.
+- Inno Setup builds an installer; `/VERYSILENT /PCASSETS=...` installs PC mode
+  with the optional audio folder blank. Supplying `/THREEDOAUDIO=...` installs
+  3DO mode. Both installed executables auto-find copied assets, exit successfully,
+  and render six seconds of nonzero 44.1 kHz stereo PCM. Source assets are not
+  modified; copied 3DO samples match byte for byte.
+
+Source and mix limitations are recorded in [FORK_AUDIO.md](FORK_AUDIO.md).
+Local evidence paths and tool versions: [FORK_WORK.md](FORK_WORK.md).
+
+
 ## run-linux.sh and run-windows.bat (October 31, 2026)
 
 - **Linux, Docker (ARM64), from a Git checkout of the tree:** each container

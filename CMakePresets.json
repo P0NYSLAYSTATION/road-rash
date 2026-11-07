@@ -153,10 +153,13 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "RR_STATIC_SDL": "ON",
-        "RR_NET_TRANSPORT": "OFF",
+        "RR_NET_TRANSPORT": "ON",
         "BUILD_TESTING": "ON",
         "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_CXX_COMPILER": "cl",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/deps/vcpkg-installed/x64-windows-static",
+        "OPENSSL_USE_STATIC_LIBS": "ON",
+        "OPENSSL_MSVC_STATIC_RT": "ON"
       }
     }
   ],
