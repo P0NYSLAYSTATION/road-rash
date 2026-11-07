@@ -1,3 +1,47 @@
+# Road Rash Windows — 3DO Audio Port
+
+Windows fork of the native port, with selectable 3DO engine processing,
+built-in MIDI synthesis, DirectX 9 presentation and file menus inside the game.
+
+**[Download the installer](https://github.com/P0NYSLAYSTATION/road-rash/releases/latest)**
+
+Point setup at your original PC installation. Optionally select the extracted
+3DO WAV folder containing `resource01.wav` through `resource19.wav`.
+Without a complete 3DO bank, setup selects PC audio automatically. Both audio
+modes are available in setup; `rr-port.ini` also allows switching afterward.
+Your original installation is copied, not modified.
+
+The installer includes no copyrighted game assets, disc images or soundfonts.
+Supply your own PC and optional 3DO assets. Extraction commands and the precise
+fidelity boundaries are documented in [FORK_AUDIO.md](docs/FORK_AUDIO.md).
+The 3DO mode is an adaptation, not a bit-exact 3DO DSP emulator.
+
+Saves are enumerated in the game's own menus from `saves/` beside the executable.
+Setup imports existing `.rrs` files. Put a custom `.sf2`, `.sf3` or `.dls` bank
+beside the executable or in `soundfonts/`; otherwise MIDI uses Windows `gm.dls`.
+
+### Windows development
+
+Open `road-rash.code-workspace` in VS Code. The default build task initializes
+the MSVC x64 environment and uses Ninja. Install VS C++ desktop tools, CMake,
+Ninja, Git and Python 3, then:
+
+```powershell
+python tools/windows_dependencies.py --openssl --installer
+powershell -ExecutionPolicy Bypass -File tools/build-local.ps1 -Configuration Release
+ctest --preset windows-local-release --output-on-failure
+python tools/build_fork_installer.py --version 1.0.0
+```
+
+The dependency helper fetches only pinned open-source runtimes/build tools.
+The release preset retains multiplayer transport support. The Debug preset
+omits its optional transport dependencies for faster local development.
+See [FORK_WORK.md](docs/FORK_WORK.md) for implementation and validation records.
+
+---
+
+## Upstream documentation
+
 # Road Rash â€” Native Port
 
 Native C++20 / SDL3 port of the 1996 Windows rerelease of Road Rash.
