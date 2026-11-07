@@ -2790,7 +2790,7 @@ messages or rate limits; UDP 40001; startup checks neither disabled nor skipped.
 - Remaining: Android, Linux, Windows and the debug-font fallback were not
   seen on screen.
 
-## Windows 3DO audio fork — November 7, 2026
+## Windows 3DO audio fork â€” November 7, 2026
 
 The Windows fork adds selectable native 3DO sample processing, built-in MIDI
 with local SF2/SF3/DLS discovery and Windows gm.dls fallback, Direct3D 9 through

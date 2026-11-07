@@ -1,6 +1,6 @@
 # Verification log (all sessions September 28, 2026)
 
-## Windows fork — November 7, 2026
+## Windows fork â€” November 7, 2026
 
 `powershell -ExecutionPolicy Bypass -File tools/build-local.ps1 -Configuration Release`
 and `ctest --preset windows-local-release --output-on-failure -j 6` succeed:
@@ -26,6 +26,11 @@ Additional real-asset runs:
   3DO mode. Both installed executables auto-find copied assets, exit successfully,
   and render six seconds of nonzero 44.1 kHz stereo PCM. Source assets are not
   modified; copied 3DO samples match byte for byte.
+
+The Debug filesystem check was rerun after removing a validation-only portable
+marker; the tooling check was rerun after making Markdown reads explicitly
+UTF-8 on Windows. Both pass. MSVC compilation and text inspection were used;
+no language-server session was available.
 
 Source and mix limitations are recorded in [FORK_AUDIO.md](FORK_AUDIO.md).
 Local evidence paths and tool versions: [FORK_WORK.md](FORK_WORK.md).

@@ -1,4 +1,4 @@
-# Road Rash Windows — 3DO Audio Port
+# Road Rash Windows â€” 3DO Audio Port
 
 Windows fork of the native port, with selectable 3DO engine processing,
 built-in MIDI synthesis, DirectX 9 presentation and file menus inside the game.
