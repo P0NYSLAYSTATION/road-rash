@@ -1,9 +1,8 @@
-// Plan 33b Task 3: rr-game.exe icon and version resources. The icon is the
-// committed assets/app-icon/roadrash.ico (owner exception; see its README).
+// Windows version resources. Disc artwork is omitted from distributable builds.
 #include <winver.h>
 #include "rr_build_version.h"
 
-1 ICON "@RR_APP_ICON@"
+@RR_APP_ICON_RESOURCE@
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION RR_VERSION_MAJOR,RR_VERSION_MINOR,RR_VERSION_PATCH,0

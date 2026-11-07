@@ -1,7 +1,12 @@
 # Plan 33b Tasks 2-3: Windows resources (included when WIN32 is set).
 enable_language(RC)
 set(RR_APP_MANIFEST "${CMAKE_SOURCE_DIR}/windows/rr-app.manifest")
+option(RR_ORIGINAL_APP_ICON "Embed the original disc icon (local builds only)" OFF)
 set(RR_APP_ICON "${CMAKE_SOURCE_DIR}/assets/app-icon/roadrash.ico")
+set(RR_APP_ICON_RESOURCE "")
+if(RR_ORIGINAL_APP_ICON)
+    set(RR_APP_ICON_RESOURCE "1 ICON \"${RR_APP_ICON}\"")
+endif()
 configure_file("${CMAKE_SOURCE_DIR}/windows/rr-app.rc.in" "${CMAKE_BINARY_DIR}/windows/rr-app.rc" @ONLY)
 configure_file("${CMAKE_SOURCE_DIR}/windows/rr-game.rc.in" "${CMAKE_BINARY_DIR}/windows/rr-game.rc" @ONLY)
 

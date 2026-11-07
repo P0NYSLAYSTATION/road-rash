@@ -1,5 +1,7 @@
 """Package only executables, redistributable libraries, notices and tools."""
 import argparse
+import ctypes
+import os
 import hashlib
 import json
 from pathlib import Path
@@ -27,6 +29,22 @@ def main():
         if not source.is_file():
             raise SystemExit('Missing runtime: ' + str(source))
         shutil.copy2(source, stage / name)
+    # The upstream executable embeds disc-derived icon group 1. Releases omit it.
+    if os.name == 'nt':
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.LoadLibraryExW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32]
+        kernel.LoadLibraryExW.restype = ctypes.c_void_p
+        kernel.FindResourceW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        kernel.FindResourceW.restype = ctypes.c_void_p
+        kernel.FreeLibrary.argtypes = [ctypes.c_void_p]
+        module = kernel.LoadLibraryExW(str(stage / 'rr-game.exe'), None, 2)
+        if not module:
+            raise SystemExit('Could not audit executable resources')
+        try:
+            if kernel.FindResourceW(module, 1, 14):
+                raise SystemExit('Disc-derived icon is embedded; configure RR_ORIGINAL_APP_ICON=OFF')
+        finally:
+            kernel.FreeLibrary(module)
     shutil.copy2(ROOT / 'tools/extract_3do_audio.py', stage / 'extract_3do_audio.py')
     licenses = stage / 'licenses'
     licenses.mkdir(exist_ok=True)

@@ -116,3 +116,7 @@ Movies already use the main window. Native file dialogs have been removed
 from game asset import. Save/load uses the game's own menus, enumerates both
 `.RRS` and `.rrs` files in `saves` beside the executable, and paginates the
 entire list. The installer imports existing saves without overwriting them.
+
+Windows distributable builds omit the upstream disc-derived application icon.
+The packager audits the executable resources and rejects that embedded icon,
+in addition to its strict file allowlist. `RR_ORIGINAL_APP_ICON` defaults off.
