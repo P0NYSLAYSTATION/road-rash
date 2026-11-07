@@ -227,7 +227,7 @@ class Frontend {
     bool confirm_unsaved(int then); // 0x004450e0; false while a dialog is pending
     void save_current();
     void save_new();
-    void open_load_list();
+    void open_load_list(size_t page=0);
     // Plan 34 Task 7: online lobby driver (polled from update()).
     void net_ensure();        // create the room client on first Host/Join
     void net_update();        // poll, dialogs, Start events, roster refresh
@@ -305,6 +305,7 @@ class Frontend {
     int name_cursor_ = -1;
     void pad_name_edit(const MenuInput&);
     std::vector<std::string> save_list_;
+    size_t save_page_=0;
     std::vector<Standing> standings_;
     RaceReport report_;
     bool standings_ready_ = false; // 0x22 rows/title/darken set by the 0x00421290 handler

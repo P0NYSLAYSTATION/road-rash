@@ -124,10 +124,10 @@ template <class Work> auto load_with_indicator(SDL_Renderer* renderer, const cha
 }
 
 // Plan 11a Task 1 Step 5: debug driver that hunts the oncoming lane, forcing
-// riderâ€“car contact so a headless run logs at least one reason-2 crash.
+// rider–car contact so a headless run logs at least one reason-2 crash.
 // Holds a fixed bias (~150 world units left of the road centre), inside the
 // oncoming-traffic lanes but clear of the wall stand-in: the constant-left
-// predecessor rode the shoulder clamp (x â‰ˆ -723, wall hits every tick),
+// predecessor rode the shoulder clamp (x ≈ -723, wall hits every tick),
 // which crashed the rider at speed > 4000 (reason 0) before traffic
 // arrived. Hands off entirely while crashed (controls 0): the crash-walk
 // back to the bike only converges with no steering input (0x0040a600
@@ -347,7 +347,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
     auto frontend_data = rr::read_frontend_data(exe);
     rr::add_native_screens(frontend_data, rr::kMobileDisplay);
     rr::Frontend fe(assets, text, strings, rr::credit_lines(resources), std::move(frontend_data), tables,
-                    career, settings, rr::path_to_utf8(rr::path_from_utf8(pref) / "saves"));
+                    career, settings, rr::save_directory());
 #ifdef RR_NET_TRANSPORT
     try {
         const auto hello = load_with_indicator(renderer, "Verifying game files...", [&] {

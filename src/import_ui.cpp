@@ -210,27 +210,13 @@ struct ImportUI {
     std::mutex mutex;
     std::string selected, message;
     ImportProgress progress{};
-    std::atomic<bool> dialog_pending{false}, dialog_failed{false}, working{false}, complete{false},
+    std::atomic<bool> working{false}, complete{false},
         cancel{false};
     // Plan 33a Task 5 Step 3: disc discovery runs on its own thread.
     std::vector<DiscCandidate> found;
     std::atomic<bool> discovery_done{false}, stop_discovery{false};
 };
-void SDLCALL selected_file(void* data, const char* const* files, int) {
-    std::unique_ptr<std::shared_ptr<ImportUI>> owner(static_cast<std::shared_ptr<ImportUI>*>(data));
-    const auto state = *owner;
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (!files) {
-            state->message = std::string("File selection failed: ") + SDL_GetError();
-            state->dialog_failed = true;
-        } else if (files[0]) {
-            state->selected = files[0];
-            state->message.clear();
-        }
-    }
-    state->dialog_pending = false;
-}
+
 // Shortens from the left so the end of a path stays visible.
 std::string tail(const std::string& s, size_t n) {
     return s.size() <= n ? s : "..." + s.substr(s.size() - (n - 3));
@@ -241,7 +227,6 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
     const auto state = std::make_shared<ImportUI>();
     std::thread worker, discovery;
     bool running = true;
-    static const SDL_DialogFileFilter filter{"Disc image", "iso"};
     ScreenUI& ui = screen_ui(renderer);
     const Fonts& fonts = ui.fonts;
     // Plain centered layout on the 640x480 logical canvas; the same rects drive
@@ -288,23 +273,10 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
     // above the game, so the in-game browser is the default action.
     if (folder_buttons && (start_browser || platform::is_gamescope(platform::process_env())))
         menu.open_browser();
-    uint64_t dialog_started = 0;
-    bool dialog_fallback_done = false;
     auto inside = [](const SDL_FRect& r, float x, float y) {
         return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
     };
-    auto dialog = [&](bool folder) {
-        if (state->working || state->dialog_pending) return;
-        state->dialog_pending = true;
-        state->dialog_failed = false;
-        dialog_started = SDL_GetTicks();
-        dialog_fallback_done = false;
-        auto* owner = new std::shared_ptr<ImportUI>(state);
-        if (folder)
-            SDL_ShowOpenFolderDialog(selected_file, owner, window, nullptr, false);
-        else
-            SDL_ShowOpenFileDialog(selected_file, owner, window, &filter, 1, nullptr, false);
-    };
+    auto dialog = [&](bool) { menu.open_browser(); };
     auto perform = [&](const ImportMenu::Action& a) {
         switch (a.kind) {
         case ImportMenu::Action::Kind::iso_dialog:
@@ -403,14 +375,6 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
             if (state->found.size() > size_t(max_rows)) state->found.resize(size_t(max_rows));
             menu.set_candidates(state->found);
         }
-        // A failed dialog, or one with no answer after 3 s, opens the browser
-        // as well; a selection the dialog delivers later is still used.
-        if (folder_buttons && !dialog_fallback_done &&
-            (state->dialog_failed || (state->dialog_pending && now - dialog_started > 3000))) {
-            dialog_fallback_done = true;
-            state->dialog_failed = false;
-            menu.open_browser();
-        }
         std::string selection;
         {
             std::lock_guard<std::mutex> lock(state->mutex);
@@ -503,9 +467,7 @@ bool run_import_screen(SDL_Window* window, SDL_Renderer* renderer, const std::st
                 fill({120, 352, 400.f * std::min(1.f, std::max(0.f, frac)), 4}, 255, 196, 0);
                 text(fonts.body, 13, 370, p.current.substr(0, 60), 110, 116, 128);
             } else {
-                if (state->dialog_pending)
-                    text(fonts.body, 16, 336, "Waiting for the file picker...", 150, 156, 168);
-                else if (!state->message.empty()) {
+                if (!state->message.empty()) {
                     text(fonts.body, 16, 336, state->message.substr(0, 62), 255, 120, 100);
                     text(fonts.body, 13, 354, "Choose the correct disc to retry.", 110, 116, 128);
                 }

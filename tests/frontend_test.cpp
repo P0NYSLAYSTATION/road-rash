@@ -542,6 +542,29 @@ int main(int argc, char** argv) {
     snap("load-list");
     key("select");
     check(career.state.cash == saved_cash && career.mode == GameMode::big_game, "save loaded back");
+    // Native save browser paginates every RRS rather than truncating the list.
+    for(int i=0;i<13;++i){
+        const auto dest=std::filesystem::path(saves)/("Paging "+std::to_string(i)+(i&1?".rrs":".RRS"));
+        std::filesystem::copy_file(fe.current_save(),dest,std::filesystem::copy_options::overwrite_existing);
+    }
+    fe.enter(screen_id::restroom);
+    while(fe.focus()!=0)key("up");
+    key("select");
+    auto has_target=[&](int target){for(const auto& item:fe.items())if(item.target==target)return true;return false;};
+    auto choose_target=[&](int target){
+        for(int i=0;i<30&&fe.items()[size_t(fe.focus())].target!=target;++i)key("down");
+        check(fe.items()[size_t(fe.focus())].target==target,"save browser navigation target");
+        key("select");
+    };
+    check(has_target(10002)&&!has_target(10001),"first save page has next only");
+    choose_target(10002);
+    check(has_target(10002)&&has_target(10001),"middle save page has both directions");
+    choose_target(10002);
+    check(!has_target(10002)&&has_target(10001),"last save page has previous only");
+    choose_target(10001);
+    check(has_target(10002)&&has_target(10001),"previous save page works");
+    choose_target(1);
+    check(career.state.cash==saved_cash,"save from later page loads");
     // Bulletin board -> City -> race -> busted with no money: game over.
     fe.enter(0x1b);
     snap("bulletin");
