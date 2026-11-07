@@ -122,6 +122,42 @@
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       }
+    },
+    {
+      "name": "windows-local-debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "RR_STATIC_SDL": "ON",
+        "RR_NET_TRANSPORT": "OFF",
+        "BUILD_TESTING": "ON",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "windows-local-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "RR_STATIC_SDL": "ON",
+        "RR_NET_TRANSPORT": "OFF",
+        "BUILD_TESTING": "ON",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
     }
   ],
   "buildPresets": [
@@ -139,6 +175,14 @@
       "name": "windows-clang-cl",
       "configurePreset": "windows-clang-cl",
       "configuration": "Debug"
+    },
+    {
+      "name": "windows-local-debug",
+      "configurePreset": "windows-local-debug"
+    },
+    {
+      "name": "windows-local-release",
+      "configurePreset": "windows-local-release"
     }
   ],
   "testPresets": [
@@ -164,6 +208,20 @@
       "execution": {
         "jobs": 4,
         "timeout": 1800
+      }
+    },
+    {
+      "name": "windows-local-debug",
+      "configurePreset": "windows-local-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-local-release",
+      "configurePreset": "windows-local-release",
+      "output": {
+        "outputOnFailure": true
       }
     }
   ]
