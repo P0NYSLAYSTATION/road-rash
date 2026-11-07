@@ -1,4 +1,6 @@
 #include "mixer.hpp"
+#include "audio_3do.hpp"
+#include "sound.hpp"
 #include "race_music.hpp"
 #include "assets.hpp"
 #include "audio_3do_math.hpp"
@@ -58,6 +60,10 @@ int main(int argc, char** argv) {
         }
         if (mode == "midi") {
 #ifdef _WIN32
+            if (!std::filesystem::exists(path_from_utf8(SDL_GetBasePath()) / "libfluidsynth-3.dll")) {
+                std::cout << "skip: optional FluidSynth runtime fixture is absent\n";
+                return 77;
+            }
             MidiSynth fallback("__missing_font_directory__");
             check(fallback.soundfont().find("gm.dls") != std::string::npos,
                   "Windows soundfont fallback not selected");
@@ -67,7 +73,8 @@ int main(int argc, char** argv) {
             double energy = 0;
             for (float x : left) energy += x * x;
             check(energy > 1e-7, "built-in MIDI rendered silence");
-            const auto temp = std::filesystem::temp_directory_path() / "rr-midi-local-bank-test";
+            const auto temp = std::filesystem::temp_directory_path() /
+                              ("rr-midi-local-bank-test-" + std::to_string(GetCurrentProcessId()));
             std::filesystem::create_directories(temp);
             std::filesystem::copy_file(path_from_utf8(fallback.soundfont()), temp / "local.dls",
                                        std::filesystem::copy_options::overwrite_existing);
@@ -83,6 +90,35 @@ int main(int argc, char** argv) {
 #else
             return 77;
 #endif
+        }
+        if (mode == "native-bank") {
+            if (argc < 3 || !std::filesystem::exists(path_from_utf8(argv[2]) / "resource01.wav")) return 77;
+            Mixer mixer(16);
+            Audio3DO audio(mixer, argv[2]);
+            check(audio.ready(), "native sample bank unavailable");
+            audio.levels(SoundLevels{});
+            audio.event({SoundEvent::skid_on});
+            int16_t pcm[1470]{};
+            int64_t tail_energy = 0;
+            for (int tick = 0; tick < 180; ++tick) {
+                mixer.render(pcm, 735);
+                if (tick > 150)
+                    for (auto x : pcm) tail_energy += int64_t(x) * x;
+            }
+            check(tail_energy > 100000, "road skid did not sustain its original sample loop");
+            auto levels = SoundLevels{};
+            levels.mute = true;
+            audio.levels(levels);
+            audio.event({SoundEvent::skid_on});
+            mixer.render(pcm, 735);
+            check(std::all_of(std::begin(pcm), std::end(pcm), [](auto x) { return x == 0; }),
+                  "sustained skid ignored mute");
+            audio.stop();
+            mixer.render(pcm, 735);
+            check(std::all_of(std::begin(pcm), std::end(pcm), [](auto x) { return x == 0; }),
+                  "native voices did not stop");
+            std::cout << "Native sampled skid sustained, muted and stopped correctly\n";
+            return 0;
         }
         if (mode == "race-midi") {
             if (argc < 3 || !std::filesystem::exists(path_from_utf8(argv[2]) / "AUDIO/MUSIC/GRUNGE1.MID"))

@@ -180,7 +180,7 @@ SoundSystem::SoundSystem(const Assets& assets, Mixer& mixer, std::array<int32_t,
         if (assets_.exists(path)) slots_[size_t(i)].pcm = read_wav(assets_.read(path));
     }
     const auto config=port_config(assets.root());
-    if(config.audio_3do){native_=std::make_unique<Audio3DO>(mixer_,config.audio_directory);if(!native_->ready())native_.reset();}
+    if(config.audio_3do){native_=std::make_unique<Audio3DO>(mixer_,config.audio_directory,skid_limit);if(!native_->ready())native_.reset();}
     set_levels({});
 }
 

@@ -34,7 +34,7 @@ Spatial spatial(int pos, int lateral, int speed, int camera, int camera_x, int c
     return s;
 }
 } // namespace
-Audio3DO::Audio3DO(Mixer& m, const std::string& dir) : mixer_(m) {
+Audio3DO::Audio3DO(Mixer& m, const std::string& dir, int skid_limit) : mixer_(m), skid_limit_(skid_limit) {
     try {
         Assets a(dir);
         for (int i = 0; i < 19; ++i) {
@@ -73,6 +73,7 @@ void Audio3DO::stop() {
         v = -1;
     }
     resources_.fill(-1);
+    effect_resource_.fill(-1);
 }
 void Audio3DO::start() {
     stop();
@@ -144,6 +145,15 @@ void Audio3DO::update(const Race& race) {
         }
         return;
     }
+    const auto& player = riders[0].bike;
+    const bool road_skid = player.i32(0x160) != 0 && player.i32(0x108) > 0 &&
+                           int8_t(player.u8(0x164)) > 0x32 && player.i32(0x2f4) == 0 &&
+                           player.i32(0x158) <= skid_limit_;
+    if (!road_skid && effect_resource_[0] == 16) {
+        mixer_.stop(effect_[0]);
+        effect_[0] = -1;
+        effect_resource_[0] = -1;
+    }
     const int camera = int(race.camera_position()), cx = race.camera_x();
     // The listener is camera motion, not the rider velocity during camera easing.
     const int cs = have_camera_ ? int(int64_t(int32_t(uint32_t(camera) - previous_camera_)) * 256)
@@ -208,8 +218,6 @@ bool Audio3DO::event(const SoundEventRecord& e) {
     }
     if (e.code == SoundEvent::nitro_off) {
         boost_ = false;
-        rpm_.clear();
-        previous_speed_.clear();
         return true;
     }
     const int code = int(e.code);
@@ -221,8 +229,13 @@ bool Audio3DO::event(const SoundEventRecord& e) {
         pitch = 0x666a + random(0x332d);
         gain = 0x4bc8 + random(0x4b1);
     } else if (e.code == SoundEvent::skid_on) {
+        if (effect_resource_[0] == 16 && mixer_.active(effect_[0])) {
+            mixer_.set_3do(effect_[0], 32767 * effects_ * master_ / 10000, 64, effect_pitch_[0]);
+            return true;
+        }
         resource = 16;
         gain = 32767;
+        pitch = 0x62b4 + random(0x3a99);
     } else
         return false; // procedural DSP-only effects retain the PC equivalent.
     if (resource < 0 || resource >= 19) return true;
@@ -236,7 +249,9 @@ bool Audio3DO::event(const SoundEventRecord& e) {
     }
     if (effect_[size_t(channel)] >= 0) mixer_.stop(effect_[size_t(channel)]);
     gain = gain * effects_ * master_ / 10000;
-    effect_[size_t(channel)] = mixer_.play_3do(&samples_[size_t(resource)], gain, 64, pitch, false);
+    effect_resource_[size_t(channel)] = resource;
+    effect_pitch_[size_t(channel)] = pitch;
+    effect_[size_t(channel)] = mixer_.play_3do(&samples_[size_t(resource)], gain, 64, pitch, resource == 16);
     return true;
 }
 } // namespace rr

@@ -9,7 +9,7 @@ class Race;
 struct SoundLevels;
 class Audio3DO {
   public:
-    Audio3DO(Mixer&, const std::string&);
+    Audio3DO(Mixer&, const std::string&, int skid_limit = 0);
     ~Audio3DO();
     bool ready() const { return ready_; }
     void start();
@@ -22,7 +22,8 @@ class Audio3DO {
     Mixer& mixer_;
     std::array<PcmSound, 19> samples_;
     std::array<int, 5> voices_{{-1, -1, -1, -1, -1}}, resources_{{-1, -1, -1, -1, -1}};
-    std::array<int, 2> effect_{{-1, -1}};
+    std::array<int, 2> effect_{{-1, -1}}, effect_resource_{{-1, -1}}, effect_pitch_{};
+    int skid_limit_ = 0;
     std::array<int, 5> pitches_{};
     std::array<int, 4> steps_{}, gains_{}, pans_{};
     std::vector<int> rpm_, previous_speed_;

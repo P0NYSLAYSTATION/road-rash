@@ -17,6 +17,8 @@ Additional real-asset runs:
   Klown produce nonzero PCM using the actual built-in MIDI sequencer.
 - `fork-audio-test.exe mixer`: raw-frequency stepping, sustain-loop bounds,
   quiet/full amplitude, interpolation, pan endpoints and integer angle quadrants.
+- `fork-audio-test.exe native-bank path/to/3DO/WAVs`: original sampled road-skid
+  sustain loop, live mute and voice stopping pass with the extracted bank.
 - `fork-audio-test.exe midi`: synthesizer output, Windows gm.dls fallback and
   local DLS bank priority.
 - `fork-audio-test.exe dx9`: real Windows Direct3D 9 device, hidden main window,
