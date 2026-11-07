@@ -1,4 +1,6 @@
 #include "sound.hpp"
+#include "audio_3do.hpp"
+#include "port_config.hpp"
 #include "assets.hpp"
 #include "det_math.hpp"
 #include "exe_tables.hpp"
@@ -177,6 +179,8 @@ SoundSystem::SoundSystem(const Assets& assets, Mixer& mixer, std::array<int32_t,
         const std::string path = "AUDIO/EFFECTS/" + upper(effect_names[i]) + ".WAV";
         if (assets_.exists(path)) slots_[size_t(i)].pcm = read_wav(assets_.read(path));
     }
+    const auto config=port_config(assets.root());
+    if(config.audio_3do){native_=std::make_unique<Audio3DO>(mixer_,config.audio_directory);if(!native_->ready())native_.reset();}
     set_levels({});
 }
 
@@ -193,6 +197,7 @@ const char* SoundSystem::effect_name(int slot) {
 
 void SoundSystem::set_levels(const SoundLevels& l) {
     // 0x004362e0: curve[level * master / 100]; a zero level or mute disables the channel.
+    if(native_)native_->levels(l);
     auto level = [&](int v) {
         return curve_[size_t(std::clamp(v * std::clamp(l.master, 0, 100) / 100, 0, 100))];
     };
@@ -267,6 +272,7 @@ void SoundSystem::stop(int slot) {
 
 void SoundSystem::start_race(int bike, int character) {
     stop_race();
+    if(native_)native_->start();
     // 0x00435e60 slot 0.
     mixer_.retire(&slots_[0].pcm);
     slots_[0].pcm = {};
@@ -282,6 +288,7 @@ void SoundSystem::start_race(int bike, int character) {
 }
 
 void SoundSystem::stop_race() {
+    if(native_)native_->stop();
     for (int i = 0; i < 0x45; ++i) stop(i);
     siren_on_ = siren_b_ = siren_wait_ = false;
     queue_.clear();
@@ -342,6 +349,8 @@ void SoundSystem::update(Race& race) {
     // 0x004349c0: the engine rpm lives on the bike (+0x2dc), so the
     // dashboard needle and the engine pitch read the same field
     // (0x00434ce0/0x00434fd0); the player's was refreshed above.
+    if(native_) native_->update(race);
+    else {
     // 0x00434ce0: the player's engine (nitro and tunnel variants replace it).
     if (!engine_off_) {
         int32_t doppler, vol, pan;
@@ -412,6 +421,7 @@ void SoundSystem::update(Race& race) {
             play_loop(base, (doppler * r) / 512, (vol * 0x9ffe / 0xef10) * others_, pan);
         }
     }
+    } // original PC engine path
     // 0x00434bd0: skidding while gripping (+0x164 > 0x32): on the road surface classes up to
     // the 0x0046dce5 limit, off-road beyond it.
     if (player.i32(0x160) != 0 && player.i32(0x108) > 0 && int8_t(player.u8(0x164)) > 0x32 &&
@@ -433,6 +443,7 @@ void SoundSystem::update(Race& race) {
     }
     // Event consumer 0x004351f0.
     for (const SoundEventRecord& e : queue_) {
+        if(native_ && native_->event(e))continue;
         if (e.code == SoundEvent::siren) {
             siren(e, race);
             continue;

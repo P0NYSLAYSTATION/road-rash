@@ -568,6 +568,7 @@ class Race {
     bool finished() const { return riders_[0].finished; }
     bool crashed() const { return bike().i32(0x2f4) != 0; }
     int32_t ticks() const { return ticks_; }
+    uint32_t player_controls() const { return controls_[0]; }
     uint32_t camera_position() const;
     int32_t horizon_scroll() const { return rr::horizon_scroll(camera_heading_); }
     int32_t camera_x() const { return camera_x_; } // 0x004b7ee8: camera lateral, world units

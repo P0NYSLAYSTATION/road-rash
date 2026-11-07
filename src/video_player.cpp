@@ -1,4 +1,8 @@
 #include "video_player.hpp"
+#include "port_config.hpp"
+#include "utf8_path.hpp"
+#include <filesystem>
+#include <cctype>
 #include "ima_adpcm.hpp"
 #include <algorithm>
 #include <limits>
@@ -42,6 +46,19 @@ VideoPlayer::VideoPlayer(const Assets& assets, const std::string& path, Mixer& m
         }
     }
     if (frames_.empty()) throw std::runtime_error("AVI has no complete video frames");
+    const auto config=port_config(assets.root());
+    if(config.audio_3do){
+        std::string stem=path_to_utf8(path_from_utf8(path).stem());for(auto& c:stem)c=char(std::tolower(static_cast<unsigned char>(c)));
+        std::string category;
+        for(const char* key:{"busted","start","lose","win","wrecked"})if(stem.rfind(key,0)==0)category=key;
+        if(stem.rfind("level",0)==0){category="newlevel";stem="newlevel"+stem.substr(5);}
+        if(!category.empty()){
+            const auto file=path_from_utf8(config.audio_directory)/"cinematics"/category/(stem+".wav");
+            try {Assets external(path_to_utf8(file.parent_path()));audio_=read_wav(external.read(path_to_utf8(file.filename())));}
+            catch(const std::exception&){/* The original movie audio remains when no matching 3DO track exists. */}
+        }
+    }
+
 }
 VideoPlayer::~VideoPlayer() {
     mixer_.retire(&audio_);

@@ -29,10 +29,10 @@ class OfflineCapture {
         if (!video_ || !audio_) throw std::runtime_error("Cannot open offline video/audio output");
     }
     void frame(SDL_Renderer* renderer, Mixer* mixer) {
-        // 22050 / 60 = 367.5: alternate 367/368, preserving the fractional
-        // sample even during warm-up. No audio device/callback runs offline.
+        // Preserve fractional frames at any mixer rate, including warm-up.
+        // No audio device/callback runs offline.
         const int samples = int((ticks_ + 1) * Mixer::rate / fps - ticks_ * Mixer::rate / fps);
-        std::array<int16_t, 736> pcm{};
+        std::array<int16_t, ((Mixer::rate + fps - 1) / fps) * 2> pcm{};
         if (mixer) mixer->render(pcm.data(), samples);
         if (ticks_++ < warmup) return;
         SurfacePtr captured(SDL_RenderReadPixels(renderer, nullptr));
@@ -43,7 +43,7 @@ class OfflineCapture {
         for (int y = 0; y < height; ++y)
             write(video_.get(), static_cast<const uint8_t*>(rgb->pixels) + y * rgb->pitch, width * 3);
         // Explicit little-endian PCM, including on big-endian hosts.
-        std::array<uint8_t, 1472> bytes{};
+        std::array<uint8_t, ((Mixer::rate + fps - 1) / fps) * 4> bytes{};
         for (int i = 0; i < samples * 2; ++i) {
             const auto sample = uint16_t(pcm[size_t(i)]);
             bytes[size_t(i) * 2] = uint8_t(sample);

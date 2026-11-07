@@ -21,6 +21,7 @@ PcmSound read_wav(const std::vector<uint8_t>& bytes) {
     const size_t end = 8 + size_t(extent);
     size_t format = 0, format_size = 0, data = 0, data_size = 0;
     uint32_t fact_frames = 0;
+    uint32_t loop_begin=0, loop_end=0;
     bool has_fact = false;
     for (size_t at = 12; at < end;) {
         if (end - at < 8) throw std::runtime_error("Truncated WAV chunk header");
@@ -34,6 +35,9 @@ PcmSound read_wav(const std::vector<uint8_t>& bytes) {
             if (data) throw std::runtime_error("Duplicate WAV data");
             data = at + 8;
             data_size = size;
+        } else if (!std::memcmp(bytes.data() + at, "smpl", 4) && size >= 60 && u32(at+8+28)>0) {
+            const uint32_t begin=u32(at+8+44), finish=u32(at+8+48);
+            if(finish>begin && finish<UINT32_MAX) {loop_begin=begin;loop_end=finish+1;}
         } else if (!std::memcmp(bytes.data() + at, "fact", 4)) {
             if (has_fact || size < 4) throw std::runtime_error("Invalid WAV fact chunk");
             has_fact = true;
@@ -79,6 +83,7 @@ PcmSound read_wav(const std::vector<uint8_t>& bytes) {
             result.samples.push_back(int16_t(value < 32768 ? int(value) : int(value) - 65536));
         }
     }
+    if(loop_end<=result.samples.size()/size_t(channels)) {result.loop_begin=loop_begin;result.loop_end=loop_end;}
     return result;
 }
 } // namespace rr

@@ -43,3 +43,11 @@ web/node_modules/
 
 # Plan 33a: Flatpak builds unpack pinned SDL/libdatachannel sources here
 /deps/
+
+# Local dependencies, user-owned assets and installer output
+/deps/
+/game/
+/3do_audio/
+/artifacts/
+/build/
+/rr-port.ini

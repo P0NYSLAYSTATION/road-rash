@@ -78,6 +78,15 @@ int Mixer::play(const PcmSound* sound, int volume, int pan, int pitch, bool loop
     if (!push(command)) return -1;
     return next_id_++;
 }
+int Mixer::play_3do(const PcmSound* sound,int amplitude,int pan,int frequency,bool loop) {
+    if(!sound || sound->samples.empty() || sound->rate<=0 || sound->channels<1 || sound->channels>2 || next_id_==INT_MAX)return -1;
+    Command c{1,next_id_,std::clamp(amplitude,0,32767),std::clamp(pan,0,127),std::clamp(frequency,0,65535),sound,loop};
+    c.native_3do=true;if(!push(c))return -1;return next_id_++;
+}
+bool Mixer::set_3do(int id,int amplitude,int pan,int frequency) {
+    Command c{2,id,std::clamp(amplitude,0,32767),std::clamp(pan,0,127),std::clamp(frequency,0,65535),nullptr,false};
+    c.native_3do=true;return push(c);
+}
 int Mixer::play_stream(MusicStream* stream, int volume) {
     if (!stream || next_id_ == INT_MAX) return -1;
     Command command{1, next_id_, std::clamp(volume, 0, 127), 0, 256, nullptr, false, stream};
@@ -152,7 +161,7 @@ void Mixer::consume() {
             cursor.id.store(-1, std::memory_order_release);
             cursor.frame.store(0, std::memory_order_release);
             *slot = {command.sound, 0, command.id, command.volume, command.pan, command.pitch, command.loop,
-                     command.stream};
+                     command.stream, command.native_3do};
             cursor.active.store(true, std::memory_order_release);
             cursor.id.store(command.id, std::memory_order_release);
         } else {
@@ -169,6 +178,7 @@ void Mixer::consume() {
                     slot->volume = command.volume;
                     slot->pan = command.pan;
                     slot->pitch = command.pitch;
+                    slot->native_3do=command.native_3do;
                 }
             }
         }
@@ -194,17 +204,20 @@ void Mixer::render(int16_t* out, int frames) {
                 if (!voice.sound) continue;
                 const auto& sound = *voice.sound;
                 const uint64_t count = sound.samples.size() / size_t(sound.channels);
-                const uint64_t period = count << 32;
+                const uint64_t end=voice.loop && sound.loop_end>sound.loop_begin && sound.loop_end<=count ? sound.loop_end : count;
+                const uint64_t begin=voice.loop && end==sound.loop_end ? sound.loop_begin : 0;
+                const uint64_t period = end << 32;
+                const uint64_t loop_start=begin<<32, loop_length=(end-begin)<<32;
                 if (voice.position >= period) {
                     if (voice.loop)
-                        voice.position %= period;
+                        voice.position=loop_start+(voice.position-loop_start)%loop_length;
                     else {
                         voice.sound = nullptr;
                         continue;
                     }
                 }
                 const size_t index = size_t(voice.position >> 32);
-                const size_t next = index + 1 < count ? index + 1 : voice.loop ? 0 : index;
+                const size_t next = index + 1 < end ? index + 1 : voice.loop ? size_t(begin) : index;
                 const uint64_t fraction = voice.position & 0xffffffffull;
                 for (size_t channel = 0; channel < 2; ++channel) {
                     const size_t input_channel = sound.channels == 1 ? 0 : channel;
@@ -212,16 +225,28 @@ void Mixer::render(int16_t* out, int frames) {
                                   b = sound.samples[next * sound.channels + input_channel];
                     const int64_t sample = (a * int64_t(0x100000000ull - fraction) + b * int64_t(fraction)) /
                                            int64_t(0x100000000ull);
+                    if(voice.native_3do) {
+                        int gain=32767;
+                        const int half=32767/2, scaled=voice.pan*32767/128;
+                        if(voice.pan!=63 && scaled!=half) {
+                            if(channel==1 && scaled<half)gain=32767-2*(half-scaled);
+                            if(channel==0 && scaled>half)gain=32767-2*(scaled-half);
+                        }
+                        mixed[channel]+=sample*voice.volume*std::max(0,gain)/(int64_t(32767)*32767);
+                        continue;
+                    }
                     int gain = 127;
                     if (channel == 0 && voice.pan > 0) gain = 127 * (63 - voice.pan) / 63;
                     if (channel == 1 && voice.pan < 0) gain = 127 * (64 + voice.pan) / 64;
                     mixed[channel] += sample * voice.volume * gain / (127 * 127);
                 }
-                const uint64_t step = (uint64_t(sound.rate) * uint64_t(voice.pitch) << 24) / rate;
+                const uint64_t step = voice.native_3do ?
+                    (uint64_t(sound.rate)*uint64_t(voice.pitch)<<17)/rate :
+                    (uint64_t(sound.rate) * uint64_t(voice.pitch) << 24) / rate;
                 if (voice.loop) {
-                    const uint64_t advance = step % period;
+                    const uint64_t advance = step % loop_length;
                     if (voice.position >= period - advance)
-                        voice.position -= period - advance;
+                        voice.position = loop_start + voice.position - (period - advance);
                     else
                         voice.position += advance;
                 } else if (step >= period - voice.position)

@@ -32,12 +32,14 @@ class MusicStream {
 };
 class Mixer {
   public:
-    static constexpr int rate = 22050;
+    static constexpr int rate = 44100;
     explicit Mixer(int max_voices);
     ~Mixer();
     Mixer(const Mixer&) = delete;
     Mixer& operator=(const Mixer&) = delete;
     int play(const PcmSound*, int volume, int pan, int pitch_q8, bool loop);
+    int play_3do(const PcmSound*, int amplitude, int pan, int raw_frequency, bool loop);
+    bool set_3do(int voice, int amplitude, int pan, int raw_frequency);
     // Streaming voice: mixes `stream`'s ring (owned by the caller, must
     // outlive the voice) at `volume` 0..127, centre-panned. The stream
     // pointer is read lock-free in render(); stop(id) detaches it.
@@ -68,6 +70,7 @@ class Mixer {
         const PcmSound* sound = nullptr;
         bool loop = false;
         MusicStream* stream = nullptr;
+        bool native_3do = false;
     };
     struct Voice {
         const PcmSound* sound = nullptr;
@@ -75,6 +78,7 @@ class Mixer {
         int id = -1, volume = 0, pan = 0, pitch = 256;
         bool loop = false;
         MusicStream* stream = nullptr;
+        bool native_3do = false;
     };
     std::array<Command, 256> queue_{};
     std::atomic<unsigned> head_{0}, tail_{0};

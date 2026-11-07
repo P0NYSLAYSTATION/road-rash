@@ -10,6 +10,7 @@
 namespace rr {
 class Assets;
 class Race;
+class Audio3DO;
 
 // The Mixer block (registry "Mixer", 0x00463030): levels 0..100 and mutes, applied through the
 // 101-entry volume curve built by 0x004362e0.
@@ -61,6 +62,7 @@ class SoundSystem {
     void distance(int32_t position, int32_t lateral, int32_t speed, int32_t& doppler, int32_t& volume,
                   int32_t& pan, int32_t* linear = nullptr) const;
     uint32_t random();
+    std::unique_ptr<Audio3DO> native_;
     const Assets& assets_;
     Mixer& mixer_;
     std::array<int32_t, 101> curve_;

@@ -16,7 +16,7 @@ int main(int argc, char**) {
         }
         int result = 0;
         {
-            rr::PcmSound sound{22050, 1, {1000, 1000}};
+            rr::PcmSound sound{rr::Mixer::rate, 1, {1000, 1000}};
             rr::Mixer mixer(4);
             mixer.pause(true);
             const int voice = mixer.play(&sound, 127, 0, 256, true);
@@ -65,7 +65,7 @@ int main(int argc, char**) {
             std::cerr << "FAIL " << what << '\n';
         }
     };
-    rr::PcmSound constant{22050, 1, {1000, 1000, 1000, 1000}};
+    rr::PcmSound constant{rr::Mixer::rate, 1, {1000, 1000, 1000, 1000}};
     rr::Mixer mixer(2);
     const int id = mixer.play(&constant, 127, 0, 256, true);
     int16_t out[200];
@@ -81,12 +81,12 @@ int main(int argc, char**) {
     mixer.stop(id);
     mixer.render(out, 1);
     check(out[0] == 0 && out[1] == 0, "stopped voice silent");
-    rr::PcmSound ramp{22050, 1, {100, 200, 300, 400}};
+    rr::PcmSound ramp{rr::Mixer::rate, 1, {100, 200, 300, 400}};
     mixer.play(&ramp, 127, 0, 512, false);
     mixer.render(out, 3);
     check(out[0] == 100 && out[2] == 300 && out[4] == 0,
           "double pitch consumes every second sample then ends");
-    rr::PcmSound low_rate{11025, 1, {0, 1000, 2000}};
+    rr::PcmSound low_rate{rr::Mixer::rate / 2, 1, {0, 1000, 2000}};
     mixer.play(&low_rate, 127, 0, 256, false);
     mixer.render(out, 5);
     check(out[0] == 0 && out[2] == 500 && out[4] == 1000 && out[6] == 1500 && out[8] == 2000,
@@ -110,7 +110,7 @@ int main(int argc, char**) {
     check(out[0] == 0 && out[1] == 0, "retired sound no longer read");
     mixer.stop(paused_voice);
     mixer.render(out, 0);
-    rr::PcmSound loud{22050, 1, {32767}};
+    rr::PcmSound loud{rr::Mixer::rate, 1, {32767}};
     mixer.play(&loud, 127, 0, 256, true);
     mixer.play(&loud, 127, 0, 256, true);
     mixer.render(out, 1);
@@ -121,7 +121,7 @@ int main(int argc, char**) {
     steal.stop(stale);
     steal.render(out, 1);
     check(active != stale && out[0] == 1000, "oldest voice stolen; stale handle cannot stop replacement");
-    rr::PcmSound stereo{22050, 2, {100, -200, 300, -400}};
+    rr::PcmSound stereo{rr::Mixer::rate, 2, {100, -200, 300, -400}};
     rr::Mixer channels(1);
     channels.play(&stereo, 127, 0, 256, false);
     channels.render(out, 2);
