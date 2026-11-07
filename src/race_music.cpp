@@ -1,4 +1,5 @@
 #include "race_music.hpp"
+#include "midi_synth.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -420,7 +421,7 @@ float note_gain(uint8_t velocity, int16_t cb) {
 namespace {
 void render_song(const MidsSong& song, const Sf1Bank& melodic, const Sf1Bank& drums,
                  std::vector<int16_t>& mono, const Sf1Bank* factory) {
-    constexpr double kRate = 22050.0;
+    constexpr double kRate = double(Mixer::rate);
     std::vector<std::pair<uint32_t, uint32_t>> tempo = song.tempo;
     if (tempo.empty() || tempo[0].first != 0) tempo.insert(tempo.begin(), {0, 500000});
     auto tick_to_frames = [&](uint32_t tick) {
@@ -516,58 +517,19 @@ RaceMusicPlayer::~RaceMusicPlayer() {
     stop();
 }
 
-void RaceMusicPlayer::play_race(int original_course_index, const std::string& alias) {
+void RaceMusicPlayer::play_race(int original_course_index,const std::string& alias) {
     stop();
-    // 0x00433bb0: the AWE `SbkGrng` mix is used when an AWE32 is present
-    // (0x00434500); there is no GM fallback path worth emulating on modern
-    // hardware, so the AWE mix always plays. Missing/unreadable assets are a
-    // silent no-op and the race continues.
-    std::string song;
     try {
-        song = race_song_name(original_course_index, alias);
-    } catch (const std::runtime_error&) {
-        return;
-    }
-    try {
-        song_data_ = read_mids(assets_.read("AUDIO/MUSIC/" + song + ".MID"));
-        if (song == "KLOWN") {
-            // Klown is a song, not a bank (no KLOWN.SBK on disc): it was
-            // written against the AWE factory ROM presets. Merge every course
-            // bank for best effort; notes outside those programs stay silent.
-            auto merged = std::make_shared<Sf1Bank>();
-            for (int n = 1; n <= 5; ++n) {
-                auto b = read_sf1(assets_.read("AUDIO/MUSIC/GRUNGE" + std::to_string(n) + ".SBK"), true);
-                merged->samples.insert(merged->samples.end(), b->samples.begin(), b->samples.end());
-                const uint32_t off = uint32_t(merged->samples.size() - b->samples.size());
-                for (const Sf1Zone& z : b->zones) {
-                    Sf1Zone shifted = z;
-                    shifted.sample_start += off;
-                    shifted.sample_end += off;
-                    shifted.loop_start += off;
-                    shifted.loop_end += off;
-                    merged->zones.push_back(shifted);
-                }
-            }
-            melodic_ = std::move(merged);
-        } else {
-            melodic_ = read_sf1(
-                assets_.read("AUDIO/MUSIC/GRUNGE" + std::to_string(original_course_index) + ".SBK"), true);
-        }
-        drums_ = read_sf1(assets_.read("AUDIO/MUSIC/RRDRUMS.SBK"), false);
-    } catch (const std::runtime_error&) {
-        stop();
-        return;
-    }
-    song_ = song;
-    loaded_ = true;
-    playing_ = true;
-    // Live path: sequence into the mixer ring (update() renders blocks).
-    // Deleting with `delete` (not reset): MusicStream is mixer-visible but
-    // player-owned; the mixer only borrows the pointer until stop().
-    stream_ = new MusicStream(1 << 15);
-    stream_voice_ = mixer_.play_stream(stream_, 127 * music_level_ / 80);
+        if(original_course_index<1||original_course_index>5)return;
+        // General MIDI arrangement, not the SBKGRNG mix authored for partial AWE banks.
+        song_=race_song_is_klown(alias)?"KLOWN":"GRUNGE"+std::to_string(original_course_index);
+        song_data_=read_mids(assets_.read("AUDIO/MUSIC/"+song_+".MID"));
+        builtin_=std::make_unique<MidiSynth>(assets_.root());
+        loaded_=playing_=true;stream_=new MusicStream(1<<15);stream_voice_=mixer_.play_stream(stream_,127);
+    }catch(const std::exception& e){SDL_Log("Race MIDI unavailable: %s",e.what());stop();}
 }
 void RaceMusicPlayer::stop() {
+    builtin_.reset();
     if (stream_voice_ >= 0) mixer_.stop(stream_voice_);
     if (stream_) mixer_.retire_stream(stream_);
     if (stream_) stream_->stop(); // generation handshake: no stale frames
@@ -607,12 +569,13 @@ void RaceMusicPlayer::test_play(const MidsSong& song, std::shared_ptr<const Sf1B
 }
 
 void RaceMusicPlayer::update() {
+    if(builtin_){update_builtin();return;}
     // Game-thread sequencer: advance song ticks by whole rendered blocks and
     // push stereo PCM into the mixer ring. No allocation here (voices_ only
     // grows on note-on, bounded by the song's polyphony); the audio thread
     // consumes lock-free and hears silence on underrun.
     if (!playing_ || paused_ || !loaded_ || !melodic_ || !drums_ || !stream_) return;
-    constexpr double kRate = 22050.0;
+    constexpr double kRate = double(Mixer::rate);
     constexpr size_t kBlock = 512;
     // Backpressure: never advance the sequencer past PCM refused by the ring.
     // Keep a short buffer and fill it on each game-frame pump.
@@ -741,6 +704,32 @@ void RaceMusicPlayer::update() {
         position_frames_ += kBlock;
     }
     if (stream_voice_ >= 0) mixer_.set(stream_voice_, 127 * music_level_ / 80, 0, 256);
+}
+
+
+void RaceMusicPlayer::update_builtin() {
+    if(!playing_||paused_||!loaded_||!stream_)return;
+    constexpr size_t count=512;const double rate=double(Mixer::rate);
+    for(int refill=0;refill<8&&stream_->available()<2048;++refill){
+        float left[count]{},right[count]{};size_t filled=0;
+        while(filled<count){
+            if(song_data_.total_ticks>0&&double(tick_)+tick_frac_>=double(song_data_.total_ticks)){
+                builtin_->reset();tick_=0;tick_frac_=0;event_cursor_=0;
+            }
+            const double now=double(tick_)+tick_frac_;
+            while(event_cursor_<song_data_.events.size()&&song_data_.events[event_cursor_].tick<=now){const auto& e=song_data_.events[event_cursor_++];builtin_->event(e.status,e.data0,e.data1);}
+            uint32_t tempo=500000;double deadline=song_data_.total_ticks?double(song_data_.total_ticks):now+480;
+            for(const auto& t:song_data_.tempo){if(double(t.first)>now){deadline=std::min(deadline,double(t.first));break;}if(t.second)tempo=t.second;}
+            if(event_cursor_<song_data_.events.size())deadline=std::min(deadline,double(song_data_.events[event_cursor_].tick));
+            const double frames_per_tick=std::max(1e-6,double(tempo)/1e6*rate/double(song_data_.division?song_data_.division:480));
+            size_t n=count-filled;if(deadline>now)n=std::min(n,size_t(std::max(1.0,std::ceil((deadline-now)*frames_per_tick))));
+            builtin_->render(left+filled,right+filled,int(n));filled+=n;
+            tick_frac_+=double(n)/frames_per_tick;const double whole=std::floor(tick_frac_);tick_+=uint32_t(whole);tick_frac_-=whole;
+        }
+        int16_t block[count*2];const float level=float(music_level_)/100.0f;
+        for(size_t i=0;i<count;++i){block[2*i]=int16_t(std::lrint(std::clamp(left[i]*level,-1.0f,1.0f)*32767));block[2*i+1]=int16_t(std::lrint(std::clamp(right[i]*level,-1.0f,1.0f)*32767));}
+        if(!stream_->push(block,count))break;position_frames_+=count;
+    }
 }
 
 // Live-registry for the sound.cpp hook region: exactly one RaceMusicPlayer

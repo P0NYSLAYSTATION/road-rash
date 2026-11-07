@@ -100,6 +100,7 @@ void register_race_player(RaceMusicPlayer* player);
 std::string race_song_name(int original_course_index, const std::string& alias);
 bool race_song_is_klown(const std::string& alias);
 
+class MidiSynth;
 class RaceMusicPlayer {
   public:
     RaceMusicPlayer(const Assets&, Mixer&);
@@ -124,6 +125,8 @@ class RaceMusicPlayer {
                    std::shared_ptr<const Sf1Bank> drums);
 
   private:
+    std::unique_ptr<MidiSynth> builtin_;
+    void update_builtin();
     const Assets& assets_;
     Mixer& mixer_;
     bool playing_ = false, paused_ = false, loaded_ = false;

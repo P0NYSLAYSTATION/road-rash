@@ -46,3 +46,14 @@ release tarball `dejavu-fonts-ttf-2.37.tar.bz2`, SHA-256
 `fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7`), used when
 the system has none of the fonts in `src/system_fonts.cpp`. The font files
 are downloaded at package time, not committed.
+
+Windows built-in MIDI synthesizer (this fork): official FluidSynth 2.6.2
+win10-x64-cpp11 runtime, dynamically linked (LGPL-2.1-or-later).
+https://github.com/FluidSynth/fluidsynth/releases/tag/v2.6.2
+The bundled sndfile.dll reports libsndfile-1.2.2 (LGPL-2.1-or-later):
+https://github.com/libsndfile/libsndfile/tree/1.2.2
+Licenses: fluidsynth-COPYING.txt and libsndfile-COPYING.txt. Users may replace
+these DLLs with compatible modified versions; no commercial soundfont is
+bundled. tools/windows_dependencies.py pins the official runtime archive by
+SHA-256 and downloads the licenses. The runtime DLLs and their source remain
+separate from the game assets.
