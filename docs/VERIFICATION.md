@@ -4325,3 +4325,26 @@ Final CTest gate PASS: 138 registered, 102 passed, 36 explicit corpus/platform
 skips, zero failures (build/upstream-merge-final-tests.log).
 See agent-handoffs/upstream-parity-merge-20261111.md for the preserved fork input
 format and why upstream paired/legacy joystick capture is not activated.
+
+## November 11, 2026 — expanded native-original probes
+
+Full Debug build succeeds. Normal-host `ctest --test-dir build/debug
+--output-on-failure` with RR_ASSETS=E:/RR passes: 138 registered, 102 passed,
+36 explicit skips, zero failures. Actual asset-backed pedestrian and traffic
+tests pass, including graphics replacement/reload and tick-zero signal-clock
+regressions. Log: build/parity-lifetimes-host-tests-console.log.
+
+Original captures use only E:/RR/ROADRASH.EXE and its instrumented working
+AWEMAN32.DLL, which is restored before publishing each capture. Seed1 initial
+RNG matches independently after native tick1 consumers. Expanded 2400-tick
+captures are complete but fail strict acceptance: Napa first difference1072
+(mixed-node scan order); City751 (crossing-car lateral motion). These failures
+are retained, not suppressed or reanchored. Scope, hashes and intermediate
+passing receipts: [handoff](agent-handoffs/actor-lifetimes-clock-20261111.md).
+
+Release full build and CTest also PASS: 141 registered, 105 passed, 36 explicit
+skips, zero failures (build/parity-lifetimes-release-tests-console.log).
+Current Release strict acceptance preserves expanded Napa2400 and City600;
+explicit-counter City4 also passes (build/lifetimes-release-accepted.json).
+Debug confirms the Napa2400/City600 pair (build/lifetimes-final-accepted.json).
+The new 2400-tick capture failures above remain separate open evidence.

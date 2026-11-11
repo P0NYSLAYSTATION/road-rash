@@ -235,6 +235,28 @@ int32_t atan_ratio(const PhysicsTables& t, int32_t x) {
     return 0x100;
 }
 
+void accumulate_road_motion(Bike& b, const PhysicsTables& tables, uint32_t from, uint32_t to,
+                            int32_t old_bend, int32_t old_rise, int32_t new_bend, int32_t new_rise) {
+    const auto curvature = [&](int32_t bend) { return (atan_ratio(tables, bend) * (1 << 14)) >> 8; };
+    if (((to ^ from) & 0xffffff00u) == 0) {
+        const int32_t distance = int32_t(to - from);
+        b.i32(0x128) -= (curvature(new_bend) * distance) / 2;
+        b.i32(0x130) = -(new_bend * distance);
+        b.i32(0x12c) = new_rise * distance;
+        return;
+    }
+    int32_t in_new = int32_t(to & 0xff), in_old;
+    if (int32_t(to) < int32_t(from)) {
+        in_old = -int32_t(from & 0xff);
+        in_new -= 0x100;
+    } else {
+        in_old = 0x100 - int32_t(from & 0xff);
+    }
+    b.i32(0x128) -= (curvature(old_bend) * in_old + curvature(new_bend) * in_new) / 2;
+    b.i32(0x130) = -(new_bend * in_new + old_bend * in_old);
+    b.i32(0x12c) = new_rise * in_new + old_rise * in_old;
+}
+
 int32_t sine(const PhysicsTables& t, uint32_t a) {
     const uint32_t i = a & 0x3ff;
     switch ((a & 0xfff) >> 10) {

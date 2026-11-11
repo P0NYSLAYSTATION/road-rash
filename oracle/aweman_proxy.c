@@ -51,6 +51,8 @@ static FILE* g_input;
 static int g_input_exhausted_tick = -1;
 static uint32_t g_sim_frames;
 static uint32_t g_player_human_calls;
+static int32_t g_initial_traffic_tick = -1;
+static int32_t g_initial_pedestrian_tick = -1;
 static int g_quit_after = -1;
 static int32_t g_first_tick = -1;
 static int g_solo;
@@ -210,6 +212,7 @@ static uint32_t* sim_rand_state(void) {
  * reimplementation that counts calls and records the tick-1 caller. */
 static uint8_t g_rand_orig[5];
 static uint32_t g_rand_calls, g_step_start_calls;
+static int g_rand_counter_installed;
 static uint32_t g_tick1_caller;
 static int32_t g_randtrace_tick = -1;
 static uint32_t g_randtrace_callers[64];
@@ -260,6 +263,7 @@ static void sim_patch_rand_entry(void) {
     memcpy(site + 1, &rel, 4);
     VirtualProtect(site, 5, old, &old);
     FlushInstructionCache(GetCurrentProcess(), site, 5);
+    g_rand_counter_installed = 1;
 }
 
 static long long sim_field_value(uintptr_t base, uint32_t offset, uint8_t width, uint8_t is_signed) {
@@ -336,6 +340,9 @@ static void dump_sim_tick(void) {
         rr_log("seed", g_seed);
         rr_log("solo", g_solo);
         rr_log("ring.car_schema", 2); // byte offsets corrected from decompiler element indices
+        rr_log("rng.counter_enabled", g_rand_counter_installed);
+        if (g_initial_traffic_tick >= 0) rr_log("traffic.setup_tick", g_initial_traffic_tick);
+        if (g_initial_pedestrian_tick >= 0) rr_log("pedestrian.setup_tick", g_initial_pedestrian_tick);
         if (g_terrain_trace) rr_log("ring.terrain.schema", 1);
         if (g_tick1_caller) rr_log("tick1_caller", (long long)g_tick1_caller);
     } else {
@@ -367,6 +374,8 @@ static void dump_sim_tick(void) {
     rr_log("nitro.charges", (long long)(int32_t)RD32(0x00465a34));
     rr_log("ring.back", (long long)(int32_t)RD32(0x0049f240));
     rr_log("ring.camera", (long long)(int32_t)RD32(0x004b6e5c));
+    rr_log("traffic.cruise", (int8_t)RD8(0x004b7e8c));
+    rr_log("traffic.rate", RD32(0x004b7e84));
     if (g_order) { /* race-end timer (0x00416010/0x00442e10) and outcome code; 4 = arrest */
         rr_log("race.end_timer", (long long)(int32_t)RD32(0x004753c4));
         rr_log("race.outcome", (long long)(int32_t)RD32(0x004c5d7c));
@@ -730,12 +739,22 @@ static void dump_sim_tick(void) {
                                sim_field_value(node, rr_sim_car_fields[f].offset, rr_sim_car_fields[f].width,
                                                rr_sim_car_fields[f].is_signed));
                     }
+                    static const uint32_t motion_words[] = {0x104, 0x10c, 0x110, 0x114, 0x118,
+                                                           0x128, 0x12c, 0x158, 0x15c};
+                    for (unsigned i = 0; i < sizeof motion_words / sizeof motion_words[0]; ++i) {
+                        snprintf(key, sizeof key, "ring.%x.motion_%x", node, motion_words[i]);
+                        rr_log(key, sim_field_value(node, motion_words[i], 4, 1));
+                    }
                     const uintptr_t signal = (uint32_t)sim_field_value(node, 0x1ec, 4, 0);
                     if (signal && readable(signal, 0xfc)) {
                         snprintf(key, sizeof key, "ring.%x.signal_position", node);
                         rr_log(key, sim_field_value(signal, 0x1c, 4, 1));
                         snprintf(key, sizeof key, "ring.%x.signal_index", node);
                         rr_log(key, sim_field_value(signal, 0xf8, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_phase", node);
+                        rr_log(key, sim_field_value(signal, 0xf0, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_accum", node);
+                        rr_log(key, sim_field_value(signal, 0xf4, 4, 1));
                     }
                     /* 0x00437e60 branch words (diagnostic-only, not in
                      * rr_sim_car_fields so old goldens still load): +0x2c
@@ -896,6 +915,22 @@ static int rr_install_player_probe(void){
  * before the bootstrapped race entry (startup 0x0044b2e0(1) calls) are
  * skipped via g_race_started. */
 static void __cdecl hook_step(void) {
+    if (g_sim && g_race_started && g_sim_frames == 0 && readable(0x0046dcc8, 4)) {
+        const uintptr_t list = (uint32_t)RD32(0x0046dcc8);
+        const uintptr_t end = list && readable(list, 8) ? (uint32_t)RD32(list) : 0;
+        const uintptr_t cursor = list && readable(list, 8) ? (uint32_t)RD32(list + 4) : 0;
+        uintptr_t node = cursor && readable(cursor + 4, 4) ? (uint32_t)RD32(cursor + 4) : 0;
+        for (int guard = 0; node && node != end && guard < 512; ++guard) {
+            if (!readable(node, 0xc8)) break;
+            if (RD32(node + 0xc4) == 0x400 && RD32(node + 0x10) + RD32(node + 0x14) == RD32(node + 0xc)) {
+                g_initial_traffic_tick = RD32(node + 0xc);
+            }
+            if (RD32(node + 0xc4) == 0x20 && RD32(node + 0x10) + RD32(node + 0x14) == RD32(node + 0xc))
+                g_initial_pedestrian_tick = RD32(node + 0xc);
+            if (g_initial_traffic_tick >= 0 && g_initial_pedestrian_tick >= 0) break;
+            node = (uint32_t)RD32(node + 4);
+        }
+    }
     // The seed fixes the live stream before the race's first step consumes
     // it, so the golden rng after tick 0 equals f(seed) on both sides.
     if (g_sim && g_race_started && !g_seed_applied && g_seed >= 0) {

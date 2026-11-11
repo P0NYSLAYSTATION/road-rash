@@ -11,7 +11,8 @@
 // 0x00440760. Skips without the disc corpus.
 namespace {
 struct Fixture {
-    rr::Assets assets{RR_SOURCE_DIR "/../cdrom/ROADRASH"};
+    rr::Assets assets{
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH")};
     std::vector<uint8_t> exe;
     rr::PhysicsTables physics;
     std::vector<rr::BikeSpec> specs;
@@ -51,6 +52,53 @@ struct Fixture {
 };
 void check(bool ok, const char* what) {
     if (!ok) throw std::runtime_error(what);
+}
+
+// Graphics residency is independent of the cached animation-table words.
+void graphics_replacement(const Fixture& f) {
+    auto race = f.race(0);
+    rr::TrackRing ring(f.course, 0);
+    race->set_track_ring(&ring);
+    rr::PedestrianLook old_look, new_look;
+    old_look.bank.resize(6);
+    new_look.bank.resize(6);
+    rr::ActorAnimationFrame held;
+    held.duration = 127;
+    held.control = 1;
+    old_look.bank[0] = rr::ActorSequence{held};
+    new_look.bank[5] = rr::ActorSequence{held};
+    bool replaced = false;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [&](const rr::RouteSample&, uint8_t) { return replaced ? &new_look : &old_look; }, f.exe);
+    race->set_pedestrians(&system);
+    auto& p = system.pool()[0];
+    p.active = true;
+    p.look = &old_look;
+    p.body.sample = size_t((ring.front_q8() - 0x5000) >> 8) + 40;
+    p.body.previous_sample = p.body.sample;
+    p.body.bike.i32(0x1c) = p.anchor = int32_t(p.body.sample * 256);
+    system.apply_template(p.body.bike);
+    p.body.bike.u8(0xc0) |= 0x10;
+    p.next_tick = 1;
+    race->countdown_step();
+    check(p.loaded() && p.has(0), "resident graphics start loaded");
+    replaced = true;
+    p.next_tick = 2;
+    race->countdown_step();
+    check(!p.loaded() && p.look == &old_look && p.has(0),
+          "eviction clears graphics validity while retaining the old bank words");
+    check(!p.pre_draw_resources[0] && p.pre_draw_resources[1],
+          "pre-draw checkpoint records eviction before any lazy reload");
+    p.body.sample = size_t((ring.front_q8() - 0x5000) >> 8) + 5;
+    p.body.previous_sample = p.body.sample;
+    p.body.bike.i32(0x1c) = p.anchor = int32_t(p.body.sample * 256);
+    p.next_tick = 1000;
+    race->countdown_step();
+    check(p.loaded() && p.look == &new_look && !p.has(0) && p.has(5),
+          "drawing an evicted actor reloads the replacement family");
+    check(!p.pre_draw_resources[0], "lazy reload does not rewrite the pre-draw checkpoint");
 }
 
 // The scheduler reads the ring camera before the player driver updates it.
@@ -250,13 +298,15 @@ void staged_hit(const Fixture& f, int32_t speed, int expected_state, bool bump) 
 
 int main(int argc, char** argv) {
     try {
-        rr::Assets probe(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets probe(
+            (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH"));
         if (!probe.exists("DATA/COURSES/CITY.CRS")) {
             std::cout << "No imported course corpus\n";
             return 0;
         }
         if (!SDL_Init(0)) std::cerr << SDL_GetError() << '\n';
         Fixture city("CITY");
+        graphics_replacement(city);
         scheduler_camera(city);
         // DZHR actor records survive placement (0x00451fc0 gate, level 1).
         size_t pedestrians = 0, cops = 0, looks = 0;

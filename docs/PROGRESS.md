@@ -3214,3 +3214,14 @@ bindings, soundfont MIDI and presentation remain active. Local unfinished
 graphics-lifetime edits were preserved separately, not blindly reapplied.
 See agent-handoffs/upstream-parity-merge-20261111.md for conflict decisions,
 verification and remaining parity work. Multiplayer remains on hold.
+
+## November 11, 2026 — actor lifetimes and initial clocks
+
+After upstream integration, model pedestrian graphics eviction separately
+from retained animation banks, share road bend/rise/heading accumulation with
+traffic, and use measured tick-zero construction for initial controllers and
+pedestrians. Replay audits the first post-countdown RNG state and actual draw
+counts; capture explicitly records the installed counter and construction
+ticks. Full Debug gate passes. Expanded longer captures expose further mixed
+scan-order and crossing-car motion divergences; complete parity remains open.
+See [evidence and next failures](agent-handoffs/actor-lifetimes-clock-20261111.md).

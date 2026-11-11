@@ -29,6 +29,18 @@ int main() {
     }
 
     // Synthetic spec: gear table and rates chosen so the arithmetic is easy to follow.
+    {
+        rr::Bike body;
+        const auto tables = rr::PhysicsTables::synthetic();
+        // Sixteen Q8 units in each of two different road samples.
+        rr::accumulate_road_motion(body, tables, 0x1f0, 0x210, 4, 3, 8, 5);
+        check(body.i32(0x128) == -3072 && body.i32(0x130) == -192 && body.i32(0x12c) == 128,
+              "road sweep weights both samples and rotates the actor heading");
+        rr::accumulate_road_motion(body, tables, 0x210, 0x1f0, 8, 5, 4, 3);
+        check(body.i32(0x128) == 0 && body.i32(0x130) == 192 && body.i32(0x12c) == -128,
+              "backward road sweep reverses the weighted rise and heading");
+    }
+
     rr::BikeSpec spec{};
     spec.d[1] = -800;
     spec.d[2] = 1024;

@@ -652,7 +652,8 @@ static void test_spawn_and_move() {
 static void test_zone_corpus() {
     // Napa at a steady 0x60 Q8/tick: spawns with the course's zone events
     // against the old fixed density 6, over the same random stream.
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) return;
     rr::Assets assets(root);
     rr::VehicleLibrary library(assets.read("DATA/CARS/NAPA.CAR"));
@@ -692,7 +693,8 @@ static void test_zone_corpus() {
 }
 
 static void test_corpus() {
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) {
         std::cout << "No CARS corpus\n";
         return;
@@ -753,7 +755,8 @@ static void test_corpus() {
 //   the rider; gap 129 misses the gate entirely (no nudge);
 // - crashed rider: no new crash is entered (0x004049c0 rejects).
 static void test_car_contact_synthetic() {
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for contact tests\n";
         return;
@@ -945,6 +948,23 @@ static std::vector<rr::RouteSample> intersection_route(int variant = 1) {
     route[100].path.zone_end = true;
     return route;
 }
+static void test_initial_signal_clock() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route();
+    const int32_t front = 130 * 256;
+    system.countdown_step(route, front, [] { return 0u; }, 1);
+    const int signal = system.controllers()[0].signals[2];
+    if (signal < 0 || system.signals()[size_t(signal)].phase != 0 ||
+        system.signals()[size_t(signal)].accum != 31)
+        throw std::runtime_error("tick-zero construction must contribute 31 on the first signal think");
+    for (uint32_t tick = 2; tick <= 571; ++tick) system.countdown_step(route, front, [] { return 0u; }, tick);
+    if (system.signals()[size_t(signal)].phase != 1 || system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("initial signal must change phase at tick 571, not 601");
+}
+
 static void test_opposite_intersection() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem system(library, synthetic_exe());
@@ -1188,7 +1208,8 @@ static void test_intersections_all_courses() {
     // Plan 24 Task 5 intersections counterpart: every course with
     // type-1..3 zone ends places controllers through a full run, and the
     // pools never exceed the original sizes (10 controllers, 40 signals).
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for course sweep\n";
         return;
@@ -1243,6 +1264,7 @@ int main() {
         test_spawn_and_move();
         test_zone_events();
         test_intersections();
+        test_initial_signal_clock();
         test_opposite_intersection();
         test_signal_phase();
         test_intersections_all_courses();

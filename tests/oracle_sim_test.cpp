@@ -484,7 +484,9 @@ static int replay_main(int argc, char** argv) {
     // The field capture's setup pedestrians first run at tick 1 (frame-0
     // positions +36, one tick-1 move with dt 1 + interval), where the solo
     // captures measured next = 2 (see Race::set_pedestrian_setup_tick).
-    if (!solo) config.pedestrian_setup_tick = 0;
+    config.pedestrian_setup_tick =
+        h.count("pedestrian.setup_tick") ? int(h.at("pedestrian.setup_tick")) : (solo ? 2 : 0);
+    if (h.count("traffic.setup_tick")) config.ring_setup_tick = uint32_t(h.at("traffic.setup_tick"));
     // Track ring (plan 10 Task 5): the original builds it inside the setup
     // stream, srand(seed) + ring.pre_draws (9 on the Napa solo captures:
     // the 9,098 ring-probe measured before 0x00453b60's window walks were

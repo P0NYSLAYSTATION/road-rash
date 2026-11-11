@@ -154,6 +154,8 @@ TrafficSystem::TrafficSystem(const VehicleLibrary& library, std::vector<uint8_t>
     for (size_t i = 0; i < 4; ++i) physics_.surface_drag[i] = int8_t(drag[i]);
     const auto wave = read_exe_data(exe, 0x00475768, 4096);
     for (size_t i = 0; i < 1024; ++i) physics_.sine[i] = bits(word(wave, i * 4));
+    const auto angles = read_exe_data(exe, 0x00476768, physics_.atan.size());
+    std::copy(angles.begin(), angles.end(), physics_.atan.begin());
     sprite_size_ = car_template[0x28]; // car template size class (+0x160 copy)
 }
 
@@ -608,7 +610,44 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
                            at.path.marking_flags,
                            uint8_t(terrain_type_ ? terrain_type_(at) : 0)};
     integrate_speed(body, physics_, surface_class(edges, car.lateral));
-    advance_actor_motion(body, physics_, [&](int32_t distance) { body.i32(0x1c) += distance; });
+    advance_actor_motion(body, physics_, [&](int32_t distance) {
+        // 0x00439270/0x004394c0: cars follow the road through the same
+        // swept bend/rise law as other actors, including the heading word.
+        if (!distance) {
+            body.i32(0x130) = body.i32(0x12c) = 0;
+            return;
+        }
+        const int32_t initial = body.i32(0x1c);
+        const int32_t last = std::max(0, int32_t(route.size()) - 2) * 256;
+        auto segment = [&](int32_t delta) {
+            const int32_t from = body.i32(0x1c);
+            const int32_t to = std::clamp(wrap(int64_t(from) + delta), 0, last);
+            const auto& before =
+                route[size_t(ring_slot_sample(from >> 8, front_q8, int32_t(route.size())))].path;
+            const auto& after =
+                route[size_t(ring_slot_sample(to >> 8, front_q8, int32_t(route.size())))].path;
+            body.i32(0x134) = from;
+            body.i32(0x1c) = body.i32(0x138) = to;
+            accumulate_road_motion(body, physics_, uint32_t(from), uint32_t(to), before.bend, before.rise,
+                                   after.bend, after.rise);
+        };
+        const int32_t crossings = ((initial + distance) >> 8) - (initial >> 8);
+        if (std::abs(crossings) < 2) {
+            segment(distance);
+            return;
+        }
+        const int32_t magnitude = std::abs(distance), sign = distance < 0 ? -1 : 1;
+        segment(sign * (magnitude & 255));
+        int32_t bend = body.i32(0x130), rise = body.i32(0x12c);
+        for (int32_t n = magnitude >> 8; n > 0; --n) {
+            segment(sign * 256);
+            bend += body.i32(0x130);
+            rise += body.i32(0x12c);
+        }
+        body.i32(0x134) = initial;
+        body.i32(0x130) = bend;
+        body.i32(0x12c) = rise;
+    });
     car.speed = body.i32(0xec);
     car.position = body.i32(0x1c);
     car.lateral = body.i32(0x28);

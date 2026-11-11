@@ -19,9 +19,11 @@ struct Pedestrian {
     Rider body; // object image (+0x1c position, +0x28 lateral, motion words) and route bookkeeping
     const PedestrianLook* look =
         nullptr; // 0x00440b80: null when category-2 resources 0/1 are missing (+0x1e0 stays 0)
-    ActorAnimationState animation; // block +0x70
-    uint8_t selector = 0;          // +0x1dc family selector
-    int type = 0;                  // +0x1e4: 4..7 cross (4 faces back, no pace), 10 performs, others stand
+    bool graphics_evicted = false;            // +0x1e0 can clear while old animation-table pointers remain
+    std::array<bool, 3> pre_draw_resources{}; // checkpoint before the frame's lazy resource load
+    ActorAnimationState animation;            // block +0x70
+    uint8_t selector = 0;                     // +0x1dc family selector
+    int type = 0;           // +0x1e4: 4..7 cross (4 faces back, no pace), 10 performs, others stand
     int state = 0;          // +0x1e8: 0 wait, 1 cross, 2 knocked down, 3 hit/hesitate, 4/5 recover, 7 perform
     int side = 1;           // +0x1ec: 1 walks toward larger lateral, 3 toward smaller (index into 0x0046df30)
     int32_t heading = 0;    // +0x1f0
@@ -33,7 +35,7 @@ struct Pedestrian {
     int32_t anchor = 0;     // +0x1c8: spawn position; 0x00440990 keeps within 0x1ff of it
     int32_t last_tick = 0, next_tick = 0; // scheduler +0x10 / +0xc
     uint16_t serial = 0;                  // +0x1c4 short, DAT_004c1278
-    bool loaded() const { return look != nullptr; }
+    bool loaded() const { return look != nullptr && !graphics_evicted; }
     bool has(int code) const {
         return look && size_t(code) < look->bank.size() && look->bank[size_t(code)].has_value();
     }

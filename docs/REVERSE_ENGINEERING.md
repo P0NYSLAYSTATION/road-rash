@@ -2689,3 +2689,19 @@ Measured scope: steal-farm first7872 ticks match with one RNG anchor; the next
 body vertical velocity gap7873 remains open. Component/snapshot tests do not
 establish complete road-neighbor topology or arbitrary per-split route parity.
 See [handoff](agent-handoffs/split-ring-latest-20261104.md) for logs and remaining work.
+
+## November 11 — native actor clocks and cached graphics
+
+Original 0044143b–00441474 invalidates a pedestrian's loaded graphics flag and
+animation descriptor when the RRAN header is replaced; old bank availability
+words persist. Resolve replacement from the global front family walker,
+accounting for CourseScene's existing view-slice bias. City slot0 changes at
+frame505/front165; pedestrian6 notices at think514.
+
+Before the first E:/RR simulation step, both intersection controller and
+pedestrian next-tick words are0 with last+interval=next. This supersedes the
+earlier construction-tick inference from later scheduler cadence. First
+controller think contributes31, advancing a600-tick signal phase at571.
+Original cars also use 00439270/004394c0 weighted road bend/rise/heading
+accumulation and atan table00476768. See
+[measurements and limits](agent-handoffs/actor-lifetimes-clock-20261111.md).

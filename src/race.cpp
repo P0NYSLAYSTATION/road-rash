@@ -365,29 +365,9 @@ void Race::accumulate(Rider& r, uint32_t from, uint32_t to, size_t from_sample, 
     // each sample, and the heading word swept by the sub-slice curvature.
     const auto& route = route_of(r);
     Bike& b = r.bike;
-    const int32_t bend_now = route[to_sample].path.bend, rise_now = route[to_sample].path.rise;
-    // +0xb4 = atan(bend) << 14 (route build 0x00454240). 0x128 loses its low 12 bits
-    // to the heading branch (0x00439920) and is scaled by half the swept distance;
-    // bikes overwrite it again in 0x004395e0, so only route-following bodies (crash
-    // halves, traffic, peds) keep the accumulated value.
-    const auto curvature = [&](int32_t bend) { return (atan_ratio(tables_, bend) * (1 << 14)) >> 8; };
-    if (((to ^ from) & 0xffffff00u) == 0) {
-        const int32_t d = int32_t(to - from);
-        b.i32(0x128) -= (curvature(bend_now) * d) / 2;
-        b.i32(0x130) = -(bend_now * d);
-        b.i32(0x12c) = rise_now * d;
-        return;
-    }
-    int32_t in_new = int32_t(to & 0xff), in_old;
-    if (int32_t(to) < int32_t(from)) {
-        in_old = -int32_t(from & 0xff);
-        in_new -= 0x100;
-    } else
-        in_old = 0x100 - int32_t(from & 0xff);
-    const int32_t bend_old = route[from_sample].path.bend, rise_old = route[from_sample].path.rise;
-    b.i32(0x128) -= (curvature(bend_old) * in_old + curvature(bend_now) * in_new) / 2;
-    b.i32(0x130) = -(bend_now * in_new + bend_old * in_old);
-    b.i32(0x12c) = rise_now * in_new + rise_old * in_old;
+    const auto& before = route[from_sample].path;
+    const auto& after = route[to_sample].path;
+    accumulate_road_motion(b, tables_, from, to, before.bend, before.rise, after.bend, after.rise);
 }
 
 void Race::cross_sample(Rider& r, int32_t delta) {
@@ -3856,6 +3836,7 @@ void Race::remove_cop() {
 }
 
 uint32_t Race::random() {
+    ++rng_draw_count_;
     seed_ = seed_ * 0x343fdu + 0x269ec3u;
     return (seed_ >> 16) & 0x7fff;
 }

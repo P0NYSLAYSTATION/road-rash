@@ -104,7 +104,8 @@ struct FieldReplay {
         }
         return true;
     }
-    std::map<const Pedestrian*, std::array<bool, 3>> previous_ped_looks;
+    uint64_t previous_rng_draws = 0;
+    bool counted_rng = false;
     void pedestrians(const std::map<std::string, int64_t>& f) {
         if (!setup.instance.pedestrians) return;
         for (const auto& [key, serial] : f) {
@@ -139,9 +140,8 @@ struct FieldReplay {
                                                                   {"1f8", p.trigger},
                                                                   {"1fc", p.lane}}})
                 if (f.count(prefix + field)) check(f, prefix + field, value);
-            // Capture is before the frame draw; native resource preparation
-            // is at the previous tick's end. Compare matching boundaries.
-            const auto previous = previous_ped_looks[&p];
+            // The original capture precedes the frame's lazy resource load.
+            const auto previous = p.pre_draw_resources;
             for (size_t i = 0; i < 3; ++i) {
                 const auto it = f.find(prefix + std::array{"1e0", "208", "21c"}[i]);
                 if (it == f.end()) continue;
@@ -149,8 +149,6 @@ struct FieldReplay {
                 if ((it->second != 0) != previous[i]) fail(it->first + " resource availability differs");
             }
         }
-        for (const auto& p : setup.instance.pedestrians->pool())
-            if (p.active) previous_ped_looks[&p] = {p.loaded(), p.has(0), p.has(5)};
     }
     void check(const std::map<std::string, int64_t>& f, const std::string& key, int64_t native) {
         if (all && !diff.empty()) {
@@ -523,6 +521,11 @@ struct FieldReplay {
                 extra("vel108", car.motion.i32(0x108));
                 extra("pause1f8", car.motion.i32(0x1f8));
                 extra("x1e9", car.motion.u8(0x1e9));
+                for (int offset : {0x104, 0x10c, 0x110, 0x114, 0x118, 0x128, 0x12c, 0x158, 0x15c}) {
+                    char field[24];
+                    std::snprintf(field, sizeof field, "motion_%x", offset);
+                    extra(field, car.motion.i32(offset));
+                }
                 // +0x2c/+0x140 are pointers to the same rolling road slice
                 // (00438930/004387a0). Verify the association and circular
                 // neighbour links, then compare the actual lane words below.
@@ -571,6 +574,8 @@ struct FieldReplay {
                         const auto& native_signal = setup.instance.traffic->signals()[size_t(car.signal)];
                         check(f, p + "signal_position", native_signal.position_q8);
                         check(f, p + "signal_index", native_signal.index);
+                        extra("signal_phase", native_signal.phase);
+                        extra("signal_accum", native_signal.accum);
                     } else
                         fail(p + "signal identity requires a captured signal position");
                 }
@@ -688,6 +693,14 @@ struct FieldReplay {
     bool frame(size_t i) {
         const auto& f = g.frames.at(i);
         diff.clear();
+        if (counted_rng && f.count("rng_calls"))
+            check(f, "rng_calls", int64_t(race().rng_draw_count() - previous_rng_draws));
+        previous_rng_draws = race().rng_draw_count();
+        if (setup.instance.traffic) {
+            const auto& timers = setup.instance.traffic->timers();
+            if (f.count("traffic.cruise")) check(f, "traffic.cruise", timers.cruise);
+            if (f.count("traffic.rate")) check(f, "traffic.rate", timers.rate);
+        }
         const char* ped_trace = std::getenv("RR_FIELD_TRACE_PEDS");
         if (ped_trace && tick0 + int64_t(i) >= std::atoi(ped_trace) && setup.instance.pedestrians)
             for (const auto& p : setup.instance.pedestrians->pool())
@@ -727,6 +740,17 @@ struct FieldReplay {
 
     int run() {
         const auto& h = g.frames.at(0);
+        previous_rng_draws = race().rng_draw_count();
+        // Legacy helpers wrote zero rng_calls without installing the counter.
+        // Explicit metadata covers zero-draw opening ticks. For older counted
+        // captures, a randlog anywhere in the trace proves interception.
+        counted_rng = h.count("rng.counter_enabled")
+                          ? h.at("rng.counter_enabled") != 0
+                          : std::any_of(g.frames.begin(), g.frames.end(), [](const auto& frame) {
+                                return std::any_of(frame.begin(), frame.end(), [](const auto& entry) {
+                                    return entry.first.rfind("randlog.", 0) == 0;
+                                });
+                            });
         // The first captured frame is POST tick 1, not factory completion.
         // Reproduce its countdown consumers before auditing the two streams.
         race().set_ticks(int32_t(tick0 - 1));
@@ -867,6 +891,9 @@ struct FieldReplay {
         std::map<std::string, size_t> extras;
         for (const auto& [key, value] : g.frames.back()) {
             if (used.count(key) || exact.count(key)) continue;
+            // Original code addresses are diagnostic attribution, not portable
+            // simulation state. Their counted draws and resulting RNG are checked.
+            if (key.rfind("randlog.", 0) == 0) continue;
             const std::string suffix = key.substr(key.rfind('.') + 1);
             if (key.rfind("rider.", 0) == 0 &&
                 (suffix == "think" || suffix == "slice_ptr" || suffix == "bike_44"))

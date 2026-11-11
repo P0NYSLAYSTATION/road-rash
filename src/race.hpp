@@ -392,11 +392,9 @@ class Race {
     // Oracle solo captures (RR_ORACLE_SOLO) freeze every scheduler node but
     // the player's: pedestrians spawn from the ring but never think.
     void set_freeze_actors(bool v) { freeze_actors_ = v; }
-    // First +0xc next of the pedestrians the 0x004552e0 ring setup spawns.
-    // Measured 2 on the solo captures (unlinks on 2 + 60k) but 0 on
-    // napa-field-l1-20261017, whose setup pedestrians already moved in tick 1
-    // (+36 = one move with dt 1 + interval) while its intersection objects
-    // keep TrafficSystem::setup_tick 2 (torn down on tick 392 = 2 + 13*30).
+    // Initial actor construction is tick 0 in the native original capture.
+    // The override retains compatibility with older frozen solo fixtures.
+    // Teardown/first-run cadence alone does not establish the creation tick.
     void set_pedestrian_setup_tick(int32_t t) { setup_tick_ = t; }
     // Live rider scheduler (field races): every tick 0x00438170(0) walks the
     // position-sorted object list front to back and runs each bike and
@@ -587,6 +585,7 @@ class Race {
     // Simulation oracle hooks (plan 10): read and write the MSVC rand state
     // (0x00455eb0) and dump every snapshotted field.
     uint32_t rng_state() const { return seed_; }
+    uint64_t rng_draw_count() const { return rng_draw_count_; } // oracle diagnostic; not gameplay state
     void set_rng_state(uint32_t s) { seed_ = s; }
     void set_ticks(int32_t t) { ticks_ = t; } // oracle: align with the capture's absolute tick
     RaceSnapshot snapshot() const;
@@ -834,7 +833,7 @@ class Race {
     bool outside_windows(int32_t position, int32_t front, int32_t back) const;
     bool ring_setup_ = false; // inside 0x004552e0: no player object yet
     bool freeze_actors_ = false;
-    int32_t setup_tick_ = 2; // set_pedestrian_setup_tick
+    int32_t setup_tick_ = 0; // original initial object construction tick
     std::function<uint32_t()> ring_random_;
     std::function<void(const RingActor&, uint32_t)> ring_sink_;
     const ActorAnimationLibrary* crash_library_ = nullptr;
@@ -907,6 +906,7 @@ class Race {
     // image -> no table (the draw alone decides, as before).
     std::optional<std::array<int32_t, 5>> overtake_eagerness_;
     uint32_t seed_ = 1; // MSVC rand() state (0x00455eb0)
+    uint64_t rng_draw_count_ = 0;
     std::vector<SoundEventRecord> sound_events_;
     void sound(SoundEvent, const Bike&);
     uint32_t previous_camera_position_ = 0;

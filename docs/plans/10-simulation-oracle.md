@@ -645,3 +645,15 @@ first gap7873 is body_f4 original1302/native1032. Strict human1431/1431 remains
 exact. No all-split or full-race acceptance claim: arbitrary route choices,
 complete neighbor topology and other-course/human cases remain open.
 [Evidence and next action](../agent-handoffs/split-ring-latest-20261104.md).
+
+### November 11, 2026: Windows upstream integration and expanded probes
+
+Merged upstream main20fb4c0 before further work. Native original captures from
+the owner's exact E:/RR installation now measure initial construction clocks,
+pedestrian cached-bank eviction, traffic body motion and per-tick RNG calls.
+Graphics lifetime, shared road accumulation and tick-zero setup are corrected.
+Expanded longer scenarios retain failures at Napa1072 (equal-key mixed scan
+ordering) and City751 (crossing-car lateral motion). These are next parity
+targets, not accepted differences. Full Debug native gate passes with36
+explicit corpus/platform skips; no complete parity claim.
+[Evidence](../agent-handoffs/actor-lifetimes-clock-20261111.md).

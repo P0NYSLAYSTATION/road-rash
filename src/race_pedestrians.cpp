@@ -219,10 +219,20 @@ void Race::load_pedestrian_looks() {
         std::max<int32_t>(ring_ ? ring_->front_q8() - 0x5000 : int32_t(camera_position()), 0);
     const size_t first = size_t(std::max<int32_t>((camera >> 8) - 1, 0));
     for (auto& p : pedestrians_->pool()) {
-        if (!p.active || p.look) continue;
+        if (!p.active) continue;
+        p.pre_draw_resources = {p.loaded(), p.has(0), p.has(5)};
+        if (p.loaded()) continue;
         if (p.body.sample < first || int64_t(p.body.sample) * 256 > int64_t(camera) + 0x1e00) continue;
         const auto& road = route_of(p.body);
-        p.look = pedestrians_->look(road[std::min(p.body.sample, road.size() - 1)], p.selector);
+        // 0x0044acd0 resolves a global family slot, advanced by the front
+        // MSRR walker. CourseScene's query already adds view_slices, so
+        // subtract that bias to query the actual front cursor once.
+        const size_t front =
+            ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
+        const auto* current = pedestrians_->look(road[std::min(front, road.size() - 1)], p.selector);
+        if (!current) continue;
+        p.look = current;
+        p.graphics_evicted = false;
         if (p.look) { // 0x00440b80
             set_animation(p.animation, p.look->bank, 1, uint32_t(ticks_));
             queue_animation(p.animation, p.look->bank, -1);
@@ -528,7 +538,21 @@ void Race::think_pedestrian(Pedestrian& p) {
         b.i32(0xec) = speed;
         b.i32(0x5c) = heading;
     }
-    if (p.look) advance_animation(p.animation, p.look->bank, tick);
+    if (p.loaded()) {
+        const auto& road = route_of(p.body);
+        const size_t front =
+            ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
+        const auto* current = pedestrians_->look(road[std::min(front, road.size() - 1)], p.selector);
+        if (current != p.look) {
+            // 0x0044143b..0x00441474: replaced graphics lose their RRAN
+            // header. Clear the loaded flag and descriptor; the old bank
+            // availability words remain for the subsequent think.
+            p.graphics_evicted = true;
+            p.animation = {};
+        } else {
+            advance_animation(p.animation, p.look->bank, tick);
+        }
+    }
 }
 
 void Race::move_pedestrian(Pedestrian& p) {

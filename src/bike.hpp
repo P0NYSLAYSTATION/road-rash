@@ -99,6 +99,9 @@ int surface_class(const SliceEdges&, int32_t x_q8);  // 0x0043a0c0
 int32_t approx_atan2(int32_t a, int32_t b);          // 0x0044f5a0
 int32_t sine(const PhysicsTables&, uint32_t angle);  // 0x0044f4a0: 4096 per turn, Q16
 int32_t atan_ratio(const PhysicsTables&, int32_t x); // 0x0044f720: x in Q8, result 256 = 90 degrees
+// 0x004394c0: swept bend/rise and heading, shared by rider and traffic movers.
+void accumulate_road_motion(Bike&, const PhysicsTables&, uint32_t from, uint32_t to, int32_t old_bend,
+                            int32_t old_rise, int32_t new_bend, int32_t new_rise);
 
 // Control bits (tables 0x00465fb9 / 0x00476c00 order).
 constexpr uint32_t control_accelerate = 0x1, control_brake = 0x2, control_left = 0x4, control_lean_down = 0x8,
