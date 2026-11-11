@@ -3859,3 +3859,5 @@ messages or rate limits; UDP 40001; startup checks neither disabled nor skipped.
   the loading screen inside a live `rr-game` run (it shows for under a second).
 
 Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).
+
+Windows startup-only controller discovery and measured frame-stall fix: [WINDOWS_FRAME_PACING.md](WINDOWS_FRAME_PACING.md).

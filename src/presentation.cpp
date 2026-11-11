@@ -1,3 +1,4 @@
+#include "runtime_timing.hpp"
 #include "presentation.hpp"
 #include "port_config.hpp"
 #include "native_controllers.hpp"
@@ -180,7 +181,10 @@ struct Backend {
         HRESULT hr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, vertices, sizeof(Vertex));
         device->EndScene();
         if (FAILED(hr)) return false;
-        hr = device->Present(nullptr, nullptr, nullptr, nullptr);
+        {
+            RuntimeTiming timing("presentation.dx9.present");
+            hr = device->Present(nullptr, nullptr, nullptr, nullptr);
+        }
         return SUCCEEDED(hr) || hr == D3DERR_DEVICELOST;
     }
 };
@@ -219,6 +223,7 @@ bool create_game_window_renderer(const char* title, int w, int h, SDL_WindowFlag
     return ok;
 }
 bool present_frame(SDL_Renderer* renderer) {
+    RuntimeTiming timing("presentation.total");
 #ifdef _WIN32
     auto it = backends.find(renderer);
     if (it != backends.end()) return it->second->present(renderer);

@@ -2804,3 +2804,5 @@ release. Detailed scope and DSP fidelity boundaries: [FORK_AUDIO.md](FORK_AUDIO.
 Evidence and build commands: [FORK_WORK.md](FORK_WORK.md).
 
 Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).
+
+Windows startup-only controller discovery and measured frame-stall fix: [WINDOWS_FRAME_PACING.md](WINDOWS_FRAME_PACING.md).

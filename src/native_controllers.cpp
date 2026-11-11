@@ -1,3 +1,4 @@
+#include "runtime_timing.hpp"
 #include "native_controllers.hpp"
 #include <algorithm>
 #include <cmath>
@@ -86,7 +87,8 @@ struct Driver {
     std::vector<State> states;
     SDL_JoystickID active = 0, next_id = 100;
     ControllerSample previous;
-    uint64_t next_scan = 0;
+    bool discovery_complete = false;
+    std::array<bool, 4> xinput_slots{};
     std::set<DWORD> xinput_products;
     Driver() {
         module = LoadLibraryExW(L"xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -140,6 +142,12 @@ struct Driver {
         return DIENUM_CONTINUE;
     }
     void scan() {
+        RuntimeTiming timing("controller.scan.startup");
+        if (get_state)
+            for (DWORD i = 0; i < xinput_slots.size(); ++i) {
+                XINPUT_STATE state{};
+                xinput_slots[i] = get_state(i, &state) == ERROR_SUCCESS;
+            }
         if (!input &&
             FAILED(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W,
                                       reinterpret_cast<void**>(&input), nullptr)))
@@ -176,16 +184,13 @@ struct Driver {
         return nullptr;
     }
     void poll() {
+        RuntimeTiming timing("controller.poll");
         if (!window) return;
         const bool focused = GetForegroundWindow() == window;
-        const auto now = SDL_GetTicks();
-        if (now >= next_scan) {
-            scan();
-            next_scan = now + 2000;
-        }
         states.clear();
         if (get_state)
-            for (DWORD i = 0; i < 4; ++i) {
+            for (DWORD i = 0; i < xinput_slots.size(); ++i) {
+                if (!xinput_slots[i]) continue;
                 XINPUT_STATE state{};
                 if (get_state(i, &state) != ERROR_SUCCESS) continue;
                 State s;
@@ -270,10 +275,21 @@ Driver& driver() {
 } // namespace
 void controller_set_window(SDL_Window* window) {
     auto& d = driver();
-    d.devices.clear();
-    d.window = static_cast<HWND>(
+    HWND hwnd = static_cast<HWND>(
         SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
-    d.next_scan = 0;
+    if (d.window == hwnd) return;
+    d.window = hwnd;
+    if (!d.discovery_complete) {
+        // Device discovery can block in a driver. Run it once before the first
+        // frame; connecting a controller later requires restarting the game.
+        d.scan();
+        d.discovery_complete = true;
+    } else {
+        for (auto& device : d.devices) {
+            device->device->Unacquire();
+            device->device->SetCooperativeLevel(hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE);
+        }
+    }
 }
 void controller_poll() {
     driver().poll();
