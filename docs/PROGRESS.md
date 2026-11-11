@@ -3225,3 +3225,8 @@ counts; capture explicitly records the installed counter and construction
 ticks. Full Debug gate passes. Expanded longer captures expose further mixed
 scan-order and crossing-car motion divergences; complete parity remains open.
 See [evidence and next failures](agent-handoffs/actor-lifetimes-clock-20261111.md).
+
+Released [3do-1.1.2](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.2)
+from clean15b46a1. The isolated1.1.1 update preserved600 asset/save/settings/
+soundfont files, and the installed main menu rendered correctly. Public
+installer download checksum verified. Parity remains incomplete as above.

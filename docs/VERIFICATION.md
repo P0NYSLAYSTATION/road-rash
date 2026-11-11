@@ -4348,3 +4348,10 @@ Current Release strict acceptance preserves expanded Napa2400 and City600;
 explicit-counter City4 also passes (build/lifetimes-release-accepted.json).
 Debug confirms the Napa2400/City600 pair (build/lifetimes-final-accepted.json).
 The new 2400-tick capture failures above remain separate open evidence.
+
+Published asset-free installer3do-1.1.2 from clean commit15b46a1. Isolated
+1.1.1-to-1.1.2 upgrade with no asset arguments preserves all600 checked files;
+installed BUILD_INFO matches, binary updates and main menu renders correctly.
+Receipt: build/parity-upgrade-validation.json. Public installer download SHA256
+verified90a68c83730692bc9e1117b5538e0d0e946b076df6ec554ba0b46d3056a44c6a.
+See [release](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.2).

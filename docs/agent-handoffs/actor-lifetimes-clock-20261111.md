@@ -81,3 +81,22 @@ draw/topology/other-course gaps. Multiplayer remains on hold. Commercial
 traces stay local. The working AWEMAN32.DLL was restored and SHA256 verified
 ca7f2f65bf6d1550857556a27d65d4f44d7a6ca14c2be89b7c0f9affb6a47022.
 No reference executable/DLL installation is involved.
+
+## Published progress release
+
+Source commit15b46a106585e968a90ef73a7906af2b8a597fa7 is clean and pushed to
+origin/codex/simulation-parity. Release3do-1.1.2:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.2
+Installer SHA25690a68c83730692bc9e1117b5538e0d0e946b076df6ec554ba0b46d3056a44c6a.
+Public download checksum verified (build/release-112-publish.log).
+
+Isolated test-AppId update1.1.1 to1.1.2 without asset arguments preserved all600
+checked assets, saves, soundfonts and settings; no changed files. Installed
+BUILD_INFO identifies the clean source above. Installed main menu rendered
+and was visually inspected (build/parity-installed-main.bmp, local commercial
+art only). Receipts: build/parity-upgrade-validation.json and upgrade logs.
+Production AppId/shortcuts were untouched by the isolated upgrade test.
+
+No original process, capture or build remains held. The C tree has no shared
+resource locks. Resume at Napa1072 mixed-node scan order or City751 crossing
+motion; keep the new failing captures and established passing cases separate.
