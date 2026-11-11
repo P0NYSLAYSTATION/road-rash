@@ -3861,3 +3861,39 @@ messages or rate limits; UDP 40001; startup checks neither disabled nor skipped.
 Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).
 
 Windows startup-only controller discovery and measured frame-stall fix: [WINDOWS_FRAME_PACING.md](WINDOWS_FRAME_PACING.md).
+
+
+## November 11, 2026 — native human parity and RNG audit
+
+Build: `tools/build-local.ps1 -Configuration Debug` succeeded (MSVC x64).
+Initial full CTest gate: 138 tests, one new traffic fixture failure, 36 corpus/
+platform skips. The fixture accidentally retained a one-lane value while
+expecting two lanes; its setup was corrected. Focused bike and traffic tests
+pass. The final full gate passes: 138 registered, 102 passed, 36 explicitly
+skipped, zero failed (build/parity-final-tests.log). Local sandboxed MSVC initially failed C1902
+because the program-database manager could not run; authorized normal-host
+build succeeded. No compiler/source workaround was introduced.
+
+`python tools/verify_sim.py --mode acceptance --binary build/debug/oracle-sim-test.exe
+--assets E:/RR --fixture analysis/oracle/napa-human-2400.tsv
+--report build/napa-pool-order.json`: PASS, `2400 ticks identical`, no reanchor.
+Trace SHA256: 63f0e295ace542f5a119c4c083d5c8bb50e499a3b35f81f04fd31797c07cf308.
+Receipt proves exact installed EXE, human branch, contiguous complete capture,
+and restoration of the working AWEMAN32.DLL before publication.
+
+Expanded City: `build/city-lane-nudge.json`, first divergence tick 514,
+pedestrian resource availability. RNG matched every preceding tick. First
+post-countdown state: original/native 742760408, seed 1. Original setup RNG
+caller trace confirms three countdown draws at 0x440eff. Acceptance checks the
+same boundary explicitly; frame zero's own draws do not invalidate the green
+pre-step proof, which concerns subsequent hold steps. The historical Napa
+600 fixture lacks current human branch counters and is not strict acceptance.
+
+Commercial traces/disassembly and binaries are local only. This evidence does
+not establish all-course, full-race, combat, branch or complete parity.
+
+Expanded Napa with the new pedestrian fields stops at tick 901 on graphics
+resource eviction (`build/napa-expanded-human-parity.json`). This supersedes
+any inference that the older 2400-tick capture covered pedestrian resource
+lifetimes: it did not record those fields. The older strict pass remains
+valid for its measured schema, not for the newly expanded schema.

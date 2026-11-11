@@ -2451,3 +2451,35 @@ in the RE worktree; trace SHA-256
 These are original component measurements, not native replay, live gameplay,
 real-asset animation verification, normal damage or a free-running steal.
 The plan 10 Task 6 / plan 16 Task 3 full steal acceptance remains open.
+
+
+## Native Windows parity findings — November 11, 2026
+
+- 0x00449b40 follows slice +0x10 links. Lookahead beyond the built ring front
+  sees old slot geometry, not future course samples. City grid sample 123
+  averages 124..129 followed by prior-lap slots 2 and 3. Future-data reads
+  shifted one initial AI lateral from 8704 to 9216 Q8 despite matching RNG.
+- 0x004547e0 (+0x08/+0x0c neighbour links; same neighbour on a single road)
+  adjusts the previous slice after building a widening neighbour. At
+  0x0045484c..0x00454881, an integral lane-width word is incremented by one
+  if the neighbour's width is larger. Physical edge coordinates were computed
+  earlier and remain unchanged. City slice 158 left width becomes 513 from
+  512; Napa slice 250 becomes 257 from 256. This is intentional original
+  topology processing, not interpolation error.
+- 0x004387a0 resets the explicit initialization words (0x0043886a onward),
+  including speed +0xec and +0x104, but retains velocity +0x108/+0x10c.
+  Original Napa tick 1780 reuses a slot with previous velocity 1540 while
+  its new speed is still zero. Clearing the entire native motion image is
+  incorrect.
+- 0x00437df0's teardown walks +0 links (ascending position). 0x00438c20
+  returns each slot before the pool end via 0x00438a60/0x00438a20;
+  0x00438a80 pops that end. Thus most recently returned slots are allocated
+  first. Napa returns cars at positions 44524 then 45294 on the same tick;
+  their retained velocities make the return/allocation order observable.
+- 0x00442a3d calls 0x0044f460 after initial ring/rider setup. It resets the
+  pedestrian serial counter at 0x004c1278 to zero, so setup and later-spawned
+  pedestrians can share serials. Identity also needs the spawn anchor.
+- Pedestrian graphics load on first draw (0x00440680/0x00440b80), not merely
+  on ring residency. At 0x0044143b..0x00441474, an invalidated graphics RRAN
+  header clears +0x1e0 and animation descriptor pointers while old animation
+  table pointers remain. Native resource eviction semantics are still open.

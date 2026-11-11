@@ -58,6 +58,7 @@ class PedestrianSystem {
     void apply_template(Bike&) const;
     int32_t spawned() const { return spawned_; }
     uint16_t next_serial() { return serial_++; }
+    void reset_serial() { serial_ = 0; } // 0x00442a3d -> 0x0044f460, after initial ring setup
     // Ring slices whose DZHR records have been walked (0x00454240 -> 0x004520d0).
     bool filled = false;
     int32_t built_back = 0, built_front = 0;

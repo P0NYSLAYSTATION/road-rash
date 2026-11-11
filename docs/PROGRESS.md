@@ -2806,3 +2806,30 @@ Evidence and build commands: [FORK_WORK.md](FORK_WORK.md).
 Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).
 
 Windows startup-only controller discovery and measured frame-stall fix: [WINDOWS_FRAME_PACING.md](WINDOWS_FRAME_PACING.md).
+
+
+## November 11, 2026 — deterministic parity before multiplayer
+
+Multiplayer work is preserved separately in E:/road-rash and is on hold. The
+native Windows oracle captures only the owner's exact E:/RR installation,
+using its working AWEMAN32.DLL with temporary capture instrumentation and
+verified restoration. Human captures now prove execution of 0x434660's actual
+human-control branch with an invocation counter.
+
+City seed 1 now explicitly reproduces the first countdown tick and checks RNG
+742760408 on both sides before comparing spawn state. Three pedestrian draws
+between factory completion and this post-tick-1 capture are reproduced, not
+skipped or reseeded. Green closure and subsequent tick RNG remain strict.
+
+Recovered/fixed circular AI lookahead, unbuilt traffic links, the original's
+one-Q8 widening adjustment, explicit recycled-object initialization, and LIFO
+car-pool return order (ascending-position teardown traversal). The receipted
+Napa human 2400-tick capture now passes strict acceptance: every field present
+in that capture is accounted for. This is one scenario, not full parity.
+Expanded City pedestrian/crossing-signal comparison matches through tick 513;
+resource eviction at tick 514 remains open. See the current handoff for exact
+evidence and the uncommitted capture/replay implementation details.
+
+A fresh expanded Napa capture now also exposes graphics resource eviction at
+tick 901. That field was absent from the older passing capture; it remains
+an acceptance gap. Full Debug CTest passes (102 executed, 36 explicit skips).

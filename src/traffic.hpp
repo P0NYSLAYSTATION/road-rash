@@ -65,17 +65,18 @@ int traffic_lane_count(int32_t lanes_q8);
 // One car object. Field comments name the original object offsets
 // (0x004387a0 template copies and 0x0044df60 writes).
 struct TrafficCar {
-    uint8_t kind = 0;                            // +0x1cc
-    uint8_t vehicle = 0;                         // +0x1fc
-    int8_t lane = 0;                             // +0x1e8
-    int32_t position = 0;                        // +0x1c: Q8 samples along the route
-    int32_t lateral = 0;                         // +0x28: Q8 world lateral
-    int32_t speed = 0;                           // +0xec
-    int32_t phase = 0;                           // +0x1c4: (rand & 0x7f) + 0xc0, 192..319
-    uint8_t jitter_a = 0;                        // +0x1c8
-    uint8_t jitter_b = 0;                        // +0x1c9
-    uint8_t jitter_c = 0;                        // +0x1ca
-    uint32_t serial = 0;                         // +0x208 (DAT_004b7e98)
+    uint8_t kind = 0;       // +0x1cc
+    uint8_t vehicle = 0;    // +0x1fc
+    int8_t lane = 0;        // +0x1e8
+    int32_t position = 0;   // +0x1c: Q8 samples along the route
+    int32_t lateral = 0;    // +0x28: Q8 world lateral
+    int32_t speed = 0;      // +0xec
+    int32_t phase = 0;      // +0x1c4: (rand & 0x7f) + 0xc0, 192..319
+    uint8_t jitter_a = 0;   // +0x1c8
+    uint8_t jitter_b = 0;   // +0x1c9
+    uint8_t jitter_c = 0;   // +0x1ca
+    uint32_t serial = 0;    // +0x208 (DAT_004b7e98)
+    uint64_t free_rank = 0; // pool return order; original allocates the most recently returned slot
     bool active = false, pending_remove = false; // marked now, returned by next scheduler prepass
     int32_t last_tick = 0, next_tick = 0, interval = 10, dt = 0; // +0x10/+0xc/+0x14/+0x18
     Bike motion;         // 0x0043adc0 physics words, persistent per pool slot
@@ -242,6 +243,13 @@ class TrafficSystem {
     // Plan 10: append "car.<pool index>.<field>" rows (tests/sim_fields.hpp
     // car_fields) for every pool slot, active or not.
     void append_snapshot(std::vector<FieldValue>& out) const;
+    struct LaneProbe {
+        int32_t right_q8, left_q8, next_right_q8, next_left_q8, previous_right_q8, previous_left_q8;
+        int32_t slot_link = 0;
+    };
+    // The same rolling-slot lane inputs used by plan_speed, exposed for
+    // original-versus-port state comparisons (raw addresses are not portable).
+    LaneProbe lane_probe(const TrafficCar&, const std::vector<RouteSample>&, int32_t front_q8) const;
 
   private:
     void build_slices(const std::vector<RouteSample>& route, int32_t front_q8, int32_t distance_moved,
@@ -268,7 +276,9 @@ class TrafficSystem {
     std::array<int32_t, 4> drift_rates_{}; // 0x00475694[kind] signed byte * 800
     std::vector<TrafficCar> cars_{pool_size};
     std::vector<SoundEventRecord> events_;
-    uint32_t serial_ = 0;       // DAT_004b7e98
+    uint32_t serial_ = 0; // DAT_004b7e98
+    uint64_t free_rank_ = 0;
+    size_t next_free(size_t first, size_t last) const;
     bool spawn_enabled_ = true; // false: nulled-pool solo (draw, never place)
     bool filled_ = false;       // initial ring fill replayed
     int32_t built_end_ = 0;     // ring front sample (exclusive) already built

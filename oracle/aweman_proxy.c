@@ -49,6 +49,7 @@ static FILE* g_record;
 static FILE* g_input;
 static int g_input_exhausted_tick = -1;
 static uint32_t g_sim_frames;
+static uint32_t g_player_human_calls;
 static int g_quit_after = -1;
 static int32_t g_first_tick = -1;
 static int g_solo;
@@ -258,6 +259,11 @@ static void sim_patch_rand_entry(void) {
 }
 
 static long long sim_field_value(uintptr_t base, uint32_t offset, uint8_t width, uint8_t is_signed) {
+    if (width == 2) {
+        if (!readable(base + offset, 2)) return -1;
+        uint16_t v = *(volatile uint16_t*)(base + offset);
+        return is_signed ? (long long)(int16_t)v : (long long)v;
+    }
     if (width == 1) {
         if (!readable(base + offset, 1)) return -1;
         uint8_t v = *(volatile uint8_t*)(base + offset);
@@ -286,6 +292,13 @@ static void dump_terrain_walker(const char* name, uintptr_t outer) {
     rr_log(key, active);
     snprintf(key, sizeof key, "ring.walk.%s.position", name);
     rr_log(key, section && readable(section + 8, 4) ? RD32(section + 8) : -1);
+    if (section && readable(section + 0x10, 0x1c)) {
+        static const uint32_t lane_offsets[] = {8, 0xc, 0x14, 0x18};
+        for (unsigned i = 0; i < sizeof lane_offsets / sizeof lane_offsets[0]; ++i) {
+            snprintf(key, sizeof key, "ring.walk.%s.lane.%x", name, lane_offsets[i]);
+            rr_log(key, RD32(section + 0x10 + lane_offsets[i]));
+        }
+    }
     snprintf(key, sizeof key, "ring.walk.%s.terrain.available", name);
     rr_log(key, available);
     if (!available) return;
@@ -339,6 +352,7 @@ static void dump_sim_tick(void) {
      * 1 = attract-demo AI branch. Read-only; the offline probe elsewhere
      * already save/restores this byte. */
     rr_log("player.demo_hold", (long long)RD8(0x004753c8));
+    if(g_sim&&g_human){rr_log("player.think",0x00434660);rr_log("player.think_count",g_player_human_calls);}
     /* Ring cursors for the +0x5100 offset and zone-density timing check
      * (plan 24 Task 1 Step 2/5): front 0x004b6e50, back 0x0049f240,
      * camera 0x004b6e5c. */
@@ -356,6 +370,11 @@ static void dump_sim_tick(void) {
     if (g_terrain_trace) {
         dump_terrain_walker("back", 0x0049ea20);
         dump_terrain_walker("front", 0x0049ee30);
+        for (int i = 0; i < 4; ++i) {
+            snprintf(key, sizeof key, "family.slot.%d", i);
+            rr_log(key, RD32(0x004b7f10 + 4 * i));
+        }
+        rr_log("family.depth", RD32(0x00476cd8));
     }
     const uintptr_t player = (uint32_t)RD32(0x004642d8);
     int rider_index = 1, node_index = 0;
@@ -436,7 +455,9 @@ static void dump_sim_tick(void) {
                         snprintf(key, sizeof key, "nodeaddr.%d.bike_c0", addr_index);
                         rr_log(key, sim_field_value(node, 0xc0, 1, 0));
                     }
-                    const uintptr_t slice = (uint32_t)sim_field_value(node, 0x2c, 4, 0);
+                    /* +0x2c may be cleared by visibility; +0x140 retains the
+                     * physics slice needed to diagnose initial AI targets. */
+                    const uintptr_t slice = (uint32_t)sim_field_value(node, 0x140, 4, 0);
                     uintptr_t next = (slice && readable(slice + 0x10, 4)) ? (uint32_t)RD32(slice + 0x10) : 0;
                     snprintf(key, sizeof key, "nodeaddr.%d.grid.next", addr_index);
                     rr_log(key, (long long)next);
@@ -660,6 +681,15 @@ static void dump_sim_tick(void) {
                     rr_log(key, sim_field_value(node, extra[e], 4, 1));
                 }
             } else {
+                if (sim_field_value(node, 0xc4, 4, 0) == 0x20) {
+                    static const uint32_t offsets[] = {0x1c, 0x28, 0x18, 0xc, 0x10, 0x14,
+                        0x1c4, 0x1c8, 0x1dc, 0x1e0, 0x1e8, 0x1ec, 0x1f4, 0x1f8, 0x1fc, 0x208, 0x21c};
+                    for (unsigned i = 0; i < sizeof offsets / sizeof offsets[0]; ++i) {
+                        snprintf(key, sizeof key, "ped.%x.%x", node, offsets[i]);
+                        rr_log(key, sim_field_value(node, offsets[i], offsets[i] == 0x1c4 ? 2 :
+                            offsets[i] == 0x1fc ? 1 : 4, 1));
+                    }
+                }
                 snprintf(key, sizeof key, "node.%d.think", node_index);
                 rr_log(key, sim_field_value(node, 0xdc, 4, 0));
                 snprintf(key, sizeof key, "node.%d.position", node_index);
@@ -695,6 +725,13 @@ static void dump_sim_tick(void) {
                         rr_log(key,
                                sim_field_value(node, rr_sim_car_fields[f].offset, rr_sim_car_fields[f].width,
                                                rr_sim_car_fields[f].is_signed));
+                    }
+                    const uintptr_t signal = (uint32_t)sim_field_value(node, 0x1ec, 4, 0);
+                    if (signal && readable(signal, 0xfc)) {
+                        snprintf(key, sizeof key, "ring.%x.signal_position", node);
+                        rr_log(key, sim_field_value(signal, 0x1c, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_index", node);
+                        rr_log(key, sim_field_value(signal, 0xf8, 4, 1));
                     }
                     /* 0x00437e60 branch words (diagnostic-only, not in
                      * rr_sim_car_fields so old goldens still load): +0x2c
@@ -820,6 +857,34 @@ static void capture_police_spawn(void) {
         snprintf(key, sizeof key, "police.spawn.%s.queued", who);
         rr_log(key, (signed char)RD8(obj + 0x82));
     }
+}
+
+// Preserve the original player-think entry and count actual visits to its
+// human-control branch. The five copied entry bytes contain no relative operand.
+typedef uint32_t (__fastcall *rr_player_think_fn)(uintptr_t,uint32_t);
+static rr_player_think_fn g_player_think_original;
+static uint32_t __fastcall rr_player_think_probe(uintptr_t self,uint32_t second){
+    if(RD8(0x004753c8)==0 && RD32(0x004c5d7c)==1)++g_player_human_calls;
+    return g_player_think_original(self,second);
+}
+static int rr_install_player_probe(void){
+    uint8_t* entry=(uint8_t*)(uintptr_t)0x00434660;
+    static const uint8_t expected[5]={0x53,0x56,0x8d,0x59,0x70};
+    if(memcmp(entry,expected,sizeof expected)){
+        if(g_out)fputs("# patch verification failed at player think entry\n",g_out);
+        return 0;
+    }
+    uint8_t* trampoline=VirtualAlloc(NULL,10,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
+    if(!trampoline)return 0;
+    memcpy(trampoline,entry,5);trampoline[5]=0xe9;
+    int32_t jump=(int32_t)((uintptr_t)(entry+5)-(uintptr_t)(trampoline+10));
+    memcpy(trampoline+6,&jump,4);
+    DWORD old;
+    if(!VirtualProtect(entry,5,PAGE_EXECUTE_READWRITE,&old)){VirtualFree(trampoline,0,MEM_RELEASE);return 0;}
+    g_player_think_original=(rr_player_think_fn)trampoline;
+    entry[0]=0xe9;jump=(int32_t)((uintptr_t)rr_player_think_probe-(uintptr_t)(entry+5));memcpy(entry+1,&jump,4);
+    VirtualProtect(entry,5,old,&old);FlushInstructionCache(GetCurrentProcess(),NULL,0);
+    return 1;
 }
 
 /* Per-step hook at 0x0044b324 (call 0x0044b3b0). The tick counters increment
@@ -4398,6 +4463,7 @@ static int rr_install_hooks(void) {
             return 0;
         }
     }
+    if(g_sim&&g_human&&!rr_install_player_probe())return 0;
     for (unsigned i = 0; i < count; ++i) {
         if (!rr_patch_call((uint8_t*)(uintptr_t)calls[i].site, calls[i].target, calls[i].hook)) {
             // Restore any earlier call sites on a protection failure.
@@ -4416,11 +4482,61 @@ static int rr_install_hooks(void) {
     return 1;
 }
 
+
+/* Native capture uses the working installation's files, with its registry
+ * settings copied into a per-run user key. Only this executable's IAT is
+ * redirected; installed game settings and machine registry are untouched. */
+static char g_native_registry[240];
+static LSTATUS WINAPI rr_native_regopen(HKEY root,LPCSTR name,DWORD options,REGSAM access,PHKEY output) {
+    int game_key=name && !_stricmp(name,"SOFTWARE\\Electronic Arts\\RoadRash 95");
+    LSTATUS result=game_key && g_native_registry[0]
+        ? RegOpenKeyExA(HKEY_CURRENT_USER,g_native_registry,options,access,output)
+        : RegOpenKeyExA(root,name,options,access,output);
+    if(game_key && g_out){fprintf(g_out,"# startup registry open root=%p access=%08lx result=%ld redirected=%d\n",(void*)root,(unsigned long)access,(long)result,g_native_registry[0]!=0);fflush(g_out);}
+    return result;
+}
+static LSTATUS WINAPI rr_native_regcreate(HKEY root,LPCSTR name,DWORD reserved,LPSTR cls,DWORD options,REGSAM access,LPSECURITY_ATTRIBUTES security,PHKEY output,LPDWORD disposition) {
+    if(name && !_stricmp(name,"SOFTWARE\\Electronic Arts\\RoadRash 95"))
+        return RegCreateKeyExA(HKEY_CURRENT_USER,g_native_registry,reserved,cls,options,access,security,output,disposition);
+    return RegCreateKeyExA(root,name,reserved,cls,options,access,security,output,disposition);
+}
+static int WINAPI rr_native_message(HWND owner,LPCSTR text,LPCSTR title,UINT type) {
+    if(g_out){fprintf(g_out,"# startup dialog: %s: ",title?title:"");if(text)for(const char* p=text;*p;++p)fputc(*p=='\r'||*p=='\n'?' ':*p,g_out);fputc('\n',g_out);fflush(g_out);}
+    return IDOK;
+}
+static int rr_native_import(const char* name,void* replacement) {
+    unsigned char* module=(unsigned char*)GetModuleHandleA(NULL);
+    IMAGE_DOS_HEADER* dos=(IMAGE_DOS_HEADER*)module;
+    IMAGE_NT_HEADERS32* nt=(IMAGE_NT_HEADERS32*)(module+dos->e_lfanew);
+    IMAGE_IMPORT_DESCRIPTOR* descriptors=(IMAGE_IMPORT_DESCRIPTOR*)(module+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    for(;descriptors->Name;++descriptors){
+        IMAGE_THUNK_DATA32* lookup=(IMAGE_THUNK_DATA32*)(module+(descriptors->OriginalFirstThunk?descriptors->OriginalFirstThunk:descriptors->FirstThunk));
+        IMAGE_THUNK_DATA32* address=(IMAGE_THUNK_DATA32*)(module+descriptors->FirstThunk);
+        for(;lookup->u1.AddressOfData;++lookup,++address){
+            if(IMAGE_SNAP_BY_ORDINAL32(lookup->u1.Ordinal))continue;
+            IMAGE_IMPORT_BY_NAME* symbol=(IMAGE_IMPORT_BY_NAME*)(module+lookup->u1.AddressOfData);
+            if(strcmp((const char*)symbol->Name,name))continue;
+            DWORD old;if(!VirtualProtect(&address->u1.Function,sizeof(DWORD),PAGE_READWRITE,&old))return 0;
+            address->u1.Function=(DWORD)(uintptr_t)replacement;
+            VirtualProtect(&address->u1.Function,sizeof(DWORD),old,&old);return 1;
+        }
+    }return 0;
+}
+static int rr_native_context(void){
+    GetEnvironmentVariableA("RR_ORACLE_REGISTRY_KEY",g_native_registry,sizeof g_native_registry);
+    if(!rr_native_import("RegOpenKeyExA",rr_native_regopen)||!rr_native_import("RegCreateKeyExA",rr_native_regcreate))return 0;
+    if(getenv("RR_ORACLE_NONINTERACTIVE")&&!rr_native_import("MessageBoxA",rr_native_message))return 0;
+    return 1;
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     (void)inst;
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
-        char path[MAX_PATH];
+        char path[MAX_PATH], exe_sha[65];
+        env("RR_ORACLE_EXE_SHA256",exe_sha,sizeof exe_sha,"73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2");
+        if(strlen(exe_sha)!=64)return FALSE;
+        for(int i=0;i<64;++i)if(!strchr("0123456789abcdef",exe_sha[i]))return FALSE;
         env("RR_ORACLE_OUT", path, sizeof path, "C:\\oracle.tsv");
         memcpy(g_output, path, sizeof path);
         env("RR_ORACLE_SCENARIO", g_scenario, sizeof g_scenario, "unnamed");
@@ -4430,12 +4546,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             fprintf(
                 g_out,
                 "# rr-oracle "
-                "1\nexe\t73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2\nscenario\t%s\n",
-                g_scenario);
+                "1\nexe\t%s\nscenario\t%s\n",
+                exe_sha,g_scenario);
         }
-        HMODULE real = LoadLibraryA("AWEMAN_REAL.DLL");
+#ifndef RR_EMBEDDED_CAPTURE
+        const int embedded_capture = getenv("RR_ORACLE_EMBEDDED") && atoi(getenv("RR_ORACLE_EMBEDDED"));
+        HMODULE real = embedded_capture ? NULL : LoadLibraryA("AWEMAN_REAL.DLL");
         g_real2 = real ? (void*)GetProcAddress(real, MAKEINTRESOURCEA(2)) : NULL;
-        if (!g_real2) {
+        if (!embedded_capture && !g_real2) {
             if (g_out) {
                 fputs("# AWEMAN_REAL.DLL ordinal 2 not found\n", g_out);
                 fclose(g_out);
@@ -4443,7 +4561,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             }
             return FALSE;
         }
-        if (!rr_install_hooks()) {
+#endif
+        if (!rr_native_context() || !rr_install_hooks()) {
             if (g_out) {
                 fclose(g_out);
                 g_out = NULL;

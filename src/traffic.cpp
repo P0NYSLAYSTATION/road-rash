@@ -157,6 +157,13 @@ TrafficSystem::TrafficSystem(const VehicleLibrary& library, std::vector<uint8_t>
     sprite_size_ = car_template[0x28]; // car template size class (+0x160 copy)
 }
 
+size_t TrafficSystem::next_free(size_t first, size_t last) const {
+    size_t choice = last;
+    for (size_t i = first; i < last; ++i)
+        if (!cars_[i].active && (choice == last || cars_[i].free_rank > cars_[choice].free_rank)) choice = i;
+    return choice;
+}
+
 bool TrafficSystem::place(uint8_t kind, int8_t lane, const RouteSample& at, int32_t spawn_q8,
                           const std::function<uint32_t()>& random) {
     if (net_) {
@@ -175,12 +182,15 @@ bool TrafficSystem::place(uint8_t kind, int8_t lane, const RouteSample& at, int3
     // Plan 34 C3: with several windows each places into its own 16 slots.
     const size_t first = windows_.size() > 1 ? pool_size * size_t(building_seat_) : 0;
     const size_t last = windows_.size() > 1 ? std::min(cars_.size(), first + pool_size) : cars_.size();
-    for (size_t slot = first; slot < last; ++slot) {
+    for (size_t slot = next_free(first, last); slot < last; ++slot) {
         auto& car = cars_[slot];
         if (car.active) continue;
         // 0x0044df60 (kind bit 0 clear): lateral from the road centre.
+        const Bike previous_motion = car.motion;
         car = TrafficCar{};
+        car.motion = previous_motion; // 0x00438a80 recycles without clearing the object.
         init_object(car.motion, car_template_);
+        car.motion.i32(0x1f8) = 0; // 0x0044e1e7: contact pause is explicitly reset.
         car.interval = car_template_[2];
         car.next_tick = int32_t(tick_);
         car.last_tick = int32_t(tick_) - car.interval;
@@ -283,7 +293,40 @@ static int32_t ring_slot_sample(int32_t sample, int32_t front_q8, int32_t sample
     const int32_t built_end = std::clamp(front_q8 >> 8, int32_t(0), samples);
     int32_t s = sample;
     while (s + 128 < built_end) s += 128;
+    // A slot at or beyond the front has not been rebuilt yet. Its link
+    // still exposes the previous lap, not future route geometry.
+    while (s >= built_end) s -= 128;
     return std::clamp(s, int32_t(0), samples - 1);
+}
+
+TrafficSystem::LaneProbe TrafficSystem::lane_probe(const TrafficCar& car,
+                                                   const std::vector<RouteSample>& route,
+                                                   int32_t front_q8) const {
+    const int32_t size = int32_t(route.size());
+    const int32_t sample = std::clamp(car.position, int32_t(0), int32_t((route.size() - 1) * 256)) >> 8;
+    auto at = [&](int32_t index) {
+        const int32_t slot = ring_slot_sample(index, front_q8, size);
+        PathSample value = route[size_t(slot)].path;
+        // 0x004547e0 updates a previous slice when its forward neighbour
+        // is built. At an integral lane width, widening nudges the lane
+        // word by one Q8 unit; physical edge coordinates are unchanged.
+        if (slot + 1 < (front_q8 >> 8) && slot + 1 < size) {
+            const auto& forward = route[size_t(slot + 1)].path;
+            if ((value.right_q8 & 255) == 0 && forward.right_q8 > value.right_q8) ++value.right_q8;
+            if ((value.left_q8 & 255) == 0 && forward.left_q8 > value.left_q8) ++value.left_q8;
+        }
+        return value;
+    };
+    const auto current = at(sample);
+    const auto next = at(sample + 1);
+    const auto previous = at(sample - 1);
+    return {current.right_q8,
+            current.left_q8,
+            next.right_q8,
+            next.left_q8,
+            previous.right_q8,
+            previous.left_q8,
+            0};
 }
 
 std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std::vector<RouteSample>& route,
@@ -412,14 +455,10 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
     // non-strict bound (count <= lane is outside); kind 2 uses a
     // strict bound (count < -lane is outside).
     if (!(kind & 1)) {
-        const int32_t nsamples = int32_t(route.size());
-        auto slot_sample = [&](int32_t s) { return ring_slot_sample(s, front_q8, nsamples); };
-        const RouteSample& slot_at = route[size_t(slot_sample(int32_t(sample)))];
-        const RouteSample& link_at = route[size_t(slot_sample(int32_t(sample) + (kind == 0 ? 1 : -1)))];
-        const int32_t right = div256(slot_at.path.right_q8); // +0x2c
-        const int32_t left = div256(slot_at.path.left_q8);   // +0x30
-        const int32_t link_right = div256(link_at.path.right_q8);
-        const int32_t link_left = div256(link_at.path.left_q8);
+        const auto probe = lane_probe(car, route, front_q8);
+        const int32_t right = div256(probe.right_q8), left = div256(probe.left_q8);
+        const int32_t link_right = div256(kind == 0 ? probe.next_right_q8 : probe.previous_right_q8);
+        const int32_t link_left = div256(kind == 0 ? probe.next_left_q8 : probe.previous_left_q8);
         const int lane = int(car.lane);
         const bool bad_first = kind == 0 ? (lane < 0 || right <= lane) : (lane >= 0 || left < -lane);
         if (bad_first) {
@@ -790,10 +829,14 @@ void TrafficSystem::place_crossing(const IntersectionController& c, int signal, 
     const auto& at = route[size_t(s)];
     const int vehicle = library_->choose(uint8_t(kind), random());
     if (vehicle < 0) return;
-    for (auto& car : cars_) {
+    for (size_t slot = next_free(0, cars_.size()); slot < cars_.size(); ++slot) {
+        auto& car = cars_[slot];
         if (car.active) continue;
+        const Bike previous_motion = car.motion;
         car = TrafficCar{};
+        car.motion = previous_motion;
         init_object(car.motion, car_template_);
+        car.motion.i32(0x1f8) = 0;
         car.interval = car_template_[2];
         car.next_tick = int32_t(tick_);
         car.last_tick = int32_t(tick_) - car.interval;
@@ -856,11 +899,19 @@ bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_
     if (scheduled_tick_ && *scheduled_tick_ == tick) return false;
     scheduled_tick_ = tick;
     tick_ = tick;
-    for (auto& car : cars_)
-        if (car.pending_remove) {
-            car.active = false;
-            car.pending_remove = false;
-        }
+    std::vector<size_t> returning;
+    for (size_t i = 0; i < cars_.size(); ++i)
+        if (cars_[i].pending_remove) returning.push_back(i);
+    std::stable_sort(returning.begin(), returning.end(),
+                     [&](size_t a, size_t b) { return cars_[a].position < cars_[b].position; });
+    for (size_t i : returning) {
+        auto& car = cars_[i];
+        car.active = false;
+        car.pending_remove = false;
+        // 00438c20 -> 00438a60 appends before the pool end;
+        // 00438a80 pops that end again (a stack, not first inactive).
+        car.free_rank = ++free_rank_;
+    }
     for (auto& c : controllers_)
         if (c.active && c.pending_remove) {
             for (int k = 0; k < 4; ++k)

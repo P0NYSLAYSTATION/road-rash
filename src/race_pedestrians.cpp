@@ -206,11 +206,15 @@ void Race::load_pedestrian_looks() {
     // resources on its first drawn frame, after that tick's sim step. The
     // think gate at 0x00440eff reads the still-unloaded +0x208/+0x21c words
     // until then and passes via +0x1e0 == 0 (plan 10 napa-field-l5 measured
-    // the resulting tick-1 rand() draw). Every spawn lands inside the camera
-    // ring window, so one end-of-tick load pass models that render.
+    // the resulting tick-1 rand() draw). Ring residency extends beyond the
+    // drawn window: far pedestrians must retain unloaded behavior until
+    // their slice reaches the frame's draw horizon.
     if (!pedestrians_) return;
     for (auto& p : pedestrians_->pool()) {
         if (!p.active || p.look) continue;
+        const int32_t camera = ring_ ? ring_->front_q8() - 0x5000 : int32_t(camera_position());
+        const int32_t slice = p.body.bike.i32(0x1c) & ~0xff;
+        if (slice > camera + 0x1e00) continue;
         const auto& road = route_of(p.body);
         p.look = pedestrians_->look(road[std::min(p.body.sample, road.size() - 1)], p.selector);
         if (p.look) { // 0x00440b80

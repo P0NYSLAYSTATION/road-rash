@@ -104,6 +104,54 @@ struct FieldReplay {
         }
         return true;
     }
+    std::map<const Pedestrian*, std::array<bool, 3>> previous_ped_looks;
+    void pedestrians(const std::map<std::string, int64_t>& f) {
+        if (!setup.instance.pedestrians) return;
+        for (const auto& [key, serial] : f) {
+            if (key.rfind("ped.", 0) != 0 || !key.ends_with(".1c4")) continue;
+            const std::string prefix = key.substr(0, key.size() - 3);
+            const Pedestrian* native = nullptr;
+            for (const auto& candidate : setup.instance.pedestrians->pool())
+                if (candidate.active && candidate.serial == uint16_t(serial) &&
+                    (f.count(prefix + "1c8")
+                         ? candidate.anchor == f.at(prefix + "1c8")
+                         : std::abs(int64_t(candidate.anchor) - f.at(prefix + "1c")) <= 511))
+                    native = &candidate;
+            if (!native) {
+                fail(prefix + "missing native pedestrian");
+                return;
+            }
+            const auto& p = *native;
+            const auto& b = p.body.bike;
+            for (const auto& [field, value] :
+                 std::array<std::pair<const char*, int64_t>, 14>{{{"1c", b.i32(0x1c)},
+                                                                  {"28", b.i32(0x28)},
+                                                                  {"18", b.i32(0x18)},
+                                                                  {"c", p.next_tick},
+                                                                  {"10", p.last_tick},
+                                                                  {"14", b.i32(0x14)},
+                                                                  {"1c4", p.serial},
+                                                                  {"1c8", p.anchor},
+                                                                  {"1dc", p.selector},
+                                                                  {"1e8", p.state},
+                                                                  {"1ec", p.side},
+                                                                  {"1f4", p.pace},
+                                                                  {"1f8", p.trigger},
+                                                                  {"1fc", p.lane}}})
+                if (f.count(prefix + field)) check(f, prefix + field, value);
+            // Capture is before the frame draw; native resource preparation
+            // is at the previous tick's end. Compare matching boundaries.
+            const auto previous = previous_ped_looks[&p];
+            for (size_t i = 0; i < 3; ++i) {
+                const auto it = f.find(prefix + std::array{"1e0", "208", "21c"}[i]);
+                if (it == f.end()) continue;
+                used.insert(it->first);
+                if ((it->second != 0) != previous[i]) fail(it->first + " resource availability differs");
+            }
+        }
+        for (const auto& p : setup.instance.pedestrians->pool())
+            if (p.active) previous_ped_looks[&p] = {p.loaded(), p.has(0), p.has(5)};
+    }
     void check(const std::map<std::string, int64_t>& f, const std::string& key, int64_t native) {
         if (all && !diff.empty()) {
             const auto it = f.find(key);
@@ -378,6 +426,12 @@ struct FieldReplay {
             check(f, p + "anim_deadline", int32_t(r.ride_animation.deadline));
         }
         if (player) {
+            if (f.count(p + "half_1c")) {
+                const auto& body = r.crash_actor.motion;
+                check(f, p + "half_1c", r.crash_active ? body.i32(0x1c) : r.half_mirror.position);
+                check(f, p + "half_28", r.crash_active ? body.i32(0x28) : r.half_mirror.lateral);
+                check(f, p + "half_ec", r.crash_active ? body.i32(0xec) : r.half_mirror.speed);
+            }
             check(f, p + "stamina_max", r.stamina.max);
             check(f, p + "stamina_current", r.stamina.current);
             check(f, "nitro.charge", r.nitro_charge);
@@ -458,6 +512,68 @@ struct FieldReplay {
                 check(f, p + "vehicle", active[i]->vehicle);
                 check(f, p + "lane", active[i]->lane);
                 check(f, p + "phase", active[i]->phase);
+                const auto& car = *active[i];
+                auto extra = [&](const char* field, int64_t value) {
+                    if (f.count(p + field)) check(f, p + field, value);
+                };
+                extra("sched_next", car.next_tick);
+                extra("sched_last", car.last_tick);
+                extra("sched_interval", car.interval);
+                extra("sched_dt", car.dt);
+                extra("vel108", car.motion.i32(0x108));
+                extra("pause1f8", car.motion.i32(0x1f8));
+                extra("x1e9", car.motion.u8(0x1e9));
+                // +0x2c/+0x140 are pointers to the same rolling road slice
+                // (00438930/004387a0). Verify the association and circular
+                // neighbour links, then compare the actual lane words below.
+                if (f.count(p + "w140")) {
+                    const int64_t slice = f.at(p + "w140");
+                    used.insert(p + "w140");
+                    if (!slice) fail(p + "w140 is null for a native live car");
+                    if (f.count(p + "w2c")) {
+                        used.insert(p + "w2c");
+                        if (f.at(p + "w2c") != slice) fail(p + "road-slice aliases differ");
+                    }
+                    // 004553a9 builds 128 slots with stride 0x2f8;
+                    // next/back pointers wrap around that ring.
+                    for (const auto& [field, direction] :
+                         std::array<std::pair<const char*, int>, 2>{{{"lk8", 1}, {"lk18", -1}}}) {
+                        if (!f.count(p + field)) continue;
+                        used.insert(p + field);
+                        auto modulo = [](int64_t value) {
+                            constexpr int64_t n = 128 * 0x2f8;
+                            return (value % n + n) % n;
+                        };
+                        if (modulo(f.at(p + field) - slice) != modulo(direction * 0x2f8))
+                            fail(p + field + " does not name the expected adjacent ring slot");
+                    }
+                    const auto probe = setup.instance.traffic->lane_probe(car, race().route_for(0),
+                                                                          setup.instance.ring->front_q8());
+                    extra("sl2c", probe.right_q8);
+                    extra("sl30", probe.left_q8);
+                    extra("s28v", probe.slot_link);
+                    extra("lk8_2c", probe.next_right_q8);
+                    extra("lk8_30", probe.next_left_q8);
+                    extra("lk18_2c", probe.previous_right_q8);
+                    extra("lk18_30", probe.previous_left_q8);
+                }
+                // 00438976 copies template word +0x18 to callback +0xe8.
+                // Ordinary cars have a null mark callback; non-null callbacks
+                // need an explicit native implementation, never pointer equality.
+                extra("we8", 0);
+                if (const auto signal = f.find(p + "signal"); signal != f.end()) {
+                    if (signal->second == 0)
+                        check(f, p + "signal", car.signal < 0 ? 0 : 1);
+                    else if (f.count(p + "signal_position") && f.count(p + "signal_index") &&
+                             car.signal >= 0 &&
+                             size_t(car.signal) < setup.instance.traffic->signals().size()) {
+                        used.insert(p + "signal");
+                        const auto& native_signal = setup.instance.traffic->signals()[size_t(car.signal)];
+                        check(f, p + "signal_position", native_signal.position_q8);
+                        check(f, p + "signal_index", native_signal.index);
+                    } else
+                        fail(p + "signal identity requires a captured signal position");
+                }
             } else {
                 // Legacy probe used decompiler int-pointer element indices
                 // as byte offsets. These four aliases are capture defects,
@@ -599,6 +715,7 @@ struct FieldReplay {
             if (!diff.empty() && diff.find(" (native rider ") == std::string::npos)
                 diff += " (native rider " + std::to_string(native_slots[k].first) + ")";
         }
+        if (diff.empty()) pedestrians(f);
         if (diff.empty()) cars(f);
         if (diff.empty()) nodes(f);
         if (diff.empty()) sched_and_ring(f);
@@ -610,6 +727,18 @@ struct FieldReplay {
 
     int run() {
         const auto& h = g.frames.at(0);
+        // The first captured frame is POST tick 1, not factory completion.
+        // Reproduce its countdown consumers before auditing the two streams.
+        race().set_ticks(int32_t(tick0 - 1));
+        const uint32_t rng_before = race().rng_state();
+        race().countdown_step();
+        const uint32_t captured_rng = uint32_t(h.at("rng"));
+        std::cout << "RNG first-frame audit: seed " << h.at("seed") << " native " << race().rng_state()
+                  << " original " << captured_rng << '\n';
+        if (race().rng_state() != captured_rng) {
+            std::cout << "first divergence at frame 0: RNG initialization/countdown does not match\n";
+            return 1;
+        }
         // Spawn placement: every native bike sits on its captured node lateral.
         std::map<int64_t, int64_t> captured;
         for (const auto& [key, value] : h) {
@@ -626,16 +755,19 @@ struct FieldReplay {
                           << " lateral original "
                           << (c == captured.end() ? std::string("missing") : std::to_string(c->second))
                           << " native " << r.bike.i32(0x28) << '\n';
+                const auto& route = race().route_for(size_t(&r - race().riders().data()));
+                std::cout << "spawn sample " << r.sample << ": next bends";
+                for (size_t j = r.sample + 1; j < route.size() && j <= r.sample + 8; ++j)
+                    std::cout << ' ' << route[j].path.bend;
+                std::cout << '\n';
                 return 1;
             }
         }
         identity = rider_node_identities(h, race().riders());
         // Frame 0 is post tick 1: run the build tick natively, then every
         // countdown tick, comparing each frame.
-        race().set_ticks(int32_t(tick0 - 1));
-        const uint32_t rng_before = race().rng_state();
         for (size_t i = 0; i < green; ++i) {
-            race().countdown_step();
+            if (i != 0) race().countdown_step();
             if (frame(i)) return 1;
         }
         if (closure_factory_end && closure_anchor) {
@@ -729,6 +861,8 @@ struct FieldReplay {
                                                     "probe.player",
                                                     "probe.frozen_words",
                                                     "player.demo_hold",
+                                                    "player.think",
+                                                    "player.think_count",
                                                     "ring.car_schema"};
         std::map<std::string, size_t> extras;
         for (const auto& [key, value] : g.frames.back()) {

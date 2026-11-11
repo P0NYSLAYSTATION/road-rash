@@ -416,6 +416,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
     }
     // 4b. Rider build draws (0x00405600 after the ring): lanes, name roll.
     race->build_draws();
+    if (out.pedestrians) out.pedestrians->reset_serial();
     // 5. Finish line + terrain source.
     race->set_finish_q8(int32_t(assets.bounds.finish_position_q8));
     if (config.live_schedule && !config.solo) race->set_live_schedule(true);

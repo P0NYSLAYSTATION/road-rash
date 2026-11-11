@@ -256,6 +256,26 @@ static void test_lane_validity_stop() {
 // ring front (mod-128 slots, verified against dumped proxy words on
 // L5e). On a course that narrows to one lane, a behind-back car
 // reads its slot sample, not its current sample.
+static void test_recycled_pool_order() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    std::vector<rr::RouteSample> route(400, lane_sample(512, 512));
+    auto& cars = system.cars_mut();
+    for (auto& car : cars) {
+        car.active = true;
+        car.next_tick = 1000;
+    }
+    // Original prepass follows ascending-position links. Both objects
+    // return on the same tick; allocation pops the last returned object.
+    cars[0].position = 100;
+    cars[1].position = 200;
+    cars[0].pending_remove = cars[1].pending_remove = true;
+    system.step(route, 120 * 256, 200 * 256, 100, 120 * 256, 0, [] { return 1u; }, 1);
+    if (!cars[1].active || cars[1].serial != 1)
+        throw std::runtime_error("car pool must reuse the last returned slot, not the first inactive");
+}
+
 static void test_lane_validity_linked_slots() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem system(library, synthetic_exe());
@@ -270,6 +290,26 @@ static void test_lane_validity_linked_slots() {
         route[size_t(s)].path.left_q8 = route[size_t(s)].path.right_q8 = 0x100;
     }
     const int32_t front = 200 * 256, back = front - 0x8000, camera = front - 0x5000;
+    // Native original capture tick 220: car at 136, front in 137. The
+    // forward link still contains sample 9, whose two lanes differ from
+    // the not-yet-built sample 137's single lane.
+    {
+        auto probe_route = route;
+        probe_route[137].path.right_q8 = probe_route[137].path.left_q8 = 256;
+        rr::TrafficCar probe_car;
+        probe_car.position = 136 * 256;
+        const auto p = system.lane_probe(probe_car, probe_route, 137 * 256 + 10);
+        if (p.next_right_q8 != 512 || p.next_left_q8 != 512)
+            throw std::runtime_error("unbuilt forward link must retain previous-lap geometry");
+        // City tick 460: widening slice 159 changes slice 158's integral
+        // left lane word 512 to 513 (0x0045484c), after it is built.
+        probe_route[158].path.left_q8 = 512;
+        probe_route[159].path.left_q8 = 533;
+        probe_car.position = 158 * 256;
+        if (system.lane_probe(probe_car, probe_route, 159 * 256).left_q8 != 512 ||
+            system.lane_probe(probe_car, probe_route, 160 * 256).left_q8 != 513)
+            throw std::runtime_error("widening must nudge the preceding integral lane word after build");
+    }
     auto drive_at = [&](uint8_t kind, int8_t lane, int32_t sample, int32_t speed) {
         system.begin_schedule(route, front, random, 1);
         auto& car = system.cars_mut()[0];
@@ -1125,6 +1165,7 @@ int main() {
         test_configure();
         test_lane_count();
         test_library_choose();
+        test_recycled_pool_order();
         test_deferred_car_teardown();
         test_countdown_timers();
         test_countdown_initial_fill();

@@ -2561,8 +2561,19 @@ int32_t Race::curvature(const Rider& r, size_t sample, int samples) const {
     // 0x00449b40: average of sub-slice +0xb4 (atan(bend) << 14, 0x00454240) over the next samples.
     const auto& route = route_of(r);
     int64_t sum = 0;
-    for (int k = 0; k < samples && sample + size_t(k) < route.size(); ++k)
-        sum += wrap_angle(atan_ratio(tables_, route[sample + size_t(k)].path.bend) * (1 << 14));
+    for (int k = 0; k < samples && sample + size_t(k) < route.size(); ++k) {
+        int32_t slot_sample = int32_t(sample) + k;
+        if (ring_) {
+            // 0x00449b40 follows circular slice links, not future course
+            // data. At the front edge these slots still hold the prior lap
+            // (City grid sample 123 reads slots 124..129, then 2 and 3).
+            const int32_t end = ring_->front_q8() >> 8;
+            while (slot_sample + 128 < end) slot_sample += 128;
+            while (slot_sample >= end) slot_sample -= 128;
+            slot_sample = std::clamp(slot_sample, 0, int32_t(route.size()) - 1);
+        }
+        sum += wrap_angle(atan_ratio(tables_, route[size_t(slot_sample)].path.bend) * (1 << 14));
+    }
     return int32_t(sum / samples);
 }
 

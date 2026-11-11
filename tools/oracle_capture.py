@@ -23,7 +23,7 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
     for line in lines[1:]:
         if not line or line.startswith('#'):
             if any(x in line.lower() for x in ['patch verification failed', 'patch installation failed',
-                                               'ordinal 2 not found', 'invalid rr_oracle']):
+                                               'ordinal 2 not found', 'invalid rr_oracle', 'startup dialog:']):
                 raise ValueError('oracle instrumentation failure: ' + line)
             continue
         if ended:
@@ -67,6 +67,11 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
     branches = {f.get('player.demo_hold') for f in frames}
     # Evidence comes from instrumented values in the trace, never an env flag/name.
     branch = 'human' if branches == {0} else 'demo' if branches == {1} else 'unverified'
+    if branch == 'human' and header['exe'] == 'b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563':
+        counts=[f.get('player.think_count',-1) for f in frames]
+        measured=all(f.get('player.think')==0x00434660 for f in frames)
+        if not measured or min(counts)<0 or max(counts)<=0 or counts!=sorted(counts):
+            branch='unverified'
     return {'schema': 'rr-oracle 1', 'exe_sha256': header['exe'],
             'scenario': header['scenario'], 'frames': len(frames), 'tick_start': tick0,
             'tick_end': frames[-1].get('tick'), 'seed': frames[0].get('seed'),
@@ -110,9 +115,8 @@ def publish_capture(trace, output, receipt, companions=()):
 
 def capture(args):
     if os.name == 'nt':
-        # The capture builds a Wine prefix (dosdevices symlinks) around the
-        # original executable; it runs on macOS/Linux hosts only (plan 33b).
-        raise SystemExit('oracle_capture: Wine-prefix captures run on macOS or Linux hosts, not Windows')
+        from oracle_windows import capture as capture_native
+        return capture_native(args)
     workspace = args.workspace.resolve()
     prefix = args.prefix.resolve() if args.prefix else workspace / 'prefix'
     install = args.install.resolve() if args.install else prefix / 'drive_c/ElectronicArts/RoadRashOracle'
@@ -233,6 +237,7 @@ def main():
     c.add_argument('--prefix', type=Path)
     c.add_argument('--install', type=Path)
     c.add_argument('--wine', type=Path)
+    c.add_argument('--live-hooks',type=Path,help='Add hooks to the working installation AWEMAN DLL, with backup and restoration')
     c.add_argument('--output', type=Path)
     c.add_argument('--timeout', type=float, default=600)
     c.add_argument('--session', default='oracle-capture')

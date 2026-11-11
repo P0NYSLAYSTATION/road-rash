@@ -106,6 +106,14 @@ void init_object(Bike& b, const std::array<int32_t, 26>& w) {
     b.i32(0x1a4) = w[22];
     b.i32(0x1a8) = w[23];
     b.i32(0x1ac) = w[24];
+    // 0x0043886a..0x00438924 resets these words on every allocation.
+    // In particular +0x108/+0x10c are NOT reset: recycled pool objects
+    // retain their previous velocity until the first movement update.
+    for (int offset : {0x198, 0x188, 0x18c, 0x184, 0xf0,  0xf4,  0xec,  0xf8,  0xfc,  0x114, 0x118,
+                       0x120, 0x124, 0x128, 0x130, 0x158, 0x144, 0x1b0, 0x100, 0x104, 0x12c, 0x15c})
+        b.i32(offset) = 0;
+    b.u8(0x1bc) = 0;
+    b.u8(0x164) = 0;
     b.i32(0x11c) = -0x25;
 }
 

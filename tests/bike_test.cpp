@@ -11,6 +11,23 @@ int main() {
         }
     };
 
+    // Recycled object observed at original tick 1780: speed is cleared but
+    // velocity +0x108 still holds 1540 from its previous lifetime.
+    {
+        rr::Bike reused;
+        reused.i32(0xec) = reused.i32(0x108) = 1540;
+        reused.i32(0x10c) = -237;
+        reused.i32(0x104) = 77;
+        reused.i32(0x118) = 99;
+        reused.i32(0x128) = 456;
+        rr::init_object(reused, {});
+        check(reused.i32(0xec) == 0 && reused.i32(0x104) == 0 && reused.i32(0x118) == 0 &&
+                  reused.i32(0x128) == 0,
+              "object reuse clears original initialization words");
+        check(reused.i32(0x108) == 1540 && reused.i32(0x10c) == -237,
+              "object reuse preserves velocity until movement");
+    }
+
     // Synthetic spec: gear table and rates chosen so the arithmetic is easy to follow.
     rr::BikeSpec spec{};
     spec.d[1] = -800;
