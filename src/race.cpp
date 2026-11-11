@@ -439,6 +439,20 @@ void Race::cross_sample(Rider& r, int32_t delta) {
             const int32_t half0_right = a.offset + a.path.right;
             if ((b.i32(0x28) >> 8) >= half0_right) r.route = 1;
         }
+        // 0x00439390 -> 0x004540e0: committing to half 0 also
+        // updates the lookahead walkers, even when the route stays 0.
+        // Each native human seat owns its own ring (plan 34).
+        if (human(r) && size_t(r.human) < rings_.size() && rings_[size_t(r.human)]) {
+            const auto& chosen = route_of(r)[r.sample];
+            const auto& before = route_of(r)[from_sample];
+            const bool forward_split = int32_t(to) > int32_t(from) && chosen.event == RoadEvent::split;
+            const bool backward_merge = int32_t(to) < int32_t(from) && before.event == RoadEvent::merged;
+            if ((forward_split || backward_merge) && chosen.dual) {
+                const int32_t half0_right = chosen.half == 0 ? chosen.offset + chosen.path.right
+                                                             : chosen.other_offset + chosen.other.right;
+                rings_[size_t(r.human)]->commit_branch(uint8_t((b.i32(0x28) >> 8) >= half0_right));
+            }
+        }
     }
     accumulate(r, from, to, from_sample, r.sample);
 }
@@ -1318,17 +1332,17 @@ void Race::contact_half_static(Rider& detached, Rider& owner, Rider& other) {
             s.i32(0xf4) = speed < 501 ? 0 : std::abs(s.i32(0xf4) / 2) + speed / 16;
             s.i32(0xec) -= s.i32(0xec) / 4;
             if (animation.animation != 33 && animation.animation != 29) {
-                set_animation_with_fallback(animation, library.playback[0], 28, uint32_t(ticks_),
+                set_animation_with_fallback(animation, crash_bank(owner), 28, uint32_t(ticks_),
                                             library.fallback);
-                queue_animation_with_fallback(animation, library.playback[0], 28, library.fallback);
+                queue_animation_with_fallback(animation, crash_bank(owner), 28, library.fallback);
             }
             if (s.i32(0xf4) > 0x150) s.i32(0xf4) = 0x150;
             if (owner.bike.i32(0x2f4) == 2 && o.i32(0xec) > 1700) {
                 s.i32(0xec) += o.i32(0xec) / 4;
                 owner.bike.i32(0x2f4) = 1;
-                set_animation_with_fallback(animation, library.playback[0], 34, uint32_t(ticks_),
+                set_animation_with_fallback(animation, crash_bank(owner), 34, uint32_t(ticks_),
                                             library.fallback);
-                queue_animation_with_fallback(animation, library.playback[0], 38, library.fallback);
+                queue_animation_with_fallback(animation, crash_bank(owner), 38, library.fallback);
             }
             if (human(owner) && s.i32(0xec) >= 2001)
                 sound(SoundEvent((random() & 1) + (s.i32(0xec) >= 6001 ? 4 : 3)), s);
@@ -1762,8 +1776,8 @@ void Race::crash_entry(Rider& r, int32_t reason, std::optional<std::array<int32_
         // the motion set (split-left 2056: body +0x16c/+0x140 spec words
         // were stale zeros, skewing the body vertical vs the original).
         r.crash_actor.motion = r.half_object;
-        begin_crash(r.bike, r.crash_actor, crash_config_, crash_library_->playback[0],
-                    crash_library_->fallback, uint32_t(ticks_), reason, rider_impulse, bike_impulse);
+        begin_crash(r.bike, r.crash_actor, crash_config_, crash_bank(r), crash_library_->fallback,
+                    uint32_t(ticks_), reason, rider_impulse, bike_impulse);
         // 0x00403d60 copies the bike words into the half (iVar2 =
         // *(bike+0x2fc): 0x1c..0x2c, 0x30..0x40, 0x58/0x5c/0x60, velocities
         // and 0x104..0x110, the zeroed 0x114..0x128/0x198/0x1a0 block,
@@ -2240,7 +2254,10 @@ void Race::vertical(Rider& r) {
     if (terrain_source_) {
         const auto& route = route_of(r);
         const auto& current = route[r.sample];
-        const auto& next = route[std::min(r.sample + 1, route.size() - 1)];
+        auto next = route[std::min(r.sample + 1, route.size() - 1)];
+        // 0x00439b10 case4 follows sub-slice +0x0c. At a split
+        // the common road's right-forward link is physical half1.
+        if (next.dual && next.event == RoadEvent::split) next = route_half(next, 1);
         ground = terrain_height(this->ground(current), current.path, this->ground(next), next.path,
                                 b.i32(0x28) - current.offset * 256, uint8_t(b.i32(0x1c)),
                                 next.offset - current.offset, current.offset);
@@ -2318,8 +2335,8 @@ void Race::crash(Rider& r) {
         r.bike.i32(0x2f4) = 0;
         // Crash body runs on the half object: pre-fill behavior words (see crash_entry).
         r.crash_actor.motion = r.half_object;
-        begin_crash(r.bike, r.crash_actor, crash_config_, crash_library_->playback[0],
-                    crash_library_->fallback, uint32_t(ticks_), 0);
+        begin_crash(r.bike, r.crash_actor, crash_config_, crash_bank(r), crash_library_->fallback,
+                    uint32_t(ticks_), 0);
         // 0x00403d60 half copies (see crash_entry).
         sync_crash_half(r);
         r.half_object.u8(0xc0) |= 3;
@@ -2353,7 +2370,7 @@ void Race::crash_phases(Rider& r) {
     input.crash = bike.i32(0x2f4);
     input.speed = body.i32(0xec);
     input.height_q8 = body.i32(0x20);
-    advance_crash_rider_animation(r.crash_actor.animation, library.playback[0], library.fallback, input,
+    advance_crash_rider_animation(r.crash_actor.animation, crash_bank(r), library.fallback, input,
                                   uint32_t(ticks_), [&] { return random(); });
     r.ride_animation = r.crash_actor.animation; // the crash rider animation runs on the rider half block
     if (bike.i32(0x2f4) != input.crash) r.crash_timer = 0;
@@ -2392,8 +2409,8 @@ void Race::crash_bike_animation(Rider& r) {
         }
         return;
     }
-    advance_crash_bike_animation(r.crash_bike_animation, library.playback[0], library.fallback,
-                                 bike.i32(0xec), uint32_t(ticks_), [&] { return random(); });
+    advance_crash_bike_animation(r.crash_bike_animation, crash_bank(r), library.fallback, bike.i32(0xec),
+                                 uint32_t(ticks_), [&] { return random(); });
 }
 void Race::crash_bike_motion(Rider& r, bool player) {
     Bike& bike = r.bike;
@@ -2490,11 +2507,11 @@ void Race::crash_recovery(Rider& r, bool player, uint32_t controls) {
         }
     }
     const auto action = bounds_wreck ? CrashRecoveryAction::wrecked
-                                     : recover_crash_actor(bike, body, library.playback[0], library.fallback,
+                                     : recover_crash_actor(bike, body, crash_bank(r), library.fallback,
                                                            uint32_t(ticks_), recovery);
     if (!bounds_wreck) r.crash_timer = recovery.state_elapsed;
     if (action == CrashRecoveryAction::remount) {
-        remount_crash_actor(bike, r.crash_bike_animation, body, crash_config_, library.playback[0],
+        remount_crash_actor(bike, r.crash_bike_animation, body, crash_config_, crash_bank(r),
                             library.fallback, uint32_t(ticks_));
         r.ride_animation = body.animation; // one half block: the remount code continues into the ride advance
         // The half rejoins the bike: clear the crash-entry bits it gained
@@ -2503,6 +2520,12 @@ void Race::crash_recovery(Rider& r, bool player, uint32_t controls) {
         r.half_object.u8(0xc0) &= 0xfc;
         r.stamina.current = r.stamina.max;
         r.crash_active = false;
+        // 0x00404560 tail calls 0x004067d0 on the remount (decompiled line
+        // 37; the copy runs because 0x2f4 was just zeroed), so the half
+        // rejoins the bike on the remount tick itself. Without this the
+        // live path keeps the stale crash-body mirror until the next bike
+        // move (traffic-field 2279: original shadow 75067, native 75033).
+        live_standings(r);
         // 0x00404560 tail: thunk 0x00407410 on the half, which now sits at
         // the bike's position (0x004067d0 copy-back). Direct path with the
         // finish known (traffic-field-body tick 2575: +0x1f8 1496540 ->
@@ -3515,8 +3538,14 @@ void Race::rider_think(Rider& r, uint32_t controls, bool player) {
             // steer (0x0040ad30). Boost multiplies the throttle force
             // (0x0040adb0); nitro_throttle records the post-boost force.
             nitro_think(r, controls, player);
+            const bool joy = player && joy_active_ && !net_ && &r == &riders_[size_t(human_rider(0))];
             if ((b.u8(0xc0) & 0x10) == 0) {
-                if (controls & control_accelerate) drive_mode(b, 1);
+                if (controls & control_accelerate) {
+                    if (joy)
+                        throttle(b, b.i32(0x260) - joy_throttle_); // 0x0040ad10
+                    else
+                        drive_mode(b, 1);
+                }
                 if (controls & control_brake)
                     drive_mode(b, 2);
                 else if (!(controls & control_accelerate))
@@ -3532,7 +3561,10 @@ void Race::rider_think(Rider& r, uint32_t controls, bool player) {
             }
             const int32_t lean = (controls & control_lean_up) ? 1 : ((controls & control_lean_down) ? -1 : 0);
             const int mode = (controls & control_left) ? 1 : ((controls & control_right) ? 2 : 0);
-            steer_input(b, tables_, mode, lean);
+            if (joy && mode != 0)
+                steer(b, tables_, (mode == 1 ? joy_steer_ - 0x20 : joy_steer_) * 65536, lean);
+            else
+                steer_input(b, tables_, mode, lean);
         }
     } else {
         // Crashed: slide to a stop, wait one second, remount at the nearest lane.

@@ -76,6 +76,35 @@ int main() {
     check(race.position() == 0x3200, "start on the grid at sample 50 (0x00464218 slot 0)");
     check(race.lateral() == 16384 >> 8, "grid slot 0 lateral offset from the imported EXE table");
 
+    // The lookahead ring can choose a different initial half from the
+    // player's lateral crossing. 0x00439390 calls 0x004540e0 even when
+    // the player stays on half 0, committing both live walkers.
+    {
+        rr::Course course;
+        course.root = 20;
+        rr::CourseSection trunk, branch;
+        trunk.samples.resize(60, rr::PathSample{0, 0, 500, 500, 512, 512});
+        branch.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+        course.sections = {trunk, branch, branch, branch};
+        course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 160, 0, 60});
+        course.nodes.emplace(160, rr::CourseNode{160, 3});
+        course.nodes.emplace(40, rr::CourseNode{40, 1, 60, 80, 20, 0, 1});
+        course.nodes.emplace(60, rr::CourseNode{60, 0, 100, 40, 1, 300});
+        course.nodes.emplace(80, rr::CourseNode{80, 0, 100, 40, 2, 300});
+        course.nodes.emplace(100, rr::CourseNode{100, 2, 60, 80, 120, 0});
+        course.nodes.emplace(120, rr::CourseNode{120, 0, 140, 100, 3, 300});
+        course.nodes.emplace(140, rr::CourseNode{140, 4});
+        rr::TrackRing ring(course, 0);
+        rr::Race crossing(rr::make_route(course, false), rr::make_route(course, true), t, spec, 90);
+        crossing.set_track_ring(&ring);
+        check(ring.diagnostic_state().front_active == 1, "lookahead starts on the original primary half");
+        for (int i = 0; i < 1200 && crossing.position() < 60 * 256; ++i)
+            crossing.step(rr::control_accelerate);
+        check(crossing.position() >= 60 * 256 && crossing.riders()[0].route == 0 &&
+                  ring.diagnostic_state().front.node == 60,
+              "player staying on half zero commits the lookahead ring to that branch");
+    }
+
     uint32_t last = race.position();
     bool monotonic = true;
     for (int i = 0; i < 600; ++i) {
@@ -107,6 +136,37 @@ int main() {
         s.step(rr::control_accelerate);
     }
     check(l.lateral() < s.lateral(), "steering left decreases lateral position");
+
+    // Joystick analog (0x0040ad30 / 0x0040ad10): full deflection (steer 0,
+    // throttle cut 0) matches the digital path; a half stick steers less and a
+    // throttle cut holds speed down.
+    {
+        rr::Race dig(straight(2000), straight(2000), t, spec, 90),
+            full(straight(2000), straight(2000), t, spec, 90),
+            half(straight(2000), straight(2000), t, spec, 90);
+        full.set_joystick_analog(true, 0, 0);
+        half.set_joystick_analog(true, 0, 16);
+        for (int i = 0; i < 300; ++i) {
+            dig.step(rr::control_accelerate);
+            full.step(rr::control_accelerate);
+            half.step(rr::control_accelerate);
+        }
+        for (int i = 0; i < 90; ++i) {
+            dig.step(rr::control_accelerate | rr::control_left);
+            full.step(rr::control_accelerate | rr::control_left);
+            half.step(rr::control_accelerate | rr::control_left);
+        }
+        check(full.bike().m == dig.bike().m, "full analog deflection equals digital");
+        check(half.lateral() > dig.lateral(), "half stick steers less");
+        rr::Race cut(straight(2000), straight(2000), t, spec, 90),
+            open(straight(2000), straight(2000), t, spec, 90);
+        cut.set_joystick_analog(true, cut.bike().i32(0x260) / 2, 0);
+        for (int i = 0; i < 300; ++i) {
+            cut.step(rr::control_accelerate);
+            open.step(rr::control_accelerate);
+        }
+        check(cut.bike().i32(0xec) < open.bike().i32(0xec), "throttle cut slows the bike");
+    }
 
     // A curve pushes the rider toward its outside (0x004395e0 adds -bend*distance to lateral velocity).
     rr::Race curve(straight(2000, 20), straight(2000, 20), t, spec, 90),

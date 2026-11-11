@@ -261,6 +261,12 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
     }
     run_cars(INT32_MIN);
     run_peds(INT32_MIN);
+    // 0x00438170, 0x00438385..0x004383a2: human play forces the
+    // player's bike and half due next tick, retaining their LOD +0x14.
+    // Plan 34 applies the same rule to each human seat.
+    if (!demo_hold_)
+        for (auto& r : riders_)
+            if (human(r)) r.sched_next = r.half_sched_next = ticks_ + 1;
 }
 
 void Race::parked_pace_band() {
@@ -523,8 +529,8 @@ void Race::park(Rider& r) {
         // stamina, copies bike words to the half (0x004067d0) and recomputes
         // finish distance (0x00407410).
         if (crash_library_) {
-            remount_crash_actor(b, r.crash_bike_animation, r.crash_actor, crash_config_,
-                                crash_library_->playback[0], crash_library_->fallback, uint32_t(ticks_));
+            remount_crash_actor(b, r.crash_bike_animation, r.crash_actor, crash_config_, crash_bank(r),
+                                crash_library_->fallback, uint32_t(ticks_));
             r.ride_animation = r.crash_actor.animation;
         } else {
             b.i32(0x2f4) = 0;

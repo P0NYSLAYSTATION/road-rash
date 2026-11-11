@@ -345,6 +345,37 @@ static void test_lane_validity_linked_slots() {
     }
 }
 
+// 0x00449da0: a same-sample node must also be within the strict
+// +/-0x80 Q8 longitudinal scan. Steal-farm tick 4059 has a player
+// 152 Q8 behind the crossing car; it must not stop that car.
+static void test_crossing_obstacle_reach() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    auto drive = [&](int delta) {
+        rr::TrafficSystem traffic(library, synthetic_exe());
+        traffic.configure(6);
+        traffic.set_spawn_enabled(false);
+        std::vector<rr::RouteSample> road(800, lane_sample(0x200, 0x200));
+        for (auto& sample : road) sample.path.marking_flags = 0x20;
+        auto& car = traffic.cars_mut()[0];
+        car.active = true;
+        car.kind = 1;
+        car.position = 0x12080;
+        car.lateral = 0;
+        car.speed = 2000;
+        car.phase = 256;
+        car.zone_end = 0x13000;
+        car.zone_lanes = 2;
+        car.next_tick = 1;
+        car.motion.i32(0xc4) = 16;
+        if (delta != 1000) traffic.obstacles().push_back({car.position + delta, 4096, 0, 0, 4});
+        traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+        return car.lateral;
+    };
+    const auto clear = drive(1000);
+    if (clear <= 0 || drive(-128) != clear || drive(128) != clear || drive(-127) != 0 || drive(127) != 0)
+        throw std::runtime_error("crossing obstacle strict longitudinal reach");
+}
+
 static void test_deferred_car_teardown() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
@@ -914,6 +945,41 @@ static std::vector<rr::RouteSample> intersection_route(int variant = 1) {
     route[100].path.zone_end = true;
     return route;
 }
+static void test_opposite_intersection() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route(3);
+    for (auto& s : route) {
+        s.dual = true;
+        s.half = 0;
+        s.other = s.path;
+        s.other.left_q8 = 0;
+        s.other.left = 0;
+        s.other.right_q8 = 256;
+        s.other.right = 250;
+        s.other.shoulder_left = s.other.shoulder_right = 100;
+        s.other_offset = 1000;
+        s.other_section = 1;
+        s.path.event_type = 0;
+        s.path.zone_end = false;
+    }
+    system.set_terrain_type([](const rr::RouteSample& s) { return s.section == 1 ? 4 : 1; });
+    const int32_t camera = 0x3100;
+    system.step(route, camera + 256, camera + 0x5100, 0, camera, 0, [] { return 1u; }, 100);
+    int signals = 0;
+    for (const auto& g : system.signals())
+        if (g.active) {
+            ++signals;
+            if (g.index != 0 || g.position_q8 != 99 * 256 + 0x50 || g.lateral_q8 != 1300 * 256 || !g.quiet)
+                throw std::runtime_error("opposite intersection signal uses its own lane edge and shoulder");
+        }
+    if (signals != 1 || !system.controllers()[0].active || system.controllers()[0].half != 1)
+        throw std::runtime_error(
+            "opposite intersection must not create a signal for the selected road's left lanes");
+}
+
 static void test_intersections() {
     // 0x0041eca0 / 0x0041ef60 / 0x0041f040 / 0x0044df60 / 0x0044e710.
     rr::VehicleLibrary library(synthetic_container(0));
@@ -1167,6 +1233,7 @@ int main() {
         test_library_choose();
         test_recycled_pool_order();
         test_deferred_car_teardown();
+        test_crossing_obstacle_reach();
         test_countdown_timers();
         test_countdown_initial_fill();
         test_countdown_disabled_spawn_expiry();
@@ -1176,6 +1243,7 @@ int main() {
         test_spawn_and_move();
         test_zone_events();
         test_intersections();
+        test_opposite_intersection();
         test_signal_phase();
         test_intersections_all_courses();
         test_corpus();

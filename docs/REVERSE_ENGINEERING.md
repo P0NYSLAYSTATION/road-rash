@@ -169,7 +169,7 @@ Native port: `src/bike.cpp`, `src/race.cpp`.
   - byte 0 → `+0x1bc`; dwords 1–5 → `+0x168`, `+0x16c`, `+0x170`, `+0x1b4`, `+0x1b8`; dword 6 = mass; dwords 7–82 → `+0x1c4…+0x2f3`
   - the gear table is at `+0x1d0 + 16·g` (drive factor, upshift speed, downshift speed), 7 gears
   - derived values: maximum throttle `+0x260` and brake `+0x27c` scale with mass and the rider value; throttle/brake ramp rates `+0x264`/`+0x268`/`+0x280`/`+0x284`; steering limit `+0x29c = 0x2e00` and rates `+0x2a8`/`+0x2ac`
-- **Controls:** `0x0044f800` combines `0x0044fa80` (keyboard via the `0x004c5d90` key → action table) and the joystick into `0x004b7ed0`. Bits in `0x00476c00` order: `0x1` accelerate, `0x2` brake, `0x4`/`0x200` steer, `0x8`/`0x400` lean, `0x10` nitro, `0x20`/`0x40`/`0x80` attacks, `0x100` dismount. `0x00434660` applies them through:
+- **Controls:** `0x0044f800` combines `0x0044fa80` (keyboard via the `0x004c5d90` key → action table) and the joystick into `0x004b7ed0`. Bits in `0x00476c00` order: `0x1` accelerate, `0x2` brake, `0x4`/`0x200` steer, `0x8`/`0x400` lean, `0x10` nitro, `0x20`/`0x40`/`0x80` attacks, `0x100` dismount (row i sets `1 << i`; see the corrected action-table note below). `0x00434660` applies them through:
   - Drive leaves REA re-confirmation (October 12, 2026; plan 10 port input): pinned REA 6.4.0 pseudocode whitespace-identical for `0x0040adb0` throttle (1336 chars: wrecked/cop-hold → brake fallback, clamp to `+0x260`, `+0x264/+0x268` up/down ramps on `+0x240`, gear-factor `+0x1d0[gear]·drive>>16` into `+0x114` with nitro `0x00465a2c` scale), `0x0040aea0` brake (1056: stopped → 0, cop `0x180/0x100` scale, `+0x284/+0x280` ramps, reverse-sign `+0x114`) and `0x0040ad30` steer-target (494: digital ±0x20 or joystick `DAT_004b7e7c−0x20`, analog `param<<5`). Files: `analysis/oracle/rea-40adb0-throttle.md`, `rea-40aea0-brake.md`, `rea-40ad30-steertgt.md` (disc-derived, git-ignored).
   - Controls REA re-confirmation (October 12, 2026; plan 10/18 port input): pinned REA 6.4.0 pseudocode whitespace-identical for `0x0044f800` poll (615 chars: keyboard `0x0044fa80` unless `DAT_004c5b10`, joystick OR via `0x00476c00` table × `DAT_0049e65c`), `0x0040acd0` drive dispatch (308: 1 → throttle `+0x260`, 2 → brake `+0x27c`, else coast by `+0x240` sign) and `0x0040af50` steering (2375: `sin(angle)·speed/+0x2b0` target, ±(`+0x29c` + quarter when leaning) clamp, `+0x2a8/+0x2ac` ramp choice by shrinking-vs-growing, lean-scaled `+0x2d0/+0x2d4` sub-steps, `+0xf0 = steer·+0x2b0>>8`). Files: `analysis/oracle/rea-44f800-controls.md`, `rea-40acd0-drive.md`, `rea-40af50-steer.md` (disc-derived, git-ignored).
 - **Integration, once per tick** (`0x0043a580`):
@@ -551,19 +551,60 @@ The course screens share one item array; the sixth item is copied from `0x004691
 **GDI text metrics (October 26, 2026; Wine-GDI ground truth via `tools/textprobe.c`)**
 - LOGFONTs (sole `CreateFontA` site `0x004488e3`, menu table `0x004239e5`): positive cell heights (72/42/36/32/24/20/18/16/15), lfWidth 0, weight 0 (FW_DONTCARE — boldness lives in the FUTB file) except New Courier Bold 700, OUT_TT_ONLY_PRECIS, DEFAULT_QUALITY.
 - ppem rule (292/292 TEXTMETRIC heights 8..80, all four faces): `ppem = round(H*upm/cell)`, then step down once when `round(cell*ppem/upm) > H`. tmAscent/tmDescent = rounded scaled win metrics; tmHeight = their sum (e.g. 33 at 32px FUTR — the old multiline drift). tmExternalLeading is 0 everywhere.
-- Advances = `round(design*ppem/upm)` (380/380 ASCII vs GetCharABCWidthsA; hdmx is NOT used). Multiline DrawText pitch = tmHeight. Bitmaps stay unhinted in the port (remaining fringe).
+- Advances = `round(design*ppem/upm)` (380/380 ASCII vs GetCharABCWidthsA; hdmx is NOT used). Multiline DrawText pitch = tmHeight. Exact rule (October 31): `(FT_MulFix(design, x_scale) + 32) >> 6`, so 26.6 values that round to exactly .5 px go up (8448/8448).
 - DrawText CALCRECT returns the measured wrapped width even under maxw (probe: 296/293/269/156 vs input 300); the port's old wordbreak carve-out pinned boxes to maxw and shifted right-aligned text. Fixed.
-- Remaining GDI deltas (open): hinted bitmap shapes (1-bit scan conversion); `>=0x80` cp1252 bytes differ (GDI has real default-char widths; the port uses .notdef advance).
+- Remaining GDI deltas (open): `>=0x80` cp1252 bytes the faces lack (Wine font-links them; Windows draws the default glyph, the port .notdef). Glyph shapes closed October 31 (below).
 
-**Colours** (`0x0041fc90`): normal `#DEFFF0`, focused `#E1E180` with a Wingdings arrow, disabled/dimmed `#A0A0A0`, skipped `#FF6432`, titles `#FF6432`. All text has a 2-pixel black shadow.
+**Menu picture pipeline (October 31, 2026; bit-exact against the original's decoded-image cache)**
+- The oracle frontend probe dumps the nine 640x480 RGB555 image-cache rows at `0x004859c0` (stride `0x58`, pixels at `+4`, name at `+8`) after each capture. Across the four acceptance runs, 226 dumps of 20 distinct pictures are bit-identical to the port: Main, Splash, Street, Postcard, Olleys, Panzer, `Chars/{Axle,Bose,Cydney,Pearl}-N`, `Chars/Cydney-F`, `Restroom/Rest3`/`Rest6`, `Results/{Wreck3,Wreck4,Bust4,Win4,Lose1}`, and the composites `Postcard/City` and `Street/Klub`.
+- Decode: IJG libjpeg with `dct_method = JDCT_IFAST` (`0x0041e496`, `cinfo+0x44 = 1`) and the 1408-byte sample-range table rebuilt with `& 0xf8` by `0x004293a0`, so Y/Cb/Cr and the colour converter output are both truncated to 5 bits. Only the scalar IJG path reads that table (SIMD bypasses it), hence the pinned scalar libjpeg-turbo build.
+- Composition (`0x0041e240`): `Street/<x>` 258x250 insets at (146,230) over `Street`; `Postcard/<x>` 397x480 right-aligned over `Postcard`. Street/Klub: 64500/64500 inset pixels exact; the remaining 242700 equal Street.
+- Display: RGB555 through the `0x0041e090` table to RGB565 with a zero green low bit. The darkened surface (`0x0041e6e0`, text boxes and button bar) halves each 5-bit channel and goes through the same table, so its green is also even in 6-bit terms (golden `0x38`, not `0x39`).
+- Menu text colours land on the 16-bit surface: `#DEFFF0` reads back `#DEFFF7`, `#A0A0A0` `#A5A2A5`, `#FF6432` `#FF6531`, `#E1E180` `#E7E384` (golden pixel census, restroom).
+
+**GDI glyph bitmaps (October 31, 2026; Wine 11.18 Staging ground truth via `tools/glyphprobe.c`, `tools/blendprobe.c`, `tools/textprobe.c`)**
+- Wine renders GDI text with its bundled FreeType 2.13.3 (`FT_Library_Version`); the port builds that release (`cmake/freetype.cmake`). The probes cover every byte 0x20..0xff of the four disc faces at cell heights 14..72 (9856 glyphs; 8448 the faces cover). Dumps: `analysis/frontend/glyphs-20261031/` (git-ignored, disc-derived).
+- **Smoothing decides the model.** The game's LOGFONTs use `DEFAULT_QUALITY`, so system font smoothing applies; the oracle prefix (and a fresh Wine prefix) has `FontSmoothing=2`, `FontSmoothingType=1` (grayscale). Wine draws 1-bit glyphs on DIBs of 8 bits or fewer and anti-aliased glyphs on deeper ones. The menu surface is RGB565, so menu text in the goldens is anti-aliased (in-between colours such as `#C6DFDE` at stroke edges; the 1-bit model left strokes one pixel too heavy). The race surface is 8-bit, so race HUD text stays 1-bit. Which mode a period Windows install used depends on the player's "smooth edges of screen fonts" setting; the port follows the oracle.
+- Common model: integer ppem from the GDI rule (`FT_Set_Pixel_Sizes(0, ppem)`; REAL_DIM/CELL/fractional requests 3570/8448), v40 interpreter, bbox from hinted metrics floored/ceiled to whole pixels, `FT_Outline_Get_Bitmap`, glyph top = tmAscent − ceil(bearingY) with tmAscent = round(`FT_MulFix(usWinAscent, y_scale)`), and rows above the cell top dropped (accented capitals at small sizes: 94 glyphs).
+- 1-bit (`glyphprobe` mono, 1bpp DIB): `FT_LOAD_TARGET_MONO`, mono raster: 8446/8448. The two misses are BADLOC 14 `Í` and `Ú`, where Wine's accent is one row shorter. No dropout mode, size request or bbox rule tried reproduces it. v35 gives 7078.
+- Anti-aliased (`glyphprobe gray`, white on black in a 32bpp DIB): `FT_LOAD_TARGET_NORMAL`, 8-bit gray raster, intensity level = `coverage * 17 / 256` (truncating; rounding gives 718/8448), levels 0 and 1 not drawn. On 32bpp white-on-black a level reads back as `ramp[level]` with ramp `00 4d 68 7c 8c 9a a7 b2 bd c7 d0 d9 e1 e9 f0 f8 ff`. Result: 8448/8448 glyphs, 1405141/1405141 pixels.
+- 16-bit blend (`blendprobe`: 8 text colours, including the game's four and black, over 4096 random RGB565 backgrounds each, all 15 drawn levels): Wine's `draw_glyph_16`. Level 16 writes the text pixel. Otherwise each channel blends the 565-expanded destination toward the 565-expanded text value `t`: `min = ramp[l]*t/255` and `max = ramp[16-l] + (255-ramp[16-l])*t/255`. A darker destination becomes `t - (t-d)*(t-min)/t`, a lighter one `t + (d-t)*(max-t)/(255-t)`, and the result is truncated to 565. The ranges use the quantised text colour, not the COLORREF (382985 vs 491520). Result: 491520/491520.
+- Bytes the faces do not cover (`0x80..0x9f`, `¤ ¦ ­ ¯ ² ³ ¸ ¹ ¼..¾` and others) are drawn by Wine from fallback fonts. That is Wine font linking, not original behaviour; Windows 95 draws the face's default glyph. None appear in the game's strings.
+- Earlier conclusion revised: the October 31 morning note ("v35 and v40 identical in mono", 6986/8448) was measured on Homebrew FreeType 2.14.3. With 2.13.3, v40 gives 8352 before the top clip and 8446 after it.
+
+**System faces: Wingdings and New Courier Bold (October 31, 2026, evening; `glyphprobe <TEXT dir> {mono|gray} sys`, `ppemprobe` scratch sweep)**
+- The game creates three system-font LOGFONTs: menu focus arrow Wingdings 18 (`0x00423b25` → `0x004961dc`: weight 400, `SYMBOL_CHARSET`, `OUT_TT_PRECIS`, pitch 4), dashboard gap arrow Wingdings 12/18 (`0x00442990` → `0x004c11f0`), and standings "New Courier Bold" 18 (`0x00423afd` → `0x004961e0`: weight 700, charset 0, pitch 5). The arrow glyphs are byte `0xe8` (`0x0046b044`, menus) and `0xe9`/`0xea` (`0x00475318`/`0x0047531c`, gap ahead/behind).
+- Wine on macOS registers the host fonts (`Z:\System\Library\Fonts\Supplemental\…` in the prefix's `Fonts` keys): Wingdings resolves to macOS's `Wingdings.ttf` (tmHeight 17 / tmAscent 14 at lfHeight 18, matching that file's VDMX), and "New Courier Bold", which does not exist, resolves to Courier New Bold (`GetTextFace` "Courier New", weight 700 → `Courier New Bold.ttf`).
+- **VDMX sizing.** Faces with a VDMX table (all the Windows/macOS system faces; none of the disc faces) do not use the ppem rule. Wine's `load_VDMX` takes the first ratio record that is 0:0:0 or covers 1:1, finds the group record with `yMax − yMin == lfHeight` (else the last one below it), and uses its ppem with tmAscent = yMax and tmDescent = −yMin. Wingdings 12 → ppem 10 (the rule gives 11), 18 → 16. Heights below the group's first record fall back to the ppem rule. Sweep (heights 8..48 of Wingdings, Courier New Bold/Regular, Arial, Times New Roman): every height in the table matches; the only misses are heights below the first record, as predicted.
+- **gasp.** Wine anti-aliases a size only when its `gasp` range sets `GASP_DOGRAY` (faces without the table always do). Wingdings' gasp turns gray off for ppem 9..28, so the menu arrow is 1-bit even on the 16-bit surface; Courier New Bold 16 is gray.
+- **Symbol cmap.** Wingdings has only a (3,0) symbol cmap: Wine looks a byte up as U+F000+byte, then as the byte.
+- Result with the macOS files: 667/667 glyphs and advances exact in mono and in smoothed mode (Wingdings 18 and 12, Courier New Bold 18, every covered byte).
+- Fallbacks: hosts with no Wingdings (Linux, Android, browser) use Wine's own `fonts/wingding.ttf` (wine-11.18, LGPL), which is what Wine draws there; its glyphs differ from Microsoft's and were not probed. Courier New Bold falls back to `courbd.ttf` (Windows, msttcorefonts) or Liberation Mono Bold, else the Futura fixed-pitch layout.
+- Controls-screen key labels (`0x0040e7b0`): keyboard codes `0x93..0x96` print `\x01`..`\x04` (`0x00466664/5c/60/58`), drawn by `0x00420280` as Wingdings `byte − 0x1a` (`0xe7` left, `0xe9` up, `0xe8` right, `0xea` down) after a `0x1a`-prefixed caption. Rows < 9 are prefixed with string 280 and a space when the code's high byte is set. Full slot text for rows 0..8: `"\x1a"` (word `0x00466670`), then for a keyboard code (byte 1) `"<Keyboard>"` (ENU string 280) + `" "` + key text + `" "` (`0x00466668`); code 0 on both bytes gives `"<Unassigned> "` (string 384). Byte 1 cases: 8 Backspace (111), 9 Tab (26), `0x90..0x92` Shift/Ctrl/Alt (286/287/285). `0x0041ff80` strips a leading `0x1a` from any Futura Bold 24 caption and calls `0x00420280` when the rest contains bytes 1..4 (set `0x0046b048`). `0x00420280` draws each run before such a byte with the two-pixel shadow (DrawTextEx `0x4850`), advances the left edge by the run's CALCRECT width (`0x4c50`), draws the Wingdings 18 byte (`DAT_004961dc`) with the shadow at top+4, then advances 16; the tail draws as plain text. Byte 1 holds the original keyboard code, so the port maps its SDL arrow scancodes onto bytes 1..4 and keeps layout-aware SDL names for other keys (plan 33b Task 4). Ported November 1, 2026; no capture shows filled labels (the acceptance golden shows stale slots).
+
+**Menu footers, stale strips and labels (October 31, 2026, evening; full-frame goldens)**
+- `0x004208d0` (callers `0x0041fe25`, `0x0042411e` pass item flags `& 0x20f00`, so bit 0x80 never reaches it) formats the player (`0x800`) or bike (`0x100`) line and calls `0x00420470` with format `0x4852` and flags `| 0xc`. With layout bit `0x900` that routine measures the line single-line in a 640-wide rectangle, places the box at x = `(0x270 − w) / 2`, y = `0x17c` (`0x16c` on screen `0x0b`), size `w + 16` by `h − 14 + 16`, repaints it dark (bit 3), and draws Futura Regular 32 left-aligned single-line from (x + 10, y + 2) with the shadow pass (format `0x4852` → `0x4850` without bit 0x80, `| DT_SINGLELINE`). The rectangle arithmetic is at `0x0042072f..0x00420795`; Ghidra's pseudocode labels the rectangle as the HDC and shows the wrong branch condition (`[esp+0x24]` is `param_4 & 0x1000`). Thrash, panzer, bulletin and showroom footers: full frame exact.
+- The showroom description is the course select's stale dynamic slot (blurb and Length line), drawn whole and right-aligned (item flags `0x184`: bit 0x80, Demi 24, `0x4852`). The earlier "separate Demi-24 Length footer at y=301" was a stand-in 2 px off; superseded.
+- Results name: `0x00421df0` case `0x1e` formats "%s finished in … Place." with `0x0041c060`, which in Big Game uses the character's full name (strings `0x20..0x27`, "Cydney Bass"); the footers and penalty use `0x0041c140` (short name).
+- `0x004214e0` is the busted/wrecked button handler that sets the penalty row (string 194/197/198) on the way in. A bare entry to `0x21` keeps the row's caption and the stale dynamic slot.
+- Standings (`0x22`) shares its picture with won/lost/penalty, and the original does not repaint the strip their wide row left (0, 410, 640×70, darkened, dynamic slot centred). The earlier "footer in the last row's rect" was a stand-in; superseded. The rows draw over the strip.
+- `0x0041ff80` draws any non-empty caption, including "*" (the stale slot 168 on a bare controls entry).
+- Controls key labels are written by the restroom Controls row's handler `0x0040fd90` (which also repoints slots 160..168 at the label buffers), not on screen entry; a bare entry shows the slots' previous contents (character heights in the golden).
+
+**DrawText word wrap (Wine user32 `TEXT_WordBreak`; `textprobe` CALCRECT)**
+- `GetTextExtentExPoint` counts the whole characters that fit. If the first character that does not fit starts a word (a ScriptBreak soft break), the line ends at the space before it. A left-aligned line keeps that space, and it counts toward the CALCRECT width. Otherwise the break works back to the previous space and drops it. Centred and right-aligned lines never keep the space. Widths 300/296/293/300/269/156 for the six probe strings are reproduced. Example: the Graphics Options description box is 293 + 16 wide, not 287 + 16.
+- HUD layout rows at `0x00474f50` (stride `0xdc`) are 5-int records `{DrawText flags, left, top, right, bottom}`. In the high-resolution MiniDash row, record 20 is the speed readout `{DT_RIGHT, 0, 436, 240, 480}`; the full row keeps needle data in that slot.
+- DrawText clips to its rectangle (`ETO_CLIPPED`) unless `DT_NOCLIP` is set. The character list's bottom row loses three pixels of a descender in the original.
+
+**Colours** (`0x0041fc90`): normal `#DEFFF0`, focused `#E1E180` with a Wingdings arrow, disabled/dimmed `#A0A0A0`, skipped `#FF6432`, titles `#FF6432`. All text has a 2-pixel black shadow. On the 16-bit menu surface these read back as RGB565 values (see the picture pipeline above).
 
 **Box geometry:**
-- Title box (`0x0041f770`): left (text + 0x31 by text + 0x2a), right-aligned (min 0x13c), centred at 3/4 height, or 640×300.
+- Title box (`0x0041f770`): left (text + 0x31 by text + 0x2a), right-aligned (min 0x13c), centred at 3/4 height, or 640×300. For title slot 6 (Restroom) the window widens to 0xe6 after the text rectangle is taken (`LVar4`). The banner fill is 230 wide, but the title is right-aligned 16 px inside the unclamped `tw + 0x31` (golden: ink 9 px left of the old port's).
 - Description box (`0x00420470`): ≤300 wide at x = 8 or 316, y = 122; or full width at y = 380.
 - Restroom/jukebox items without a width take the title box width, clamped to 0xe6/0xa0..0x118 (`0x004459f0`).
 - Description dark-box repaint (October 26, 2026; static disassembly of `0x00420470` + pixel evidence): the fill/`0x41fb90` invalidate is gated on the item-flags bit 3. Pixel-verified across goldens: restroom/jukebox/graphics (`0xc`) fill; characters (`0x5`), course (`0x4815`) and showroom (`0x184`) bios draw text on the photo. Net rule: fill iff `flags & 8` (the 0x4208d0 dynamic path's `or ebx,0xc` does not force it — showroom proves the negative).
-- Standings (`0x22`): rows, title and the darkened fill are populated by the `0x00421290` results handler (per-row flags `0x8040` shown vs `0x8000`), not on screen entry: direct `0x00421df0` entry shows the bare photo (traced golden) with only the dynamic-slot result line as a footer in the last row's rect. The port mirrors this (rows/title/darken gated on handler state).
-- Footers (traced positions, masked): course Length at (8, y367) is the desc's line 8; the showroom draws the blurb only and a separate Demi-24 Length footer at (right, y301); results footers are the wide item caption (dynamic slot, masked y>=370). Price (`0x46b058`) and player (`0x46b09c`) footers at y380 are real-play draws whose content mapping (0x4208d0 bh&1/bh&8 arg slots) is recovered but not yet ported — masked in acceptance, open for real-play fidelity.
+- Standings (`0x22`): rows, title and the darkened fill are populated by the `0x00421290` results handler (per-row flags `0x8040` shown vs `0x8000`), not on screen entry: direct `0x00421df0` entry shows the bare photo (traced golden). The result line is the stale won/lost strip (see "Menu footers, stale strips and labels"), not a footer in the last row's rect (corrected October 31).
+- Footers (traced positions): course Length at (8, y367) is the desc's line 8; results footers are the wide item caption (dynamic slot). Superseded October 31 (evening): the showroom Length line is part of its stale description, and the y=380 price/player footers are ported with the `0x00420470` box (see "Menu footers, stale strips and labels").
 - Footer content mapping (October 26, 2026; byte-exact formats + golden-verified):
   player `0x46b09c` = `"     %s     %s     %s%s  $%u     "` with
   (player_name, str(91+level), str(29) "Cash", str(504) ":", cash);
@@ -575,8 +616,8 @@ The course screens share one item array; the sixth item is copied from `0x004691
   `0x420b0c`: bike 0→0x70, 1..14→0x71,0x72,0x74,0x73,0x7a,0x7d,0x7b,0x7e,
   0x7c,0x75,0x78,0x76,0x79,0x77). Trade-in = `bike_price[bike]>>1`
   (`0x468fc0`, confirmed `$2748 = 1000 + 3497>>1` for Cydney). Both footers
-  centered in 640, Regular 32 (caller-0x4208d0 desc face/height); Length
-  footer is Demi 24. Player footer gated on focused-item `flags & 0x800`
+  are Regular 32 in the `0x00420470` box (left-aligned inside it, which
+  centres the line; corrected October 31). Player footer gated on focused-item `flags & 0x800`
   (raw high byte bh&8 — verified on street/thrash/bulletin/panzer goldens,
   including a masked street footer); price footer on the showroom screen.
   The `[0x4b8a12]` level-string index is assumed to track career level
@@ -689,6 +730,21 @@ The course screens share one item array; the sixth item is copied from `0x004691
   - MIDI pump-tail REA re-confirmation (October 12, 2026; plan 13 Task 1 input — via 3 parallel subagents, MATCH claims independently re-verified): pinned REA 6.4.0 pseudocode whitespace-identical for `0x00433e30` stream pump (1643 chars: MIDS-magic gate, open vs restart paths, header feed, error teardown), `0x004340a0` session alloc (526: teardown-old + alloc + feed + open chain, 0/1/2 codes) and `0x00434150` track feed (1038: MDSI block + file-map + parser call, 0/1/2/4 codes). The race-MIDI chain starter→pump is now fully double-confirmed; remaining: volume/teardown `0x00433cb0`/`0x00433cf0`/`0x00433f70`/`0x00433dd0`. Files: `analysis/oracle/rea-433e30-streampump.md`, `rea-4340a0-session.md`, `rea-434150-trackfeed.md` (disc-derived, git-ignored).
   - MIDI volume/teardown REA re-confirmation (October 12, 2026; plan 13 Task 1 input — via 3 parallel subagents, MATCH claims independently re-verified): pinned REA 6.4.0 pseudocode whitespace-identical for `0x00433cb0` volume pack (186 chars: two percent volumes → 0–255 → both-channel DWORD), `0x00433cf0` session teardown (384: header cleanup + stream teardown + free/null + AWE Ordinal_2 commands), `0x00433f70` header cleanup (670: MDSI-magic gate, midiOutReset + unprepare chain + stream close) and `0x00433dd0` stream teardown (385: close-if-open + buffer free + magic stamp). The race-MIDI chain is now COMPLETE end-to-end (starter→probe→parser→feed→session→pump→volume/teardown). Files: `analysis/oracle/rea-433cb0-midivol.md`, `rea-433cf0-teardown.md`, `rea-433f70-hdrclean.md`, `rea-433dd0-streamdown.md` (disc-derived, git-ignored).
   - SBK-loader callees REA re-confirmation (October 12, 2026; plan 13 Task 1 input — via 3 parallel subagents, MATCH claims independently re-verified): pinned REA 6.4.0 pseudocode whitespace-identical for `0x00434620` SBK bank-load slot wrapper (243 chars: slot + opaque args → AWEMAN32 Ordinal_2 func 0xcc), `0x00434420` compressed-track decode (1352: alignment/bounds-checked header + payload copy) and `0x00433380` (2076: CORRECTION — not an Audio path resolver as the scout labeled it, but a serial-port session `__thiscall` ctor: dual 16000-byte buffers, HANDLE + SetupComm/DCB/timeouts, `0x004337c0` post-init. Out of MIDI scope; recorded to prevent misattribution). SBK-load + track-decode paths confirmed; the serial ctor needs no port. Files: `analysis/oracle/rea-434620-sbkload.md`, `rea-434420-trackdecode.md`, `rea-433380-audiopath.md` (disc-derived, git-ignored; the last filename is a misnomer kept for traceability).
+  - SBK generator semantics (October 31, 2026; bank dump of GRUNGE1-5/RRDRUMS plus TiMidity's SF1 reader `sffile.c`/`sbkconv.c`/`sndfont.c` as a reading reference, GPL, not vendored): SF1 stores most generators in its own units, and the port's renderer reads only attenuation, tuning and root key, two of them wrongly. Facts for the synthesizer slice:
+    - Sample headers carry no rate or pitch. TiMidity assumes 44100 Hz, and the zone's `samplePitch` (gen 55, SBK-only; e.g. 6000, 7200, 5365) gives root = value/100 and tune = −(value%100) cents; `overridingRootKey` (58) overrides it. The port assumes 22050 Hz with root 58-or-60 and ignores 55, which agrees in pitch only when 55 is 7200 with no 58.
+    - Loop points come from the header plus the zone's loop offsets (gens 2/3, e.g. +12479/−26), then TiMidity adds +1 to the start and +2 to the end for SF1. `sampleModes` (54) = 1 enables the loop; the port loops whenever the header's loop end exceeds its start.
+    - `initialAttenuation` (48) is a 0..127 level (127 = full; 0 = silent), not centibels. Every melodic zone has 127; drum zones range 101..127. The port subtracts it as centibels, so every note is 12.7 dB down and the drum balance is inverted.
+    - Envelope and LFO times (21..28, 30, 33..36, 38) are milliseconds (TiMidity: timecents = 1200·log2(ms/1000)). Sustain levels (29, 37) are 0..127 levels (TiMidity converts them with formulas specific to each envelope). `initialFilterFc` (8) is 0..127 (127 = open), `Q` (9) is ×1.5 in cB, sends (15/16) are /256, pan (17) is 0..127, the LFO frequencies (22/24) have their own log formula, and the pitch/filter/volume modulation depths (5, 6, 10, 11, 13) are /64 scaled.
+    - Merging: SF1 preset values apply only where the instrument zone leaves a generator unset (key/velocity ranges always copy). The banks' preset zones carry only `instrument` and a zero `startAddrs`. Instrument global zones (no `sampleID`) provide defaults; the parser currently drops them.
+    - `keyExclusiveClass` (57) = 1 on RRDRUMS hi-hats 42/44/46 (each cuts the others).
+    - None of this has a timbre oracle: Wine has no EMU8000. A synthesizer built from these rules is spec-derived, not measured.
+    - Renderer slice (October 31, 2026, `src/race_music.cpp` `Sf1Synth`): the rules above are now applied. Further facts it needed:
+      - Rate check without an oracle: autocorrelating the sample bodies, the two zones that set only `samplePitch` with non-round values (GRUNGE2/5 bass, 4281 and 4782) measure 42.8 and 47.9 semitones at 44100 Hz, against 30.8/35.9 at 22050. That confirms TiMidity's 44100 base. Zones with a 58 override read 0, 7 or 12 semitones away from it, which is consistent with harmonic or octave errors in the estimate and with deliberate overrides.
+      - Attenuation: TiMidity truncates `−2000·log10(v/127)`, so 101 → 198 cB, 108 → 140, 115 → 86, 120 → 49. With the ×10 the drum levels span 0..20 dB; without it they would span only 2 dB.
+      - Unset sustains matter: some RRDRUMS zones set a volume decay (36) but no sustain (37), and several omit the mod sustain (29). TiMidity's SBK default for an unset sustain is 1000 (silent volume / zero mod level), so these hits decay away. The SF2 default (full sustain) would hold them. Unset LFO rates default to −725 / −15600 absolute cents (5.4 Hz / ≈0.001 Hz); unset times default to −12000 timecents (1 ms, per SF2).
+      - No disc bank has an instrument or preset global zone, and no preset zone sets anything but the instrument. The merge rules are exercised only by the synthetic tests.
+      - Controller census of the AWE songs (SBKGRNG1..5, KLOWN): CC7, CC10 and CC11 (SBKGRNG5 has 374 CC11 events), pitch bend (18..401 per song), RPN 0 data entry (bend range), CC1, CC121, CC0, and CC91/CC93. The renderer applies the SF2 default modulators to these: velocity, CC7 and CC11 on a concave 960 cB curve; CC10 to pan (±500); pitch bend times the RPN 0 range; CC1 to vibrato (+50 cents). CC91/93 and the zone reverb/chorus sends were parsed only until November 1, when effects buses were added (next bullet). Bank select is ignored (channel 10 = kit).
+      - Effects (November 1, 2026): the game's AWEMAN32 `Ordinal_2` messages are 0x68 and 0x65 (open, `0x00434500`), 0xcd 1/2 (free banks), 0xcc (load SBK, `0x00434620`) and 0x66 (close, `0x00433cf0`). No effect-mode message is sent, so the driver's default modes apply; the AWE driver defaults are reverb "Hall 2" and chorus "Chorus 3" (Linux `awe_wave.c`, reading reference; not observed on Win95 AWEMAN32). Every SBKGRNG/GRUNGE song sets CC91 (10–100) and CC93 (0–70) per channel at the start; KLOWN sets neither, so it takes the power-on depth (the port uses GS 40/0, an assumption). The EMU8000 effects microcode is undocumented; the native buses are labelled stand-ins.
 - Showroom clips (`0x004023e0` flag 1) only signal the soundtrack thread; other videos stop it.
   - SBK bank structure + synthesis decision (October 12, 2026; plan 13 Task 1 Steps 1–4 close-out, disc analysis via python3): all six banks are SoundFont 1 (`sfbk`, `ifil` v1.0, 16-bit `sdta/smpl` PCM): GRUNGE1 (127060 B, 3 presets + EOP: RUSHTUTT/Dist guitar/Pulsy VCO Bass 2), GRUNGE2 (110056, Slap Bass/FUNKCHRD), GRUNGE3 (136916, GTRSTRNA/RUSHTUTT/FINGBAS1), GRUNGE4 (115614, DVBASSHI/GTRCHNKA/Dist guitar/PGTRHARM/DVBASSPL), GRUNGE5 (113886, Slap Bass 1/FUNKMUTE/FUNKCHRD/BASSCPOP), RRDRUMS (373246, Heavy Drums + 20 instruments). Programs are bank-specific, not General MIDI (songs reference channels 0–15 with bank-local programs; GRUNGE/SBKGRNG/KLOWN `.MID` are RIFF `MIDS` with `fmt `+`data`, not SMF — consistent with the confirmed `0x00434230` parser). Generators in use span loop offsets, mod/vib LFO→pitch, filter Fc/Q + mod/env→filter, mod LFO→volume, chorus/reverb sends, pan, full mod/vib envelopes, keyRange, attenuation, coarse/fine tune, sampleID/modes, exclusiveClass, overridingRootKey. DECISION: option B (minimal native sampler in `src/race_music.cpp`: zone-mapped 16-bit voices, linear interpolation, volume envelope) — option A rejected because SF1→SF2 conversion + two pinned single-headers outweigh the tiny bank surface (≤6 presets, 1–20 instruments), and no third-party file was added. Race continues silently on missing/corrupt bank (logged once) per the Task 2 truncated-bank test.
 
@@ -824,6 +880,7 @@ Police scope for opening Napa: `0x00407f30` invokes `0x00406b80` when owner is 0
   - Police chain REA re-confirmation (October 12, 2026; plan 11 Task 6 port input): pinned REA 6.4.0 pseudocode is whitespace-identical to the project exports for `0x00406b80` cop constructor (3676 chars), `0x00407860` cop-find (614) and `0x00407f30` arrest+rider-anim dispatch (5040). `0x00406b80` builds via `0x00405990` (templates `0x464310/0x464378`, row 15, param_5 = 2), single-cop guard on `DAT_004642dc`, video-slot cycle 0–7, 10-column relationship reset + level-scaled rows, cop-becomes-owner, speed `+0x1a4` from `+0x1bc[level]`; `0x00407860`/`0x00407f30` own the ≥0xb DZHR spawn branch, proximity gates and the busted outcome 4 path. Live spawn/chase/siren tick integration and the `napa-cops`/`city-cops` goldens remain open (need working captures). Files: `analysis/oracle/rea-406b80-copspawn.md`, `rea-407860-copfind.md`, `rea-407f30-arrest.md` (disc-derived, git-ignored).
 
 Cop actor allocation: `0x00405470` allocates 0x32c-byte bikes; `0x00405490` allocates 0x208-byte riders. Constructor capture must not apply bike-only offsets >=0x208 to the rider. Native `make_police_actor` retains imported virtual callback addresses only as opaque numeric metadata; native code never executes them. It imports cop-bank playback (bank 1), applies per-level bike selection/throttle percentages and reduced AI gears, initializes condition/stamina/weapon and pursuit relations, with ground/road target supplied by the caller. Captured level-1 numeric fields match; route/scheduler ownership, dynamic AI replanning and display-list integration remain open.
+  - Cop crash animation bank (November 8, 2026; Sentry ROAD-RASH-E): `0x00405990` lines 83–84 call `0x00446060(+0x70, param_5)` on both the bike (`piVar1`) and its half (`piVar2`); `0x00446060` stores `0x00474d78[0x004746b8[param_5]]` as the anim table. The cop (param_5 2) therefore selects crash codes (`0x00403d60` 29/33/35, `0x00407a90` 44/46/47/48, `0x00407f30`) from the cop table, falling back through `0x00464430` for codes the cop bank lacks (it populates 2, 8, 9, 16, 17, 28, 33, 37, 43, 46, 48). The cop views hold 30 groups versus the rider's 162.
 
 ## Napa playtest fixes (October 11, 2026, plan 11a)
 
@@ -1127,7 +1184,12 @@ native look-alike of dialog 300, Pause is purely native.
   - Pause-pump keys (October 12, 2026; plan 18 Task 1 Step 3 — exports `004431d0.c`/`00443120.c` + disasm call sites): modal pump `0x004431d0` exits on key-up/`syskey-up` (`0x101/0x105`): F10 (`0x79`) cycles MiniDash, PrintScreen (`0x2c`) sets the screenshot flag, any other key exits 2 (resume); with param_1≠0 Escape (`0x1b`) exits 1, else 2. WM_TIMER + joystick-button exits 2. Three call sites: A (param 1, string +0x4f0) — return 1 → `PostQuitMessage(0)` + outcome `0x4c5d7c = 5`; B (param 0, +0x4f4); C (param 0, custom format +0x5f0). Native gap: race loop has no F10/PrintScreen handling (`cycle_mini_dash` is menu-test-only); the opponent toggle is PORTED with menu `/` wiring (`toggle_opponent_list`, `d68d44b`) — plan 18 Task 6/7 port scope for the rest. Escape race-entry point still open.
   - Escape race-entry (October 12, 2026; plan 18 Task 1 — time-boxed, entry point still open): eliminated the run-back control dispatch (`0x40a835+` reads control-word bits `0x78/0x10/0x08/0x40/0x2000` for on-foot steering, not quit) and the key-table at `0x436352` (rebind display codes). The race-side call site invoking quit-confirm pump variant A (param_1 = 1 → outcome 5) was not found within the box. Native behavior already matches the confirmed outcome-5 rule (ESC → quitting → second ESC quits wrecked). Per the plan's trace rule: stopping here and reporting rather than guessing.
   - Press-a-key capture (October 13, 2026; plan 18 Task 7 Step 1 — disasm `0x0040e690`/`0x0040e760` + exports `0040fb50.c`/`0040f6d0.c`): `0x0040fb50` drains WM_KEYDOWN–KEYUP then scans the 256-byte `GetKeyboardState` for a pressed key; `0x0040f6d0` polls joystick (X<15000 → `0x28`, X>45000 → `0x26`, Y<15000 → `0x25`, Y>45000 → `0x27`, R with flag → `0x2a/0x29`, else buttons via `0x0040f7a0`, 0 when idle/`0x465fe0` clear). `0x0040e760` loops both; `0x1b` (Escape) skips the store → cancel with relabel only, no change. Keyboard codes store low-byte-first (`key,0`), joystick high-byte-first (`code,0`). Registry `Controls` = 0x16-byte `0x465fb8` via `0x0040e710` (`KEY_ALL`, value `0x466648`); read back by `0x0040e5c0`.
-  - Action table `0x00476c00` (11 rows × 8 bytes: u32 control bit + u32 analog flag): 0 accel `0x1` dig, 1 brake `0x2` ANALOG, 2 left `0x4` dig, 3 right `0x8` ANALOG, 4 punch `0x10` ANALOG, 5 kick `0x20` ANALOG, 6 backhand `0x40` ANALOG, 7 look-back `0x80` ANALOG, 8 unused `0x100` ANALOG, 9 nitro `0x200` dig, 10 camera `0x400` ANALOG. Row 8 (bit `0x100`) has no native control bit and no game binding — dead in the original too. Analog rows use dead zones `0x3fff/0xbffd`, digital rows `0x6fff/0x8fff` (`0x0044f880` branch, matches the `steer_dead_zone` comment).
+  - Action table `0x00476c00` (rows × 8 bytes: u32 control bit + u32 analog flag; bit = `1 << row` for rows 0..10, rows 11..18 repeat `0x800/0x1000/0x4000/0x2000`): 0 accelerate `0x1` dig, 1 brake `0x2` ANALOG, 2 left `0x4` dig, 3 lean down `0x8` ANALOG, 4 nitro `0x10` ANALOG, 5 punch `0x20` ANALOG, 6 kick `0x40` ANALOG, 7 backhand `0x80` ANALOG, 8 dismount `0x100` ANALOG (no reader found), 9 right `0x200` dig, 10 lean up `0x400` ANALOG. **Corrected November 1, 2026:** the October 12 reading named rows 3–10 right/punch/kick/backhand/look-back/unused/nitro/camera. The bit meanings come from the sim-validated `bike.hpp` constants (`0x0040a600`/`0x00434660` readers) and match the Configure Input captions 256–264 (Accelerate, Brake, Turn, Lean, Nitro boost, Swing, Kick, Backhand, Dismount); rows 9/10 are the second halves of Turn/Lean. The port's `kActionBits` carried the old reading until November 1. Analog rows use dead zones `0x3fff/0xbffd`, digital rows `0x6fff/0x8fff` (`0x0044f880` branch, matches the `steer_dead_zone` comment).
+  - Keyboard codes (November 1, 2026): `0x0040e5f0` copies one 256-byte VK → code table into `0x004c5d90` by keyboard layout (`0x00465fe8` US/default, `0x004660f0` German 7, `0x00466408` Spanish 10, `0x00466510` Finnish 0xb, `0x004661f8` French 0xc, `0x00466300` Italian 0x10). US codes: ASCII lower-case letters, digits and punctuation; `0x80`–`0x86` Clear/PgUp/PgDn/End/Home/Insert/Delete each with its keypad twin (5/9/3/1/7/0/decimal); `0x90`–`0x92` Shift/Ctrl/Alt; `0x93`–`0x96` Left/Up/Right/Down with keypad 4/8/6/2; Backspace, Tab, Enter, Escape, Space as themselves. Table row codes hold the keyboard code in byte 1 (u16 high byte) and the joystick code in byte 0. Keyboard defaults `0x00466618`: Up, Down, Left, Home, `n`, Insert, Enter, Space, `d`, Right, PgUp.
+  - Turn/Lean capture `0x0040fc70` (rows 2/3 via `0x0040e690`, captions 0xa2/0xa3): the first key or joystick code goes to row r; Left arrow (`0x93`) fills row r+7 with Right (`0x95`) and joystick `0x24`/`0x28`/`0x29` fill `0x22`/`0x26`/`0x2a`; otherwise it waits for a second, different code (Escape cancels at either step). Both rows are stored, then `0x0040fbf0` runs for each and both are relabelled. `0x0040fbf0` clears a matching row's pair partner too (2↔9, 3↔10); after that pair clear its scan pointer moves 7 rows while the row counter does not, so the rest of the scan reads past the table (port: scans each row once).
+  - Joystick race read (November 2, 2026; decompiled `0044f800.c`/`0044f880.c`): `joyGetPosEx(0)` then rows 0..`DAT_0049e65c`−1 (0xf, or 0x13 when `0x0044f7c0` finds any joystick code and sets `DAT_00476c98`). Code 1..0x20 tests `dwButtons` bit code−1; 0x21..0x24 compares `dwPOV` with `0x00476c1c[code]` (0, 9000, 18000, 27000 at `0x00476ca0`); 0x25 Y ≤ lo, 0x26 X ≥ hi, 0x27 Y ≥ hi, 0x28 X ≤ lo, 0x29 R ≥ hi, 0x2a R ≤ lo, where `0x00476c04` (row flag, 8-byte stride after the bit) 0 gives lo/hi 0x6fff/0x8fff plus an analog write and 1 gives 0x3fff/0xbffd. Flag 0 rows: 0, 2, 9. Codes above 0x2a fall through the switch and read as pressed with an uninitialised deflection. `0x0044fa00(row, v)`: row 0 → `DAT_004b7e78 = +0x260·v/0x7fff`, rows 2/9 → `DAT_004b7e7c = v/800`; `0x0044fa50` (a key or button) writes 0, 0 and 0x6400. `0x00434660` with `DAT_00476c98` set throttles via `0x0040ad10` (`+0x260 − DAT_004b7e78`) and `0x0040ad30` steers to `DAT_004b7e7c − 0x20` / `DAT_004b7e7c`.
+  - Joystick capture (`0x0040f6d0`/`0x0040f7a0`): X < 15000 → 0x28, X > 45000 → 0x26, Y < 15000 → 0x25, Y > 45000 → 0x27, then (caps bit 2) R < 15000 → 0x2a, R > 45000 → 0x29, then (caps bit 0x10) POV exactly 9000/0/18000/27000 → 0x22/0x21/0x23/0x24, then a `dwButtons` with exactly one bit → its button number (any button sets `DAT_004c5ba3`). `0x0040fc60` before each capture step is empty.
+  - Joystick label text (`0x0040e7b0`, byte 1 zero): code 0 `"<Unassigned> "`; 1..0x20 `"Joystick "` (rows 0..8) + `"Button "` + `%d` + `" "`; 0x21..0x24 `"Joystick Hat "` + arrow byte; 0x25..0x28 `"Joystick "` + arrow byte (0x21/0x25 up, 0x22/0x26 right, 0x23/0x27 down, 0x24/0x28 left); 0x29/0x2a `"Left "`/`"Right "` then `"Pedal "`; above 0x2a `"Pedal "`. Bound rows 9/10 append `"/ "` + their text (no device word) to the Turn/Lean slot.
 
 ### Rider/bike/shadow nodes (October 12, 2026, plan 11a Task 3 trace)
 
@@ -2483,3 +2545,147 @@ The plan 10 Task 6 / plan 16 Task 3 full steal acceptance remains open.
   on ring residency. At 0x0044143b..0x00441474, an invalidated graphics RRAN
   header clears +0x1e0 and animation descriptor pointers while old animation
   table pointers remain. Native resource eviction semantics are still open.
+
+## City parked-camera pedestrians: draw-gated load and road-clear scan (November 3, 2026)
+
+Disc EXE SHA-256 `73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2`
+(checked against `analysis/inventory.json`). Sources: project exports
+`analysis/decompiled/{00440dd0,00440b80,00438610,00441500,0044a070,00449e60,00449ce0,004415b0,0044a020,004498c0,00440990,0043adc0,0043a190}.c`
+and two new original captures (`city-parked-randlog-20261102`,
+`city-parked-randlog2-20261102`, see SIM_SCENARIOS). No Ghidra writes.
+
+- The City RNG gap at tick 955 (`city-cops-parked-20261026`) was one missing
+  `rand()` in a pedestrian think, not AI. The per-tick stream showed a single
+  draw every 20 ticks (ticks ≡ 15 mod 20) from a type-5 crosser at sample 89,
+  ~10000 Q8 ahead of the parked camera; native skipped 955 and then fell
+  further behind. RANDLOG callers are `0x00440eff` (state 0 `rand & 1`) and
+  `0x004410ba` (state 1 `rand & 3`).
+- **Load on draw, only on drawn slices.** `0x00440b80` sets `+0x1e0` and the
+  animation words `+0x208..+0x220` from the draw callback `0x00440680`.
+  `0x00438610` invokes a node's `+0xdc` draw only for slices that frame draws,
+  and only when the projected x (`+0x50 >> 8`) lies inside the slice span. A
+  pedestrian beyond the drawn slices never loads. Its think then takes the
+  unloaded branches: state 0 → 1 sets pace 8 (`+0x208 == 0`), state 1 sets
+  pace 4 (`+0x208`, `+0x21c` and `+0x1e0` all zero). Measured with the new
+  0x3000 ORDER window: the crosser's lateral goes 153644 → 140249 on the
+  first walking run (dt 19 at pace 8), then −305/tick (dt 19) and −300/tick
+  (dt 20), the pace-4 law `dt·(pace·100 − 5·dt)`. The native loaded every
+  active pedestrian at the end of each tick and walked it at pace 8. Native
+  now loads only pedestrians whose slice lies between one slice behind the
+  ring camera (front − 0x5000) and camera + 0x1e00, the reach measured for
+  static boxes (traffic-field slice capture). The projected-x test is not
+  ported; that remains a labelled approximation.
+- **Road-clear scan (`0x00441500` → `0x0044a070` → `0x00449e60` →
+  `0x00449ce0`).** It walks the position-sorted scheduler list from the
+  pedestrian: ahead (`param_3` 0) for a negative lane, behind (2) otherwise,
+  with type mask `0x14` (bikes and cars), no range limit, and it returns the
+  first node in that lane (lane from `+0x28` minus slice `+0xcc`, divided by
+  250, as `0x0044a020`). `0x00449ce0` skips nodes without a slice (`+0x2c == 0`),
+  so parked bikes are never obstacles, and requires overlapping roadway bits
+  (`slice+0x36 & 3`). The test then compares the obstacle's `|+0x108|` (scaled
+  by `DAT_004b7e8c + 1` and the crossing factor) with the distance. `+0x108`
+  is the along-road velocity from the `0x0043adc0` motion words. A crossing
+  car (kinds 1 and 3) carries `+0x108 = 0` even while its `+0xec` speed is
+  2868. Native used `car.speed` (negated for kind 2), so a crossing car
+  blocked the crosser at tick 995; it now reads `car.motion.i32(0x108)`.
+- Earlier City notes on tick 235 (`0x4410b5`) and "City AI RNG" are
+  superseded: with these two rules every City capture matches its RNG and
+  ring-window riders to the end (4552 and 2×2400 ticks), including the
+  original arrest at 4552.
+
+## Remount tail: 0x004067d0 rejoins the half on the remount tick (November 4, 2026)
+
+Disc EXE SHA-256 `73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2`
+(checked against `analysis/inventory.json`). Sources: project exports
+`analysis/decompiled/{00404560,004067d0}.c` and the git-ignored capture
+`analysis/oracle/sim-napa-traffic-field.tsv`. No Ghidra writes.
+
+- The traffic-field replay diverged at tick 2279 on one node only: the
+  0x004463e0 shadow at 75067 in the original vs 75033 natively, while the
+  rider's dumped position matched (75067). Golden archaeology: the
+  original's node.28 jumps 75033 -> 75067 exactly when rider slot 3's
+  crash flag clears 3 -> 0, i.e. the shadow follows the remount.
+- `0x00404560` remount tail (export line 37) calls `FUN_004067d0(param_1)`
+  after zeroing 0x2f4, then thunks 0x00407410. `0x004067d0` copies the
+  bike motion words to `*(bike+0x2fc)` gated on 0x2f4 == 0, which holds at
+  that point. The half therefore rejoins the bike on the remount tick
+  itself, even when the bike node is not due after the half node.
+- Native `Race::crash_recovery` now calls `live_standings(r)` (the native
+  0x004067d0 image, same words; slice presence follows the +0x2c copy) in
+  the remount branch, matching the original call order (copy, then the
+  0x00407410 finish recompute). The non-live path is unchanged:
+  `update_halves` rewrites the same words at end of tick with no RNG.
+- REA 6.4.0 was requested as a second opinion but its Ghidra headless
+  launch fails persistently in this sandbox (`GhidraLaunchError`; doctor
+  reports ghidra/headless/java healthy; retried twice). The project export
+  above is the evidence.
+
+## Pedestrian projected-x draw test: scene-build data, not sim state (November 4, 2026)
+
+Follow-up to the city-rng-20261102 handoff item 1 (the unported
+projected-x part of the draw gate). Sources: project exports
+`analysis/decompiled/{00438610,00443b40,00443c00,00443af0,00443cd0,
+00440680,004463e0,00444630}.c`. No Ghidra writes. Time-boxed trace;
+stops below rather than guessing the actor-node writer.
+
+- `0x00438610` is the only indirect `+0xdc` dispatcher in the export set,
+  and `0x00440680` (pedestrian load/draw) has no direct callers, so ped
+  loads fire only through that dispatch. The dispatch additionally
+  requires `node+0x54 == half` and the bucket test
+  `(node+0x50 rounded)>>8 in [param_2, param_3)`, with the spans from the
+  half (`+0xe8/+0xec` in `0x00443c00`, else +-10000).
+- `0x00444630` writes the tested words per node per frame during the
+  scene build: `+0x44` depth, `+0x48` vertical, `+0x50` x, `+0x54/+0x58/
+  +0x60/+0x68` spans, all from projection math with screen-width terms
+  (`(DAT_0046667c & ~1) * 0x8000`). These are render-side, per-frame
+  values: there is no sim-side per-pedestrian projected-x word to port.
+  (The same `(node+0x50 rounded)>>8` value is passed as the world-x input
+  to `0x0044ba40` by the actor draw callbacks, so actor `+0x50` doubles
+  as the projection input at draw time.)
+- Open: which builder writes the actor (rider/pedestrian/car) nodes that
+  satisfy `node+0x54 == half`, and the exact span contents of half
+  `+0xe8/+0xec`. No `+0x54` writer was found in the scheduler
+  (`0x00438170`, `0x004060b0`, `0x00406890`) or the pedestrian think/spawn
+  (`0x00440dd0`, `0x00440990`) exports.
+- Consequence: the native slice-reach approximation in
+  `load_pedestrian_looks` stands until moving-camera evidence shows the
+  x-gate firing. All parked City captures pass without it (2x2400,
+  4552). The faithful port would drive ped loads from the native
+  scene-build draw decision on the same tick (deterministic: same
+  post-step state), not from sim-side span plumbing. `city-moving.tsv`
+  is a scene capture (slices/pixels, no rider/RNG keys), not a replay
+  golden; a moving-camera replay still needs a fresh `RR_ORACLE_INPUT`
+  capture with prefix coordination.
+
+
+## Split/merge runtime ring and physical-road identity (November 4, 2026)
+
+Reference disc SHA256 `73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2`.
+Project exports plus independent `npx rea-agents@6.4.0` on the unmodified disc:
+
+- `00452e10` section-step results0/1/2/3 mean same road/new road/window/terminal.
+  A terminal/null link leaves iterators intact. `00453030` retains two section
+  iterators (500-byte stride), steps selected half first, and enters both halves
+  before fractional stepping. `00454c80` likewise builds selected then opposite.
+- `00453b60` retains the 81-step window iterator snapshot. Later split/merge
+  reentry clones the opposite iterator and its offset relative to the live half;
+  reinitializing terrain would draw from RNG incorrectly. Separation threshold
+  is first index with gap>=256+inner shoulders, else80. `00451910` assembly
+  explicitly zeroes EAX on all returns, so its two return values add no terrain
+  width to this test. `004540e0` sets global choice and both dual walkers;
+  `00452fd0` collapses only after branch commitment.
+- `make_route_indexed` incorrectly retained the chosen graph edge as its own
+  opposite. Original split uses next forhalf0 and previous forhalf1. Napa A at
+  sample729 is section1, but opposite must be section3, whose CESR type3 endpoint
+  creates the original quiet intersection. Its lane count/offset/terrain must
+  also come from section3 during intersection and signal construction.
+- `00439b10` case4 reads current sub-slice+0xc, its right-forward link, for
+  next-slice terrain interpolation. At the common road before a split this is
+  physical half1 even when the rider's current selected route is half0. Using
+  native route[+1] directly produced body ground7 vs original11 at tick7868.
+  Selecting the actual half1 link restores that prefix and the finish fixture.
+
+Measured scope: steal-farm first7872 ticks match with one RNG anchor; the next
+body vertical velocity gap7873 remains open. Component/snapshot tests do not
+establish complete road-neighbor topology or arbitrary per-split route parity.
+See [handoff](agent-handoffs/split-ring-latest-20261104.md) for logs and remaining work.

@@ -38,6 +38,358 @@ Source and mix limitations are recorded in [FORK_AUDIO.md](FORK_AUDIO.md).
 Local evidence paths and tool versions: [FORK_WORK.md](FORK_WORK.md).
 
 
+
+## Crashed cop uses the cop animation bank (November 8, 2026)
+
+Sentry ROAD-RASH-E (web build `40829db`): `vector::at` thrown from
+`select_actor_view` via `ActorNodes::rider`. Owned Debug build
+`build-agent-sentry-e` at baseline `40829db`.
+
+- Probe against the disc library: rider-bank playback drawn with cop views
+  fails 157/159 frames; cop-bank playback with cop views fails 0/35.
+- New `police-test` block (Napa level 3, cop spawned at 4096, cop bike forced
+  into crash state 1 at speed 6000): every crash rider/bike frame must come
+  from the cop bank and select within the cop views. It fails on the old
+  behaviour (`Cop crash animation code lies in the cop bank`) and passes with
+  the fix (1493 crashed ticks).
+- Full build exit 0; `ctest --test-dir build-agent-sentry-e -j8`: 135/135
+  passed. `python3 tools/cpp_quality.py format-check`: clean.
+- Not covered: no original capture of a crashing cop exists, so cop crash
+  numeric fields are not compared tick by tick.
+
+## Remount rejoins the half on the remount tick (November 4, 2026)
+
+Owned Debug build `build-agent-remount-20261104` at baseline `d063704` plus
+the change (one line in `src/race.cpp`, one block in `tests/crash_test.cpp`).
+
+- Full build, `cmake --build build-agent-remount-20261104 --parallel`:
+  exit 0. `python3 tools/cpp_quality.py format-check`: 0 violations.
+- New `crash-test` block (live-schedule Race, crash state 3 with the
+  pickup animation past 41, bike moved on, only the half node due):
+  fails without the fix (`Live remount did not rejoin the half: mirror
+  17920/32768`), passes with it (`Live remount rejoins the half on the
+  remount tick`); `crash-test` exit 0.
+- `oracle-sim-test --driver=human` first divergence, post-fix binary:
+
+| Scenario | Baseline `d063704` | Now |
+| --- | --- | --- |
+| traffic-field | 2279 (shadow 75067 vs 75033) | **4381/4381 identical** (full pass) |
+| steal-farm | 3627 | 4059 (ring car lateral) |
+| steal-farm-l1 | 2837 | 5697 (RNG) |
+| contact / fight-steal / fight-steal-l5 / steal-bunch / steal-vary | 4096 / 896 / 816 / 1399 / 941 | unchanged |
+
+- No regressions (same post-fix binary): `napa-field-l1`,
+  `napa-field-l1-schema2-20261018`, `napa-field-l5-20261018` each
+  2400/2400; `police-test` city `cops-parked-20261026` RNG/riders/cop to
+  4552 with the arrest, both `city-parked-randlog*` 2400/2400;
+  `python3 tools/verify_sim.py --mode acceptance` 1431/1431, exit 0.
+- Full `ctest --test-dir build-agent-remount-20261104 --output-on-failure`:
+  **127/135 passed** (log `build-agent-remount-20261104.ctest.log`). The 8
+  failures (`first-run-smoke`, `first-run-smoke-unicode`,
+  `game-race-wiring`, `net_ws`, `net_hostile_ws`, `server_health`,
+  `net_presentation`, `net_rtc`) fail identically with the untouched
+  baseline build `build-agent-city-rng-20261102` (same 8 test IDs): no
+  displays and no TCP bind in this sandbox (`The video driver did not add
+  any displays`; `TCP server socket binding failed`). Not run: Android,
+  sanitizers, package gates (simulation-only change; same scope as Nov 3).
+
+## City pedestrian RNG parity (November 3, 2026)
+
+Owned Debug build `build-agent-city-rng-20261102` at baseline `1f02453` plus
+the change. Baseline comparison build: detached worktree
+`/Users/archit/Dev/rr/wt-baseline-cityrng-20261102` at `1f02453`.
+
+- Full build, `ctest --test-dir build-agent-city-rng-20261102 -j8`:
+  **135/135 passed**, 0 failed (474 s). `police-test` prints three
+  pre-existing fixture skips (`napa-randlog1/2-20261018`,
+  `napa-backward-ring-randlog-20261018` are not on this disk).
+- `python3 tools/agent_gate.py oracle --build-dir build-agent-city-rng-20261102`
+  (= `make verify-sim`): **passed**, receipt
+  `analysis/agent-gates/oracle-73edceeaebce42afb0dab044da569331/receipt.json`.
+- `police-test` (one RNG anchor at tick 1):
+
+| Capture | Baseline `1f02453` | Now |
+| --- | --- | --- |
+| `city-cops-parked-20261026` | RNG to 954, riders to 4551 | RNG/riders/cop to **4552**, arrest 4552 asserted |
+| `city-parked-randlog-20261102` | RNG to 954 | **2400/2400** |
+| `city-parked-randlog2-20261102` | RNG to 954 | **2400/2400** |
+| Napa parked / crashed / foot / foot2 | 4730 / 4715 / 4700 / 4700 | unchanged |
+
+  "Riders" means the riders the capture dumps each tick (those inside the
+  ring window). Parked riders outside it are covered only through the RNG.
+- `oracle-sim-test --driver=human` first divergence, baseline vs now
+  (identical on both): contact 4096, fight-steal 896, fight-steal-l5 816,
+  steal-bunch 1399, steal-farm 3627, steal-farm-l1 2837, steal-vary 941,
+  traffic-field 2279. traffic-field body/box/slice/carcrash and fight: full
+  length identical (4381 / 2581).
+- New captures (original, receipted, valid; private install
+  `prefix/drive_c/ElectronicArts/RoadRashOracle-cityrng20261102`, proxy
+  `b02fffda7725`, built from this commit's proxy before clang-format
+  whitespace only). Shared install untouched (`30f4a83e8c48`).
+- Not run: Android, sanitizers, package gates (simulation-only change).
+
+## CI: multi-config pinned libraries and touch-control fixture (November 2, 2026)
+
+GitHub Actions had failed since `278dd5e`: every Windows job (Windows, Determinism
+matrix, Cross-play) stopped at `ninja: error: FindFirstFileExA(jpeg-scalar/build/$<CONFIG>)`,
+and Deploy browser game failed `tests/web_recovery.cjs` with `matchMedia is not
+defined` after `a7e1f57` added the on-screen touch controls.
+
+- `cmake/jpeg_scalar.cmake`: `IMPORTED_LOCATION` takes no generator expressions.
+  Multi-config generators (the Windows presets' Ninja Multi-Config) now get one
+  `IMPORTED_LOCATION_<CONFIG>` per configuration; single-config builds keep the
+  flat path.
+- `cmake/freetype.cmake`: the Release subdirectory is chosen by
+  `GENERATOR_IS_MULTI_CONFIG`, not `MSVC`. The old rule linked a missing
+  `freetype/build/libfreetype.a` under any non-MSVC multi-config generator.
+- `tests/web_recovery.cjs`: the VM sandbox provides `matchMedia` and
+  `document.body.classList.toggle`.
+
+Checks on macOS ARM64: `node tests/web_recovery.cjs` passes all six groups.
+`cmake -G Xcode` (multi-config) builds `rr-determinism` in Release, links
+`jpeg-scalar/build/Release/libjpeg.a` and `freetype/build/Release/libfreetype.a`,
+and `--synthetic` runs. The single-config Debug build and `ctest` pass.
+No Windows host was available locally; the Windows jobs on the pushed commit are the check
+for MSVC and clang-cl.
+
+Follow-up after `315454b`: with the paths found, Windows links failed on
+`freetype.lib(ftbase.c.obj) : error LNK2019: unresolved external symbol
+__imp_strncpy` (LNK4098 `MSVCRT` conflicts). FreeType's `cmake_minimum_required(3.0...3.5)`
+leaves CMP0091 unset, so it built against the DLL CRT while the port links the
+static one (`cmake/msvc.cmake`). FreeType now gets `CMAKE_POLICY_DEFAULT_CMP0091=NEW`
+and the port's `CMAKE_MSVC_RUNTIME_LIBRARY`. The parent evaluates that expression,
+so a Debug port gets `/MTd` (checked with a scratch ExternalProject). libjpeg-turbo
+chooses its own static CRT from `CMAKE_BUILD_TYPE`, which was empty under
+multi-config, so it now receives `$<CONFIG>`. The Xcode build script shows
+`-DCMAKE_BUILD_TYPE=Debug/Release/...` per configuration; Release `rr-determinism`
+and the single-config Debug unit tests still pass on macOS.
+
+## Joystick codes in the Configure Input table (November 2, 2026)
+
+- Scope: native component tests against decompiled flow and EXE tables. No
+  original capture with a joystick; no physical pad exercised by hand.
+- Evidence: decompiled `0044f800.c`, `0044f880.c`, `0044fa00.c`,
+  `0044fa50.c`, `0044fa80.c`, `0040f6d0.c`, `0040f7a0.c`, `0040fc70.c`,
+  `0040e760.c`, `0044f7c0.c`, `0040ad30.c`, `0040ad10.c`, `00434660.c`;
+  EXE bytes `0x00476c00` (row bit + edge flag, 8-byte stride) and
+  `0x00476ca0` (hat angles 0/9000/18000/27000).
+- `input-test`: capture codes for stick, pedal, hat, single and multiple
+  buttons; race bits and analog values from the joystick defaults table;
+  brake row's wide edge; keys reset analog in VK order.
+- `race-test`: full analog deflection equals the digital bike state; half
+  stick steers less; a throttle cut lowers speed.
+- `settings-test`: legacy `0028` loads as Return; joystick defaults survive
+  a round trip with the marker.
+- `frontend-test`: held arming button ignored; button 3 binds swing with its
+  label; stick left fills stick right; Lean takes two joystick codes and
+  ignores keys; keyboard first half ignores the pad; armed capture is modal
+  and Android Back cancels.
+- Build `build-agent-keylabels` (Debug): build PASS; `ctest` 134/134 PASS
+  (macOS, disc present); clang-format PASS; `tools/portability_check.py` 0
+  problems; `tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-64f578be41584b1696b5e41004bc80c3`,
+  hardware not run).
+- Not run: sanitizers, oracle sim (sim unchanged when no joystick code is
+  bound: the analog path is gated off), web build, Linux/Windows, a pad by hand.
+
+## Configure Input rows, key codes and Turn/Lean pairs (November 1, 2026)
+
+- Scope: native component tests against EXE tables and decompiled flow. No
+  original capture of a rebind or of race input from a custom table.
+- Evidence: EXE bytes `0x00476c00` (row bits), `0x00465fe8` (US VK table),
+  `0x00466618`/`0x00466630` (defaults); decompiled `0040fc70.c`,
+  `0040fbf0.c`, `0040fdf0.c`, `0040fd90.c`, `0040e7b0.c`, `0044fa80.c`.
+- Build `build-agent-keylabels` (Debug): build PASS; `ctest` 134/134 PASS
+  (macOS, disc present).
+- `input-test`: every original default key drives its row's bit (Up/KP8
+  accelerate, Home lean down, PgUp lean up, n nitro, Insert punch, Enter
+  kick, Space backhand, d nothing); code table round trip over all codes.
+- `settings-test`: legacy SDL capture `001a` loads as `7700`; pair clear on
+  conflict; `apply_pair_rebind`.
+- `frontend-test`: default labels per row, Turn waits for a second distinct
+  key and ignores F1, Left fills Right for Lean, Keyboard/Joystick defaults
+  rows load their tables and relabel; the controls golden stays 0 pixels.
+- clang-format on changed files PASS; `python3 tools/portability_check.py`
+  0 problems; `python3 tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-2a48ae2c3c2a4483906d25cc98318aaf`,
+  hardware not run).
+- Not run: sanitizers, web build, Linux/Windows, a live race with a custom
+  table by hand.
+
+## Controls key labels and Wingdings arrow keys (November 1, 2026)
+
+- Scope: native frontend component tests and rendered frames. No original
+  capture shows filled labels, so nothing here is a measured match.
+- Build `build-agent-keylabels` (Debug): build PASS; `ctest` 134/134 PASS
+  (macOS, disc present).
+- `frontend-test`: new checks for the default Up/Left labels
+  (`"\x1a<Keyboard> \x03 "`, `"\x1a<Keyboard> \x01 "`), the unbound row
+  (`"\x1a<Unassigned> "`), the rebind label, and that the arrow label draws
+  a different frame than the same label without the arrow byte. The controls
+  acceptance golden stays at 0 pixels full frame (bare entry shows stale
+  slots).
+- `frontend-test --dump <dir>` writes `controls-arrow-labels.bmp` and
+  `-2x.bmp`; inspected by eye at 1x and 2x (arrows in place after
+  "<Keyboard>").
+- clang-format on changed files PASS; `python3 tools/portability_check.py`
+  0 problems; `python3 tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-11acb77fde3849e89204bcfc260d884d`,
+  hardware not run).
+- Not run: sanitizers, web build, Linux/Windows.
+
+## Reverb and chorus buses in the race-music renderer (November 1, 2026)
+
+- Scope: native component and render tests of stand-in effects. No EMU8000
+  oracle exists, so nothing here is a measured match.
+- Build `build-sbk-timbre` (Debug): build PASS; `ctest` 134/134 PASS. First
+  failing run (before the test change): `music` failed six dry voice-rule
+  checks (loop gate, release level/silence, unset release, hard pan),
+  because the power-on reverb depth 40 now adds a tail. The engine was
+  right; those checks now zero CC91/93 first, and the new effect checks
+  cover the default depth itself.
+- `music-test ../cdrom/ROADRASH`: 57 synthetic SF1 checks pass (7 new for
+  the effects) plus the corpus checks (eleven songs parse, the AWE songs and
+  Napa render, the factory-note audit, the live Napa stream over thirty
+  seconds, stop silences).
+- Scratch corpus dump (not committed): SBKGRNG1..5 mono peaks
+  19575/21236/17096/15235/19402, zero clipped samples. CC91/93 census of the
+  disc songs (scratch Python): every SBKGRNG/GRUNGE song sets both per
+  channel (reverb 10–100, chorus 0–70); KLOWN sets neither.
+- `make format-check` on the changed files PASS;
+  `python3 tools/portability_check.py` 0 problems.
+- `python3 tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-ded4d33de53143f3861486ddb32a1c75`,
+  hardware not run). Nothing was played on a device or by ear.
+- Not run: sanitizers, fuzzers (parser unchanged), emscripten,
+  Linux/Windows.
+
+## SBK generator semantics in the race-music renderer (October 31, 2026, night)
+
+- Scope: native component and render tests of a spec-derived synthesizer.
+  There is no EMU8000 timbre oracle (Wine has none), so nothing here is a
+  measured match against the original's music.
+- Build `build-sbk-timbre` (Debug): configure/build PASS; `ctest` 134/134
+  PASS, zero failures. A first run on an earlier revision failed only
+  `portability-lint` (A11: `std::` libm calls); the maths now goes through
+  `det_math` plus a series sine.
+- `music-test ../cdrom/ROADRASH`: all 50 synthetic SF1 rule checks pass
+  (fixture builder in the test, no disc bytes). They cover attenuation
+  levels and the rendered 19.8 dB ratio, samplePitch/58 root and cents, an
+  882 Hz pitch from a 44100 Hz sample, loop offsets with +1/+2 and the
+  end + 1 clamp, the sampleModes gate, global zones, the SF1 merge, unit
+  conversions, envelope stages (attack ramp, decay to the silent SBK
+  default sustain, a release linear in dB), the Fc cut and mod-env sweep, Q,
+  vibrato and tremolo, hard pan, the exclusive class, CC7 and the RPN 0 bend
+  range. The corpus checks still pass: eleven songs parse, the five AWE
+  songs and Napa render audibly, the factory-note audit (SBKGRNG1 190,
+  KLOWN 2850), and the live Napa stream over thirty seconds.
+- Scratch corpus dump (not committed): SBKGRNG1..5 mono peaks
+  19777/20835/17021/15237/19610, zero clipped samples, at the −12 dB master
+  gain.
+- Pitch evidence (scratch Python on the local disc): the GRUNGE2/5 zones
+  with only samplePitch 4281/4782 autocorrelate to 42.8/47.9 semitones at
+  44100 Hz.
+- `python3 tools/cpp_quality.py format-check` on the changed files PASS;
+  `python3 tools/portability_check.py` 0 problems.
+- `python3 tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-de212f0b7f0a4af5a74848da71ce1e00`,
+  hardware not run). Nothing was played back on a device or by ear.
+- Not run: sanitizers, fuzzers (the `read_sf1` interface is unchanged),
+  emscripten, Linux/Windows.
+
+## System faces, footers and full-frame menus (October 31, 2026, evening)
+
+- Ground truth: `glyphprobe.exe <dir> {mono|gray} sys` (Wine 11.18 Staging,
+  scratch prefix, which registers the macOS system fonts) dumps the game's
+  Wingdings 18/12 and New Courier Bold 18 LOGFONTs:
+  `analysis/frontend/glyphs-20261031/sysmono.txt`, `sysgray.txt`
+  (git-ignored). A scratch `ppemprobe` sweep (heights 8..48, seven faces)
+  established the VDMX rule; it is not committed.
+- `text-test`: "mono system-face glyphs exact 667/667, advances 667" and
+  "smoothed system-face glyphs exact 667/667, advances 667" with the macOS
+  `Wingdings.ttf` and `Courier New Bold.ttf`; skipped without them or the
+  dumps. The built-in Wine Wingdings is checked for the three arrow glyphs
+  (coverage and ink), not against a probe. Earlier results unchanged
+  (8446/8448, 8448/8448, 491520/491520).
+- `frontend-test` full-frame ceilings (macOS host): 0 pixels on characters,
+  restroom, jukebox, controls, thrash, loading, olleys, showroom, panzer,
+  schmooze, bulletin, wrecked, busted, won, lost, penalty, standings and
+  street; graphics 704 (port-only Display row); main menu and menu-09 852
+  (Mano-À-Mano greyed without a network transport). Hosts without the macOS
+  Wingdings get 119 pixels of slack for the arrow. The controls test now
+  reaches Configure Input through the restroom Controls row.
+- Build `build-agent-frontend-exact-20261031` (Debug): `ctest` 134/134 PASS;
+  clang-format check on the changed C++ files PASS.
+- Not run: Linux and Windows packages (licence lists updated and checked by
+  their verifiers only when those gates run), Android hardware, the
+  Courier/Wingdings fallbacks on a real Linux or Android host.
+
+## Exact menu text: FreeType 2.13.3 and smoothed GDI glyphs (October 31, 2026)
+
+- Ground truth (Wine 11.18 Staging, scratch prefix with the default
+  grayscale smoothing; i686 mingw builds of the probes). `tools/glyphprobe.c`
+  (1bpp DIB) and `glyphprobe.exe <TEXT dir> gray` (32bpp, white on black)
+  each dump 9856 glyphs. `tools/blendprobe.c` gives 491520 RGB565 blend
+  samples, and `tools/textprobe.c` gives the CALCRECT widths. Outputs are in
+  `analysis/frontend/glyphs-20261031/` (git-ignored, disc-derived).
+- `text-test` replays them: "mono glyphs exact 8446/8448, advances 8448" (the
+  two misses are BADLOC 14 `Í`/`Ú`, pinned by name), "smoothed glyphs exact
+  8448/8448, advances 8448", "16-bit text blend exact 491520/491520". It
+  skips (77) without the dumps.
+- `frontend-test`: 226 picture caches bit-exact as before. Full-frame
+  ceilings (unmasked): characters 119, restroom 83 and jukebox 83 differing
+  pixels (all in the Wingdings focus arrow); graphics 787 (arrow plus the
+  port-only Display row); loading, schmooze, wrecked, busted and lost 0.
+  Masked exact is 100% on characters, restroom, jukebox and graphics (pins
+  0.999/0.99). Scratch full-frame sweep: restroom 95.9 to 100.0%, jukebox
+  97.8 to 100.0%, graphics 96.6 to 99.7%, characters 95.5 to 100.0%; also
+  olleys 100.0%, panzer 96.1%, won 98.8%, penalty 99.0%. Showroom (94.7%),
+  thrash/bulletin (95.9%) and standings (87.3%) keep known y=380
+  footer and New Courier gaps.
+- `race-cache`: the RGB hashes were re-recorded because HUD glyphs now come
+  from FreeType. All six `original_scene` (no-HUD) hashes are unchanged and
+  every dashboard-pixel check passes. `hud-test` exposed the MiniDash readout
+  record offset (21 to 20) once DrawText clipping was in. The countdown checks
+  vs the original stay 1209/1209, 1241/1241 and 750/750.
+- Build `build-agent-frontend-exact-20261031` (Debug): `ctest` 134/134 PASS.
+  `python3 tools/cpp_quality.py format-check` PASS. `python3
+  tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-46675a655cb643ab98d2482bc1a97e24`,
+  hardware not run). Its first attempt failed because the FreeType sub-build
+  had no `CMAKE_MAKE_PROGRAM`; both ExternalProject modules now forward it.
+  Emscripten Release build PASS with `EMSDK_PYTHON` set to emsdk's 3.13 (the
+  system python3 is 3.9); its ctest was not run. Offline configure with
+  `RR_FREETYPE_SOURCE_DIR`: "No download step for 'rr-freetype-build'",
+  library built.
+- Not run here: Linux/Windows package builds, the MSVC branch of
+  `cmake/freetype.cmake` (`Release/freetype.lib`), and Android hardware.
+
+## Exact menu pictures, dark fills and text colours (October 31, 2026)
+
+- Build `build-agent-frontend-exact-20261031` (Debug): configure/build PASS;
+  `ctest` 121/121 PASS before the rebase onto upstream and 134/134
+  PASS after it, zero failures.
+- `frontend-test ../cdrom/ROADRASH`: "original picture caches compared
+  bit-exact: 226" (all `fe-*-cache<i>.raw` named slots under
+  `analysis/frontend/acceptance-*`); masked screens characters 90%,
+  restroom 95%, jukebox 97%, controls 96%, graphics 93% exact (pins 0.88,
+  0.93, 0.95, 0.94, 0.91).
+- `python3 tools/cpp_quality.py format-check` PASS;
+  `python3 tools/agent_gate.py android-debug` PASS (receipt
+  `analysis/agent-gates/android-debug-03e2011a872746da99ee3f1feb8c163d`,
+  hardware not run); emscripten Release build PASS
+  (`build-agent-frontend-exact-web`, ctest not run).
+- After rebasing onto `6b3b6be` (Linux/Windows packaging): the JPEG
+  licences join the Linux tarball/Flatpak and Windows package lists (and
+  their verifiers), and the Flatpak supplies libjpeg-turbo as a pinned
+  archive through the new `RR_JPEG_SOURCE_DIR` (offline configure checked
+  locally: "No download step", frontend-test 226/226). Linux and Windows
+  package builds, and the MSVC path of `cmake/jpeg_scalar.cmake`, were not
+  run on this Mac.
+- Glyph research: `tools/glyphprobe.c` (i686 mingw, Wine 11.18 Staging,
+  scratch prefix) wrote 9856 glyphs; scratch comparator against Homebrew
+  FreeType 2.14.3: 6986/8448 covered glyphs exact, ASCII 4185/4224. Not a
+  shipped renderer and not an acceptance claim.
 ## run-linux.sh and run-windows.bat (October 31, 2026)
 
 - **Linux, Docker (ARM64), from a Git checkout of the tree:** each container
@@ -3897,3 +4249,79 @@ resource eviction (`build/napa-expanded-human-parity.json`). This supersedes
 any inference that the older 2400-tick capture covered pedestrian resource
 lifetimes: it did not record those fields. The older strict pass remains
 valid for its measured schema, not for the newly expanded schema.
+
+## 2026-11-02 — rr-netd non-blocking health responder
+
+- Build `build-agent-netd-health-20261102` (Debug, macOS ARM64).
+- `ctest -R "server_|net_hostile_ws"`: 5/5 passed (`server_health`,
+  `server_room`, `server_hostile`, `server_sealer`, `net_hostile_ws`).
+  `server_health` passed 5 runs in a row. It checks that a poll with 8
+  stalled clients returns in under 50 ms, that a request split across polls
+  gets 200, that other paths get 404 without building the body, that
+  stalled clients are closed exactly at the 2 s deadline, and the 32-socket cap.
+- Live daemon: `rr-netd` on 127.0.0.1:18980/18981 with 8 stalled health
+  connections held open answered three `GET /net/health` requests in
+  2.4–2.6 ms each (200, body ends with the revision) and closed all 8
+  stalled sockets after the deadline. The old responder would have spent
+  up to 1.6 s per loop pass on those 8.
+- Full suite (`cmake --build` + `ctest`): 134/135. The one failure was
+  `portability-lint` (A6: unguarded POSIX headers in the new test). After
+  moving them behind `#ifndef _WIN32`, `portability-lint` and
+  `server_health` pass; the other 133 were not rerun for that header-only
+  test change.
+- Not run: Linux Docker image build (the Linux `MSG_NOSIGNAL` branch has not
+  been compiled here), production deploy.
+
+
+## Dual-half ring and physical-road selection — November 4, 2026
+
+Owned build `build-agent-traffic-ring-20261103`, Debug, exported compile DB.
+
+- Full build passed: `cmake --build build-agent-traffic-ring-20261103 --parallel 6`
+  (`/tmp/rr-split-current-full-build.log`, exit0).
+- Completed full CTest gate: 135/135 passed, zero failures (428.01s),
+  `/tmp/rr-split-current-full-ctest.log`. The November 5 resume confirmed
+  the owner process had exited and the final log was complete.
+- Resume build passed November 5: `cmake --build
+  build-agent-traffic-ring-20261103 --parallel 6`, exit0,
+  `/tmp/rr-resume-20261105-build.log`. Fresh full CTest passed 135/135, zero skips/failures (434.36s):
+  `ctest --test-dir build-agent-traffic-ring-20261103 --parallel 6
+  --output-on-failure`, `/tmp/rr-resume-20261105-ctest-parallel.log`.
+  Earlier serial resume was stopped to run this complete parallel gate.
+- Resume formatting and `git diff --check` passed. REA6.4.0 spot-check of
+  0x0043a190 succeeded; reference hash matches inventory. clangd preflight
+  healthy (426 entries), source check timed out after60s; no client LSP.
+  Debugger investigation of the next gap is in the
+  [resume handoff](agent-handoffs/split-ring-resume-20261105.md).
+- Focused course/traffic/race_state: 3/3 passed (12.78s),
+  `/tmp/rr-split-ground-tests.log`. New course opposite-half regression failed
+  both branch directions before its fix; gameplay commitment regression failed
+  before wiring; width/cache/reversal/terminal/snapshot tests pass. No golden
+  or acceptance assertion was weakened.
+- Strict `tools/verify_sim.py --mode acceptance` passed1431/1431 identical,
+  report `/tmp/rr-split-ground-acceptance.json`, with the current replay binary.
+- `oracle-sim-test analysis/oracle/sim-napa-steal-farm.tsv --driver=human`:
+  first gap advanced6719(RNG) ->7435(missing nodes) ->7868(body ground)
+  ->7873(body_f4 original1302/native1032). Last run exit1 is a diagnostic
+  mismatch, not full capture acceptance; first7872 ticks match. No reanchor.
+- Earlier integration on the pre-ground-link source was134/135 (474.80s),
+  failing only the finish-run assertion in race_state. LLDB showed the player
+  busted and bike condition0. The original +0xc ground-link correction made
+  that unchanged test pass. That earlier gate does not certify current source.
+- Independent REA6.4.0 exports for00453030,00451910,004540e0,00439b10 support
+  address/field mapping; logs and exact reference SHA are in the handoff.
+  No new Wine capture or device validation. Client C++ LSP unavailable;
+  clangd fallback attempted with the owned426-entry CDB, Apple refactor-tweak
+  check failures/time bound recorded locally; no claim of green client LSP.
+- Remaining acceptance is explicit in the [handoff](agent-handoffs/split-ring-latest-20261104.md).
+
+
+## November 11, 2026 — upstream merge validation
+
+Integration target upstream/main 20fb4c0 onto 1d575f0. Full Debug build succeeds.
+Napa human2400 remains strict PASS (build/upstream-merge-napa.json); expanded
+City remains blocked at graphics eviction tick514 (build/upstream-merge-city.json).
+Final CTest gate PASS: 138 registered, 102 passed, 36 explicit corpus/platform
+skips, zero failures (build/upstream-merge-final-tests.log).
+See agent-handoffs/upstream-parity-merge-20261111.md for the preserved fork input
+format and why upstream paired/legacy joystick capture is not activated.

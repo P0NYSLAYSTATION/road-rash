@@ -1,5 +1,32 @@
 stb_image.h, stb_truetype.h (v1.26, SHA-256 ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab) and LICENSE from https://github.com/nothings/stb/tree/2c980bb59875b0d32144a71867fbdebb2f77cd20
-Unmodified upstream image decoder and TrueType rasteriser. Used for the original JPEG-encoded RRI assets and for the TrueType fonts on the disc (TEXT/*.DLL).
+Unmodified upstream image decoder and TrueType rasteriser. stb_truetype renders the import screen's system fonts; stb_image now serves only the research viewer.
+
+The disc's TrueType fonts (`TEXT/*.DLL`) are rendered by FreeType 2.13.3, the
+release Wine bundles for GDI text, fetched by `cmake/freetype.cmake` from
+https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
+(SourceForge mirror as fallback; SHA-256
+`0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289`) and built
+static without zlib/bzip2/png/harfbuzz/brotli. Unmodified source, used under the
+FreeType License (`FreeType-FTL.txt`, from the archive's `docs/FTL.TXT`), which
+ships in every package. Portions of this software are copyright © 2024 The
+FreeType Project (www.freetype.org). All rights reserved.
+
+The original draws its focus and dashboard arrows in Wingdings and its standings
+in Courier New Bold, Windows system fonts. The game loads them from the host
+(`system_font_paths` in `src/text.cpp`). Without a host Wingdings it uses Wine's
+own replacement, `wine-fonts/wingding.ttf` from Wine 11.18 (unmodified, with its
+`wingding.sfd` source; LGPL-2.1-or-later, `Wine-Wingdings-LGPL.txt`, shipped in
+every package), compiled in by `cmake/wine_wingdings.cmake`.
+
+Menu pictures (`IMAGES/*.RRI`, JPEG) are decoded by libjpeg-turbo 3.1.4.1,
+fetched by `cmake/jpeg_scalar.cmake` from
+https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.4.1.tar.gz
+(SHA-256 `a7da42b640377c2a9a9665e2c4b0ea60cd5599afb48c2521e6df0c9dc9d15a25`)
+and built static with SIMD off (`WITH_SIMD=OFF`): the original masks the IJG
+sample-range table, which only the scalar path consults. Unmodified source;
+licences `JPEG-LICENSE.md` and `JPEG-README.ijg` (IJG + BSD-3-Clause) ship in
+the macOS bundle and the APK notices. This software is based in part on the
+work of the Independent JPEG Group.
 
 SDL Android runtime: https://github.com/libsdl-org/SDL/releases/tag/release-3.4.8
 The official `SDL3-devel-3.4.8-android.zip` archive has SHA-256
@@ -15,7 +42,7 @@ build, Linux/Windows packages, and any host whose system SDL is older than
 3.4.18 is newer than 3.4.12, which added `SDL_HINT_ENABLE_STEAM_SCREEN_KEYBOARD`
 (plan 33a). Android stays on the 3.4.8 AAR above until its device work bumps
 it (plan 33 Task A7 records the split).
-The existing SDL and stb licences are copied into the application's Resources.
+The SDL, stb, libjpeg-turbo, FreeType and Wine Wingdings licences are copied into the application's Resources.
 
 Online multiplayer (plan 34) networking, fetched by `cmake/net.cmake` when
 `RR_NET_TRANSPORT` is on (native desktop builds, rr-netd, net bots):

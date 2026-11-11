@@ -120,6 +120,7 @@ class Frontend {
     void start(); // intro video, then the Credits screen
     void update(const MenuInput&, uint64_t now_ms);
     bool poll(FrontendEvent&); // next host action
+    const Settings& settings() const { return settings_; }
     // Plan 33b Task 4: button names of the connected pad (default: none connected).
     void set_pad_labels(PadLabels labels) { pad_labels_ = std::move(labels); }
     void draw(RgbImage&, int scale = 1) const; // 640s x 480s; scale = 1 keeps today's output exactly
@@ -152,7 +153,8 @@ class Frontend {
     bool dialog_open() const { return !dialog_.text.empty(); }
     std::string caption_text(const MenuItem&) const;
     const std::string& current_save() const { return save_file_; }
-    std::string player_name() const; // 0x0041c140
+    std::string player_name() const;  // 0x0041c140
+    std::string results_name() const; // 0x0041c060: Big Game full name (won screen)
     bool editing_text() const { return editing_name_ || editing_code_ || editing_chat_ >= 0; }
     const std::string& string_slot(int slot) const { return str(slot); }
     // In-race toggles: F10 cycles MiniDash 0->1->2->0 (0x004431d0 pump); the menu `/`
@@ -181,6 +183,8 @@ class Frontend {
     // Test-only pins (plan 13 Task 6 Step 2): the RNG stream still advances
     // the same draws as without them.
     void set_rest_picture_for_test(int n) { rest_picture_override_ = n; }
+    void set_string_for_test(int slot, std::string s) { strings_.at(size_t(slot)) = std::move(s); }
+    const std::string& string_for_test(int slot) const { return str(slot); }
     void set_schmooze_for_test(int rider, int attitude) {
         schmooze_rider_override_ = rider;
         schmooze_attitude_override_ = attitude;
@@ -211,8 +215,10 @@ class Frontend {
     void slider_home_end(bool home);              // Home/End: 0/100 on the focused slider row
     void apply_mixer_setting();                   // persist + emit apply_mixer
     std::string key_name(int action) const;       // plan 18 Task 7: 0x12 label text
+    void refresh_key_labels();                    // 0x0040fd90: label slots 160-168
     PadLabels pad_labels_;                        // plan 33b Task 4: Gamepad page names
     mutable std::array<std::string, 4> pad_rows_; // rows built from pad_labels_ in str()
+
     void apply_restroom_pattern();
     void set_background(const std::string& name);
     std::string background_for(int previous, int screen, int title);
@@ -245,6 +251,7 @@ class Frontend {
     std::string format_standing(size_t place, const Standing&) const;
     void draw_text_box(RgbImage&, const TextRect&, Face, int height, const std::string&, unsigned flags,
                        uint32_t colour) const;
+    void draw_arrow_label(RgbImage&, TextRect scaled, int scale, const std::string&, uint32_t colour) const;
 
     const Assets& assets_;
     const TextRenderer& text_;
@@ -284,9 +291,16 @@ class Frontend {
     int desc_slot_ = 0;
     uint32_t desc_format_ = 0, desc_flags_ = 0;
     bool desc_fill_ = false;    // 0x00420470 repaints the dark box only for flags & 8 items
-    std::string length_footer_; // course Length line for the showroom footer (stale = faithful)
-    std::string player_footer_; // 0x4208d0 bh&8 player line, centered at y=380 (masked in tests)
-    std::string price_footer_;  // 0x4208d0 bh&1 bike line, centered at y=380 (masked in tests)
+    std::string player_footer_; // 0x4208d0 bh&8 player line in a dark box at y=380
+    std::string price_footer_;  // 0x4208d0 bh&1 bike line in a dark box at y=380
+    uint32_t footer_flags_ = 0; // focused item flags; 0x004208d0 keeps & 0x20f00
+    struct FooterLayout {
+        TextRect box, text;
+        Face face;
+        int height;
+        unsigned format;
+    };
+    FooterLayout footer_layout(const std::string&) const;
     std::string price_text_;
     bool qualified_overlay_ = false;
     bool dark_screen_ = false; // standings: the darkened copy fills the screen

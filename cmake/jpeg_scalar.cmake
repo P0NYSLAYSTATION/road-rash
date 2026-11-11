@@ -1,0 +1,64 @@
+# The original modifies the IJG sample-range table to truncate to five bits.
+# SIMD paths bypass that table. Always build the pinned scalar decoder, for
+# identical output on macOS, Android, WebAssembly and future desktop targets.
+# Offline builds (Flatpak) pass the unpacked 3.1.4.1 tree as RR_JPEG_SOURCE_DIR.
+include(ExternalProject)
+set(RR_JPEG_SOURCE_DIR "" CACHE PATH "Unpacked libjpeg-turbo 3.1.4.1 source (skips the download)")
+set(RR_JPEG_ROOT "${CMAKE_BINARY_DIR}/jpeg-scalar")
+if(RR_JPEG_SOURCE_DIR)
+    set(RR_JPEG_SOURCE "${RR_JPEG_SOURCE_DIR}")
+    set(RR_JPEG_FETCH)
+else()
+    set(RR_JPEG_SOURCE "${RR_JPEG_ROOT}/src")
+    set(RR_JPEG_FETCH
+        URL https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.4.1.tar.gz
+        URL_HASH SHA256=a7da42b640377c2a9a9665e2c4b0ea60cd5599afb48c2521e6df0c9dc9d15a25)
+endif()
+set(RR_JPEG_BINARY "${RR_JPEG_ROOT}/build")
+set(RR_JPEG_PLATFORM_ARGS)
+foreach(var CMAKE_TOOLCHAIN_FILE CMAKE_OSX_ARCHITECTURES CMAKE_OSX_DEPLOYMENT_TARGET
+        CMAKE_OSX_SYSROOT ANDROID_ABI ANDROID_PLATFORM ANDROID_STL CMAKE_C_COMPILER
+        CMAKE_C_COMPILER_TARGET CMAKE_SYSROOT CMAKE_C_FLAGS CMAKE_EXE_LINKER_FLAGS CMAKE_MAKE_PROGRAM)
+    if(DEFINED ${var} AND NOT "${${var}}" STREQUAL "")
+        list(APPEND RR_JPEG_PLATFORM_ARGS "-D${var}=${${var}}")
+    endif()
+endforeach()
+if(MSVC)
+    set(RR_JPEG_NAME jpeg-static.lib)
+else()
+    set(RR_JPEG_NAME libjpeg.a)
+endif()
+# The sub-build inherits the generator; multi-config ones (the Windows presets'
+# Ninja Multi-Config) put the library in a per-config directory.
+# IMPORTED_LOCATION takes no generator expressions, so list each config.
+get_property(RR_JPEG_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(RR_JPEG_MULTI_CONFIG)
+    set(RR_JPEG_LIBRARY "${RR_JPEG_BINARY}/$<CONFIG>/${RR_JPEG_NAME}")
+else()
+    set(RR_JPEG_LIBRARY "${RR_JPEG_BINARY}/${RR_JPEG_NAME}")
+endif()
+# libjpeg-turbo picks the static CRT, Debug or not, from CMAKE_BUILD_TYPE;
+# $<CONFIG> keeps that matched to the port's /MT or /MTd under multi-config.
+file(MAKE_DIRECTORY "${RR_JPEG_SOURCE}/src" "${RR_JPEG_BINARY}")
+ExternalProject_Add(rr-jpeg-build
+    ${RR_JPEG_FETCH}
+    SOURCE_DIR "${RR_JPEG_SOURCE}" BINARY_DIR "${RR_JPEG_BINARY}"
+    CMAKE_ARGS -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_SIMD=OFF -DWITH_TURBOJPEG=OFF
+        ${RR_JPEG_PLATFORM_ARGS}
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target jpeg-static --config $<CONFIG>
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS "${RR_JPEG_LIBRARY}")
+add_library(rr-jpeg STATIC IMPORTED GLOBAL)
+set_target_properties(rr-jpeg PROPERTIES IMPORTED_NO_SYSTEM TRUE
+    INTERFACE_INCLUDE_DIRECTORIES "${RR_JPEG_SOURCE}/src;${RR_JPEG_BINARY}")
+if(RR_JPEG_MULTI_CONFIG)
+    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+        string(TOUPPER "${config}" config_upper)
+        set_target_properties(rr-jpeg PROPERTIES
+            IMPORTED_LOCATION_${config_upper} "${RR_JPEG_BINARY}/${config}/${RR_JPEG_NAME}")
+    endforeach()
+else()
+    set_target_properties(rr-jpeg PROPERTIES IMPORTED_LOCATION "${RR_JPEG_LIBRARY}")
+endif()
+add_dependencies(rr-jpeg rr-jpeg-build)

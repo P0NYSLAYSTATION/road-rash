@@ -604,3 +604,44 @@ This completes the requested full live-field capture. The task checkboxes
 above remain open for the other specified scenarios (level5, dedicated fights,
 steals and isolated traffic) and unmeasured police/split/mixed-actor branches.
 Do not infer all-game or all-course parity from this single captured route.
+
+
+### City pedestrian RNG (November 3)
+
+`city-cops-parked-20261026` now matches RNG, ring-window riders and the cop
+to its 4552 end, with the original arrest on 4552 asserted. Two new
+2400-tick City captures match end to end. The fixes are pedestrian rules:
+resources load only for pedestrians inside the drawn slices, and the
+road-clear scan follows `0x00449ce0` (slice-holding nodes, car `+0x108`).
+This covers City at level byte 2 (`RR_ORACLE_LEVEL=3`) with a parked player only. Moving-camera City races,
+other levels and the remaining courses still need captures. See
+[handoff](../agent-handoffs/city-rng-20261102.md).
+
+### Remount rejoins the half on the remount tick (November 4)
+
+`sim-napa-traffic-field.tsv --driver=human` diverged at tick 2279 on one
+0x004463e0 shadow node (original 75067, native 75033) while the rider
+position matched: the original's node.28 jumps exactly when rider slot 3's
+crash flag clears 3 -> 0. `Race::crash_recovery` ran `remount_crash_actor`
+but not the `0x004067d0` copy-back that the `0x00404560` remount tail calls
+(export line 37, gated on the just-zeroed 0x2f4), and the bike node was not
+due that tick. One-line fix: `live_standings(r)` in the remount branch
+(matching the original call order; the non-live path is unchanged because
+`update_halves` rewrites the same words with no RNG). New `crash-test`
+block fails pre-fix and passes post-fix. Results: traffic-field 2279 ->
+**4381/4381 identical** (Task 7 traffic-field scenario now fully replays);
+steal-farm 3627 -> 4059, steal-farm-l1 2837 -> 5697; contact/fight/steal
+first divergences unchanged; field/city/acceptance goldens unchanged. See
+[handoff](../agent-handoffs/remount-mirror-20261104.md).
+
+
+### November 4, 2026: split-ring continuation checkpoint
+
+Dual-half runtime walkers, cached window reentry, commitment and lane offsets
+are implemented with synthetic forward/back/snapshot coverage. Static route
+opposite identity, intersection roadway selection and the ground right-forward
+link are corrected. Single-anchor `sim-napa-steal-farm` now matches through7872;
+first gap7873 is body_f4 original1302/native1032. Strict human1431/1431 remains
+exact. No all-split or full-race acceptance claim: arbitrary route choices,
+complete neighbor topology and other-course/human cases remain open.
+[Evidence and next action](../agent-handoffs/split-ring-latest-20261104.md).
