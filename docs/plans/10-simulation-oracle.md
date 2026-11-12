@@ -1,5 +1,11 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## Physical statics checkpoint — November 12, 2026
+
+Exact Hiway prefix11158 includes RNG. Physical-half static builds restore10073
+marking contact; first11159 active riders5/native6 remains open. Full-race/all-track
+acceptance is unfinished. See current handoff for evidence.
+
 ## Latest Windows checkpoint — November 12, 2026
 
 Hiway matches through10072 including RNG on the unchanged completed recording.

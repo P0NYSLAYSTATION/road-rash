@@ -473,6 +473,15 @@ static void dump_sim_tick(void) {
                 uintptr_t sl = (uint32_t)RD32(node + 0x140);
                 fprintf(g_out, "# ground-actor tick=%d actor=%u pos=%d lateral=%d ground=%d\n", tick,
                         (unsigned)node, RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x24));
+                if (sl && readable(sl, 0x64)) {
+                    fprintf(g_out, "# static-input actor=%u slice=%u billboards=%u flags=%u\n",
+                            (unsigned)node, (unsigned)sl, RD8(sl + 0x3d), RD8(sl + 0x64));
+                    for (int i = 0; i < RD8(sl + 0x3d) && i < 2; ++i) {
+                        uintptr_t bb = sl + 0x40 + i * 16;
+                        fprintf(g_out, "# static-billboard index=%d selector=%u flags=%u type=%u boxes=%u word4=%u word8=%u wordc=%u\n",
+                                i, RD8(bb), RD8(bb + 1), RD8(bb + 2), RD8(bb + 3), RD32(bb + 4), RD32(bb + 8), RD32(bb + 12));
+                    }
+                }
                 for (int k = 0; k < 2 && sl && readable(sl, 0x14a); ++k) {
                     fprintf(g_out, "# ground-slice side=%d slice=%u node=%u local=%d type=%u flags=%u centre=%d edges=%d/%d shoulders=%d/%d selectors=%u/%u points=",
                             k, (unsigned)sl, RD32(sl), RD32(sl + 4), RD8(sl + 0x3c), RD8(sl + 0x37),

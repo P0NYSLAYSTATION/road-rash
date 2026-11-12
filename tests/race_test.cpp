@@ -748,7 +748,8 @@ int main() {
     // 0x00437750 type3+: marking selectors and timing belong to the half;
     // repeated contact with the same sample does not restart the animation.
     for (int type : {3, 4, 5})
-        for (int speed : {1000, 4000}) {
+        for (int speed : {1000, 4000})
+          for (bool physical : {false, true}) {
             rr::Race mark(straight(4000), straight(4000), t, spec, 90);
             auto& rider = mark.riders()[0];
             auto& bike = rider.bike;
@@ -767,7 +768,11 @@ int main() {
             slice.billboards = 1;
             slice.billboard[0] = {uint8_t(type), 128, 64};
             const auto& rs = mark.route()[rider.sample];
-            mark.ring_statics(int32_t(rider.sample), rs.section, rs.local, slice);
+            //A physical walker may enter a section before the flattened
+            //route does. Its marking must still collide in the live slot.
+            if (physical) slice.physical_half = 0;
+            mark.ring_statics(int32_t(rider.sample), rs.section + unsigned(physical),
+                              rs.local + unsigned(physical), slice);
             plain.step(0);
             mark.step(0);
             check(bike.i32(0x298) == (type - 2) * 60, "marking type sets its traction timer");

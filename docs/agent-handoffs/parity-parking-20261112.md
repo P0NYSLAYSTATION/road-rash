@@ -1,5 +1,29 @@
 # Parking continuation and retained road pointers
 
+## Physical statics continuation — latest state
+
+Published1.1.12 at98062ddd68a2e1f1912efe17cecf60543783a5e3; public installer
+SHA671ffd08525dee5e8b0fdf99b039f5063eab4fe99b57ef80de7eda1cf174c2b1 verified.
+Isolated1.1.11->1.1.12 preserved600 files and SDL menu smoke passes.
+Initial upgrade rejected a stale precommit build stamp; rebuilt clean and reran,
+then published. Logs v1112-clean-source-build, parity-v1112-upgrade-validation,
+v1112-publish under build/. No unverified installer published.
+
+Current physical-static-half fix matches immutable Hiway through11158 including
+RNG; first11159 active riders5/native6 (`build/hiway-physical-static-half.json`).
+Native10073 had unbuilt static table because canonical local15 differed from
+physical local16. Original10090 diagnostic confirms selector128/type10/one box;
+trace SHA998628e6eee06c9b8ebccf63260e42573686822e733ce3536f9688257821652f,
+10090 controls validated, working DLL restored. Probe word4 mislabeled lateral
+in that recording; corrected source uses neutral raw-word labels. No original
+capture is active. Focused synthetic marking tests cover shifted section/local
+and pass; strict Napa2400/City600 pass. Full MSVC build and SDL gate pass:104 passed,35 explicit skips,zero failures;
+two unavailable Direct3D tests excluded. Logs build/physical-static-half-full-build.log
+and physical-static-half-native-tests.log.
+New native11159 trace identifies rider9 waking (pos361600); compare original
+parked-state to diagnose wake boundaries next. No reanchor/golden edits.
+Full-race/all-track acceptance remains unfinished; multiplayer held.
+
 ## Latest continuation — supersedes older WIP descriptions below
 
 Physical force, mover-start wall reference and physical graph finish-distance

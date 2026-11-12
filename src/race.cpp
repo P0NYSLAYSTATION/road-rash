@@ -1184,6 +1184,12 @@ void Race::ring_statics(int32_t sample, uint32_t section, uint32_t local, const 
     // same section sample. Frames resolve the slice's family selectors as
     // 0x0044b630 does when the slice is first drawn (+0x64 bit 4).
     if (sample < 0) return;
+    auto matches = [&](const RouteSample& s) {
+        //00454240 writes the physical half even when its walker has entered
+        //the next section one sample before the canonical flattened route.
+        return in.physical_half >= 0 ? (!in.dual || s.half == in.physical_half)
+                                     : s.section == section && s.local == local;
+    };
     // 0045461f..00454649 inserts only strict interior BORR laterals.
     // Geometry collisions still use the slice boxes; these type1/flags4
     // nodes participate in list scans without contact or draw callbacks.
@@ -1191,10 +1197,13 @@ void Race::ring_statics(int32_t sample, uint32_t section, uint32_t local, const 
         for (int road = 0; road < 2; ++road) {
             if (size_t(sample) >= routes_[road]->size()) continue;
             const auto& s = (*routes_[road])[size_t(sample)];
-            if (s.section != section || s.local != local) continue;
+            if (!matches(s)) continue;
+            const int32_t centre = in.physical_half >= 0 ? in.road_offset : s.offset;
+            const int32_t left = in.physical_half >= 0 ? in.road_left : s.path.left;
+            const int32_t right = in.physical_half >= 0 ? in.road_right : s.path.right;
             for (size_t i = 0; i < in.borr_count; ++i) {
-                const int32_t x = s.offset + in.borr[i];
-                if (x <= s.offset - s.path.left || x >= s.offset + s.path.right) continue;
+                const int32_t x = centre + in.borr[i];
+                if (x <= centre - left || x >= centre + right) continue;
                 auto slot = std::find_if(roadside_nodes_.begin(), roadside_nodes_.end(),
                                          [](const RoadsideNode& n) { return !n.active; });
                 if (slot == roadside_nodes_.end()) break;
@@ -1208,18 +1217,19 @@ void Race::ring_statics(int32_t sample, uint32_t section, uint32_t local, const 
         auto& table = statics_[road];
         if (size_t(sample) >= table.size()) continue;
         const auto& rs = (*routes_[road])[size_t(sample)];
-        if (rs.section != section || rs.local != local) continue;
+        if (!matches(rs)) continue;
+        const int32_t centre = in.physical_half >= 0 ? in.road_offset : rs.offset;
         StaticSlice& out = table.mut(size_t(sample));
         out = StaticSlice{};
         out.built = true;
         out.borr_count = in.borr_count;
         for (size_t i = 0; i < in.borr_count && i < out.borr.size(); ++i)
-            out.borr[i] = rs.offset + in.borr[i];
+            out.borr[i] = centre + in.borr[i];
         if (in.borr_count) out.borr_frame = static_frames_(section, local, in.borr_selector, false);
         out.billboards = in.billboards;
         for (size_t i = 0; i < in.billboards && i < 2; ++i) {
             const auto& b = in.billboard[i];
-            out.billboard[i] = {b.type, rs.offset + b.offset,
+            out.billboard[i] = {b.type, centre + b.offset,
                                 static_frames_(section, local, b.selector, true), b.selector};
         }
     }
@@ -1278,6 +1288,17 @@ bool Race::sweep_statics(Rider& r, Rider* half_owner) {
     // count, boxes +0x61/+0x68) first, then the billboards (+0x3d). The first
     // overlapping box runs its contact and ends the sweep.
     const auto& table = statics_[r.route];
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")) && r.sample < table.size()) {
+        const auto& debug = table[r.sample];
+        std::fprintf(stderr, "static-input slot %d sample %zu built %d ready %d billboards %u\n", r.slot,
+                     r.sample, debug.built, debug.boxes_ready, unsigned(debug.billboards));
+        for (size_t i = 0; i < debug.billboards; ++i) {
+            const auto& bb = debug.billboard[i];
+            std::fprintf(stderr, "static-billboard index %zu selector %u type %u lateral %d frame %d boxes %zu\n",
+                         i, unsigned(bb.selector), unsigned(bb.type), bb.lateral, bb.frame != nullptr,
+                         bb.frame ? bb.frame->boxes.size() : 0);
+        }
+    }
     if (r.sample >= table.size() || !table[r.sample].built) return false;
     const StaticSlice& slice = table[r.sample];
     if (live_schedule_ && !slice.boxes_ready) return false;

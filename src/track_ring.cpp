@@ -467,8 +467,8 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     if (w.stopped) return;
     slice_events_[size_t((uint32_t(ring_q8) >> 8) & 127)] = w.event;
     // 0x00454c80 builds the selected half before its opposite.
-    build_half(w.halves[w.active], ring_q8, sink, w.front);
-    if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink, w.front);
+    build_half(w.halves[w.active], ring_q8, sink, w.front, w.dual ? w.active : 0, w.dual);
+    if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink, w.front, w.active ^ 1, true);
     auto& stored = shoulders_[size_t((uint32_t(ring_q8) >> 8) & 127)];
     stored.closed = 0;
     stored.countdown = int8_t(w.countdown);
@@ -510,7 +510,8 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     }
 }
 
-void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& sink, bool discover_finish) {
+void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& sink, bool discover_finish,
+                           uint8_t physical_half, bool dual) {
     // 0x00454240: two 0x00451cb0 walks, then 0x004520d0.
     const auto& node = node_of(*course_, w.node);
     const auto& section = course_->sections.at(node.link);
@@ -521,6 +522,11 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
     }
     const auto& path = path_of(w);
     RingStatics statics;
+    statics.physical_half = physical_half;
+    statics.dual = dual;
+    statics.road_offset = w.offset;
+    statics.road_left = path.left;
+    statics.road_right = path.right;
     w.borr.slots(path, *random_, statics); // first walk: stale edges, positions overwritten
     if (slice_sink_ && w.terrain)          // 0x00451910 (draw-free)
         slice_sink_(node.link, local, path,

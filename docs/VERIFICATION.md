@@ -1,5 +1,20 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — physical static collision gate
+
+`build/hiway-physical-static-half.json`: exact through11158 including RNG;
+first11159 riders5/native6, exit1 remains failed whole-race acceptance.
+Full MSVC Release build and SDL gate pass:104 passed,35 explicit skips,zero failures;
+two unavailable Direct3D checks excluded (`build/physical-static-half-native-tests.log`).
+Focused marking tests include shifted physical section/local and pass
+(`build/physical-static-half-tests.log`). Strict Napa2400/City600 pass
+(`build/physical-static-half-regressions.json`). Original diagnostic10090
+captures10090 validated controls and restores the working DLL (trace SHA256
+998628e6eee06c9b8ebccf63260e42573686822e733ce3536f9688257821652f).
+At10073 its current slice has selector128/type10/one box/local4096 (16 samples),
+where native canonical local15 had no static entry. Its probe word4 was initially
+mislabeled lateral; only raw words and selector/type/count are used as evidence.
+
 ## November 12, 2026 — physical force, wall and graph gate
 
 `build/hiway-physical-graph-finish.json`: unchanged completed14084-tick Hiway

@@ -1,5 +1,14 @@
 # Binary evidence and next work
 
+## November 12, 2026 — physical half owns static builds
+
+00454240 writes statics to its physical half; matching canonical section/local
+can silently discard a real build. At Hiway10073 original current local4096
+(sample16) contains a type10 marking, selector128, one loaded box. Native route
+local15 rejected that slice build, leaving statics unbuilt. Carrying physical
+half/common-road identity and actual walker centre/widths restores the contact
+and advances the exact completed-trace prefix to11158. First11159 is rider count.
+
 ## November 12, 2026 — force, wall reference and graph location
 
 0043a380 computes contact force from physical slice rises. Capture ground is

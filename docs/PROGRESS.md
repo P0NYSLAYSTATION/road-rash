@@ -1,5 +1,13 @@
 # Port progress
 
+## November 12, 2026 — physical static-collision identity
+
+Hiway matches through11158 including RNG on the unchanged completed recording.
+Live static builds now address their physical half and road centre even when
+walker section/local differs from the flattened route. This restores the marking
+contact at10073. First remaining gap11159 is active riders5/native6.
+Full-race/all-track acceptance remains open; multiplayer stays held.
+
 ## November 12, 2026 — physical force and mover references
 
 The unchanged completed Hiway trace matches through10072 including RNG.

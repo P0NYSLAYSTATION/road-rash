@@ -34,6 +34,9 @@ struct RingActor {
 // laterals) and up to two 0x004520d0 billboards (+0x3d, entries +0x40).
 // Laterals are units relative to the road centre (slice +0xcc).
 struct RingStatics {
+    int physical_half = -1; // -1: standalone fixture identified by section/local
+    bool dual = false;
+    int32_t road_offset = 0, road_left = 0, road_right = 0;
     uint8_t borr_count = 0, borr_selector = 0x3f;
     std::array<int32_t, 8> borr{};
     uint8_t billboards = 0;
@@ -189,7 +192,8 @@ class TrackRing {
     int step_section(SectionWalker&, int32_t delta);                    // 0x00452e10 section result (0/1/2/3)
     void collapse(Walker&);                                             // 0x00452fd0
     void step(Walker&, int32_t delta);                                  // 0x00453030 -> 0x00452e10
-    void build_half(SectionWalker&, int32_t ring_q8, const ActorSink&, bool discover_finish); // 0x00454240
+    void build_half(SectionWalker&, int32_t ring_q8, const ActorSink&, bool discover_finish,
+                    uint8_t physical_half, bool dual); // 0x00454240
     void build_slice(Walker&, int32_t ring_q8, const ActorSink&);       // 0x00454c80 -> 0x00454240
     const Course* course_;
     int level_;
