@@ -1,5 +1,14 @@
 # Port progress
 
+## November 12, 2026 — live family cursor and physical road lookups
+
+The unchanged completed Hiway trace now matches through9748 including RNG.
+Exact global-front family queries avoid firing old-section loads past the
+section's exit and retain incoming families while its biased cursor is negative.
+Car lane planning and AI curvature lookahead now read physical ring words.
+First remaining gap9749 is opponent ground64/native71. Full-race/all-track
+parity remains open. [Evidence and validation](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — physical traffic road motion
 
 Traffic now reads retained physical ring bend/rise words for swept motion,

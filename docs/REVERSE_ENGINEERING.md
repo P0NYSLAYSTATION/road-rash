@@ -1,5 +1,15 @@
 # Binary evidence and next work
 
+## November 12, 2026 — exact family cursor and physical lookahead
+
+00452310 uses the signed current-section cursor plus header bias; a following
+section can inherit the incoming family while that sum is negative. Subtracting
+33 globally then re-adding33 inside the old section incorrectly reaches loads
+beyond its actual exit. Original Hiway9405..9408 retains family139; native had
+overlaid171. Querying the exact front resolves9407. Physical cached lane words
+resolve9516 (298/341), and00449b40 curvature lookahead uses physical bends,
+resolving9694 target4608/2816. Next9749 ground64/71 remains open.
+
 ## November 12, 2026 — traffic shares retained road motion
 
 Original cars follow physical slice links in00439270/004394c0, reading current

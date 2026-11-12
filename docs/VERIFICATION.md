@@ -1,5 +1,17 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — family cursor, physical lanes and curvature
+
+`build/hiway-physical-ai-curvature.json` matches the unchanged completed Hiway
+trace through9748 including RNG;9749 opponent ground64/native71 remains a
+failed whole-race acceptance (exit1). Napa2400/City600 strict regressions pass
+(`build/family-lanes-curvature-regressions.json`). Full build and SDL gate pass:
+104 tests,35 explicit skips,zero failures; two unavailable Direct3D tests are
+excluded (`build/family-lanes-curvature-native-tests.log`). The new original9420
+prefix matches all standard compared fields, but its121 extra terrain
+diagnostics remain un-compared, so strict verification rejects it; do not call
+it a strict pass (`build/family-physical-lanes-original-diagnostic.json`).
+
 ## November 12, 2026 — physical traffic motion gate
 
 `build/hiway-traffic-physical-motion.json`: unchanged completed Hiway trace

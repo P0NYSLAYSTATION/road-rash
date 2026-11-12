@@ -377,32 +377,54 @@ const PedestrianLook* CourseScene::pedestrian_look(uint32_t section, uint32_t lo
 }
 
 const PedestrianLook* CourseScene::pedestrian_look(const std::vector<RouteSample>& route, size_t sample,
-                                                  uint8_t selector) const {
+                                                  uint8_t selector, bool exact_front) const {
+    bool previous_section = false;
     for (;;) {
         const auto& s = route.at(sample);
-        const uint16_t id = family_slots_.at(s.section).at(s.local)[selector >> 6];
+        uint16_t id = 0;
+        if (exact_front) {
+            const auto& timeline = family_timelines_.at(s.section);
+            const int64_t cursor = int64_t(s.local) + (previous_section ? 1 : 0) + timeline.forward_bias;
+            for (auto it = timeline.events.rbegin(); it != timeline.events.rend(); ++it)
+                if (it->sample <= cursor && it->slot == selector >> 6 && (it->type == 1 || it->type == 3)) {
+                    id = it->family;
+                    break;
+                }
+        } else id = family_slots_.at(s.section).at(s.local)[selector >> 6];
         if (id) return pedestrian_family_look(id, selector);
         // A section can leave a slot untouched. The original global slot
         // then keeps its incoming family rather than resetting to zero.
         if (sample <= s.local) return nullptr;
         sample -= size_t(s.local) + 1;
+        previous_section = true;
     }
 }
 
 bool CourseScene::pedestrian_graphics_valid(const std::vector<RouteSample>& route, size_t sample,
-                                            uint8_t selector, const PedestrianLook& look) const {
+                                            uint8_t selector, const PedestrianLook& look, bool exact_front) const {
+    const bool trace = std::getenv("RR_RESOURCE_TRACE_SAMPLE") &&
+                       sample == size_t(std::atoi(std::getenv("RR_RESOURCE_TRACE_SAMPLE")));
+    if (trace) std::fprintf(stderr, "resource-check sample %zu selector %u offset %u\n", sample,
+                            unsigned(selector), unsigned(look.graphics_offset));
     std::array<uint8_t, 4> header{0x4e, 0x41, 0x52, 0x52};
     uint8_t found = 0;
+    bool previous_section = false;
     for (;;) {
         const auto& s = route.at(sample);
         const auto& timeline = family_timelines_.at(s.section);
-        const int64_t cursor = std::max<int64_t>(0, int64_t(s.local) + view_slices + timeline.forward_bias);
+        const int64_t cursor = exact_front
+                                   ? int64_t(s.local) + (previous_section ? 1 : 0) + timeline.forward_bias
+                                   : std::max<int64_t>(0, int64_t(s.local) + view_slices + timeline.forward_bias);
+        if (trace) std::fprintf(stderr, "resource-timeline section %u local %u cursor %lld\n", s.section,
+                                s.local, static_cast<long long>(cursor));
         for (auto it = timeline.events.rbegin(); it != timeline.events.rend(); ++it) {
             if (it->sample > cursor || it->slot != selector >> 6 || (it->type != 1 && it->type != 3))
                 continue;
             const auto family = families_.find(it->family);
             if (family == families_.end()) continue;
             const auto& bytes = family->second.bytes;
+            if (trace) std::fprintf(stderr, "resource-event sample %u family %u size %zu\n",
+                                    unsigned(it->sample), unsigned(it->family), bytes.size());
             for (size_t i = 0; i < header.size(); ++i) {
                 const uint64_t offset = uint64_t(look.graphics_offset) + i;
                 if (!(found & (1 << i)) && offset < bytes.size()) {
@@ -414,7 +436,10 @@ bool CourseScene::pedestrian_graphics_valid(const std::vector<RouteSample>& rout
         }
         if (found == 15 || sample <= s.local) break;
         sample -= size_t(s.local) + 1;
+        previous_section = true;
     }
+    if (trace) std::fprintf(stderr, "resource-header %02x%02x%02x%02x found %u\n",
+                            header[0], header[1], header[2], header[3], unsigned(found));
     return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
 }
 

@@ -2,6 +2,11 @@
 
 ## Windows continuation — November 12, 2026
 
+Current exact-family/physical-road continuation matches through9748 including
+RNG on the unchanged completed Hiway trace. First gap9749 is opponent ground
+64/native71. Full-race/all-track acceptance remains open; older gaps below
+are historical. See the [current evidence](../agent-handoffs/parity-parking-20261112.md).
+
 Latest physical-traffic-motion continuation matches through9406 including RNG.
 First gap9407 is pedestrian serial8 resource availability original1/native0.
 All-track full-race acceptance remains open; historical gaps follow below.

@@ -2688,7 +2688,11 @@ int32_t Race::curvature(const Rider& r, size_t sample, int samples) const {
             while (slot_sample >= end) slot_sample -= 128;
             slot_sample = std::clamp(slot_sample, 0, int32_t(route.size()) - 1);
         }
-        sum += wrap_angle(atan_ratio(tables_, route[size_t(slot_sample)].path.bend) * (1 << 14));
+        int32_t bend = route[size_t(slot_sample)].path.bend;
+        if (ring_)
+            if (const auto motion = ring_->retained_motion(slot_sample * 256, route[size_t(slot_sample)].half))
+                bend = motion->first;
+        sum += wrap_angle(atan_ratio(tables_, bend) * (1 << 14));
         if (ring_ && ring_->forward_closed(slot_sample * 256, route[size_t(slot_sample)].half))
             closed = slot_sample;
     }

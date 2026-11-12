@@ -9,6 +9,13 @@ Continue the authorized work within the active turn; do not stop after status.
 
 ## Published checkpoint
 
+Release1.1.10 is published from clean d667918 (use git rev-parse for full SHA):
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.10
+SHA25669f13b90991fe99fe2f7ea0ed5ea2a1c3e30d906e80a00e0cfa01a8d841a0e48.
+Public download verified (`build/v1110-publish.log`). Isolated1.1.9->1.1.10
+upgrade preserved600 files and passed SDL menu smoke
+(`build/parity-v1110-upgrade-validation.json`). Physical traffic checkpoint pushed.
+
 Release1.1.9 is published from clean d9172a46eaa1d3685db75918606cfe9263f8b639:
 https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.9
 SHA2568aea62f0fd323ee3c2dbca18f4eed8dabc0488a42566cad9f82af1b91788f24a.
@@ -276,3 +283,109 @@ speeds, exact E:/RR, reversible working-DLL hooks. Compare native graphics_valid
 timeline overlay against original resource header before changing residency.
 Do not run full graphics/import gates while original capture is installed.
 Continue without prompting the user or stopping after partial status.
+
+## Active resource probe (latest)
+
+Original `hiway-ped-resource-9420` completed, exact E:/RR,
+9420 frames, timeout360, AI_TARGET_TICK9407, TERRAIN_TRACE1. Accepted control
+file and measured extra-AI speeds are unchanged. Log
+`build/hiway-ped-resource-9420-capture.log`. Wait for completion/restoration
+receipt before any full graphics gate or new original capture. The original
+accepted full Hiway trace remains unchanged. No reference install used.
+
+Native read-only trace exec58329 is running with RR_RESOURCE_TRACE_SAMPLE1296,
+logging `build/hiway-ped-resource-native-1296.log`; helper build log
+`build/ped-resource-native-trace-build.log`. Optional CourseScene logging prints
+query sample, section/local/cursor, family events/payload sizes, final four
+overlaid header bytes. This is the only current source edit, diagnostic only.
+No runtime behavior change accepted yet.
+
+At9406 original ring.front340277 crosses sample1329; the native query subtracts
+view_slices33 to sample1296, then CourseScene adds33 within that sample's
+section. Hypothesis: crossing a section boundary changes which family timeline
+is queried; subtract/add does not cancel across sections. Other hypotheses:
+allocation buffer reuse or asynchronous family load timing. Compare measured
+original header/family/root and native events before choosing a fix.
+Ped serial8 selector0 position314763 lateral-110745 remains available through
+9408 in accepted original; native first unavailable9407. No full parity claim.
+
+No user questions pending. Continue parity until every track matches start to
+finish. All authorized build/remotes/release actions remain permitted. Source
+must be clean for the next final installer build/publication. Scripts outside
+repo now use publish-v1110.py and verify-parity-v1110-upgrade.py as templates.
+
+Latest resource evidence supersedes that hypothesis: native sample1296 is
+section2/local166/cursor171 (bias-28), not a section-boundary mismatch. Native
+overlays family171 at offset56, header28010000. Original diagnostic9420 valid
+controls, restored DLL, SHA256
+d9c1fd8fb3c24ccb00437b0da218a34202bf861ba01c547a6ea1f9e8e98c0644,
+shows active family139/root50362024 at9405..9408. Native query used the
+pedestrian's old split route, although global family slots follow the player's
+committed front walker. Both load_pedestrian_looks and think_pedestrian now
+query route_of(riders_[0]); test is running exec50244,
+`build/hiway-ped-global-family-route.log/json`. No measured fix claim yet.
+
+The first original ped-resource comment erroneously treated byte+1e0 loaded
+flag as a pointer, so its graphics=1/header0 are invalid evidence. Family/root
+fields are independent and valid. Corrected source reads animation block+4 at
+object+74 and separately prints loaded; helper rebuild
+`build/ped-resource-header-pointer-build.log` succeeds. No new original capture
+is needed unless family/route evidence is insufficient. No original currently
+active. Source WIP: diagnostic CourseScene log, corrected oracle comment,
+player-route family queries, this handoff. Await full replay before acceptance.
+
+## Current resource/lane result (latest supersession)
+
+Changing only pedestrian->player route did not advance9407. The original
+front walker has already entered the next section (position20 samples), while
+the old query starts at global1296, section2/local166 and adds33 to that section
+before bias-28. Section2 is only180 samples long: its event171 load is not
+reached before that section's actual MSRR cursor exits. The new exact_front
+CourseScene APIs query the actual global front, retain negative biased cursors
+in incoming sections and stop previous sections at their terminal cursor.
+RaceSetup's ring-driven callbacks select that explicit mode. Default scene
+projection lookups keep their original API behavior.
+
+`build/hiway-family-exact-front.json` advances to9516, car slice right lane
+word298/native341. Physical ring lane words are now cached and TrafficSystem
+uses a ring source for its lane_probe in both actual planning and verification,
+including linked-neighbour widening. Synthetic traffic test gives canonical
+route different lane widths and proves a stale slot sees its rebuilt physical
+words after128 steps. `build/hiway-physical-traffic-lanes.json` matches through
+9693 including RNG; first9694 rider13 lateral target4608/native2816.
+Strict Napa2400/City600 pass (`build/family-physical-lanes-regressions.json`).
+Full build and fresh SDL native gate104 passed,35 skips,zero failures, two
+Direct3D checks excluded (`build/family-physical-lanes-native-tests.log`).
+
+The new9420-tick diagnostic originally hit invalid stoul because ring.walk.*
+position keys were mistaken for hex car addresses. tests/field_replay.hpp now
+excludes that known diagnostic prefix from car address enumeration. Afterward
+all standard compared fields match9420 ticks with binary exit0, but strict
+verify still rejects121 additional un-compared terrain diagnostic fields:
+`build/family-physical-lanes-original-diagnostic.json` is NOT strict acceptance.
+Do not weaken that check, drop fields from the accepted original or call it a
+strict pass. The unchanged full original is the primary acceptance fixture.
+
+Latest WIP adds physical cached bend reads to Race::curvature (00449b40's
+slice-link lookahead), testing the9694 target difference. Owned exec29831:
+`build/hiway-physical-ai-curvature.log/json`, targeted build succeeds. Wait for
+measurement before claiming this fix. No original capture is active. After
+coherent validation/docs, commit/push and release1.1.11 (upgrade from1.1.10).
+Source currently also includes optional resource timeline and phase logging,
+corrected original header probe (+74 instead of loaded byte+1e0), exact-front
+family APIs, physical lane cache/ring source, synthetic lane test and parser
+prefix fix. Preserve all; no other agents are editing. Continue autonomously.
+
+Physical AI curvature is now measured: `build/hiway-physical-ai-curvature.json`
+matches through9748 including RNG. First gap9749 rider13 ground64/native71.
+Actual00449b40 uses physical bend words; the canonical fallback caused the
+seven-world-unit9694 target mismatch. The same ring cache now supplies these
+lookahead bends. Strict Napa2400/City600 pass
+(`build/family-lanes-curvature-regressions.json`). Final full build and SDL gate
+succeed (`build/family-lanes-curvature-native-tests.log`):104 passes,35 skips,
+zero failures; two Direct3D checks explicitly excluded. Ready for checkpoint
+commit/push and1.1.11 installer/release (isolated1.1.10 upgrade).
+Next independent read-only task: trace9749 rider13 ground and compare physical
+ring terrain/side heights against the canonical section/local source. No
+original capture active. The latest original prefix's bad header probe is
+explicitly excluded as evidence; corrected helper is built for future probes.

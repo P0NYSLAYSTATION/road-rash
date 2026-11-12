@@ -487,7 +487,7 @@ struct FieldReplay {
         if (ignore_cars || !setup.instance.traffic) return;
         std::vector<std::string> addresses;
         for (const auto& [key, value] : f)
-            if (key.rfind("ring.", 0) == 0 && key.ends_with(".position"))
+            if (key.rfind("ring.", 0) == 0 && key.rfind("ring.walk.", 0) != 0 && key.ends_with(".position"))
                 addresses.push_back(key.substr(5, key.size() - 14));
         std::sort(addresses.begin(), addresses.end(), [](const auto& a, const auto& b) {
             return std::stoul(a, nullptr, 16) < std::stoul(b, nullptr, 16);

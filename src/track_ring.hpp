@@ -100,6 +100,11 @@ class TrackRing {
         if (!s.count) return std::nullopt;
         return s.edges[s.count == 1 ? 0 : half];
     }
+    std::optional<std::array<int32_t, 2>> slice_lanes(int32_t position, uint8_t half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!s.count) return std::nullopt;
+        return s.lanes[s.count == 1 ? 0 : half]; // right, left Q8 lane words
+    }
     bool forward_closed(int32_t position, uint8_t half) const {
         return (shoulders_[size_t((uint32_t(position) >> 8) & 127)].closed & (1u << half)) != 0;
     }
@@ -208,6 +213,7 @@ class TrackRing {
         int8_t countdown = 0;
         uint8_t motion_valid = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
+        std::array<std::array<int32_t, 2>, 2> lanes{};
         std::array<std::pair<uint32_t, uint32_t>, 2> location{};
         std::array<std::pair<int32_t, int32_t>, 2> motion{};
     };

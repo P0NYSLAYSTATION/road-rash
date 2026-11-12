@@ -316,16 +316,27 @@ static int32_t ring_slot_sample(int32_t sample, int32_t front_q8, int32_t sample
 TrafficSystem::LaneProbe TrafficSystem::lane_probe(const TrafficCar& car,
                                                    const std::vector<RouteSample>& route,
                                                    int32_t front_q8, const TrackRing* ring) const {
+    if (!ring && ring_source_) ring = ring_source_(car.position);
     const int32_t size = int32_t(route.size());
     const int32_t sample = std::clamp(car.position, int32_t(0), int32_t((route.size() - 1) * 256)) >> 8;
-    auto at = [&](int32_t index) {
+    auto raw = [&](int32_t index) {
         const int32_t slot = ring_slot_sample(index, front_q8, size);
         PathSample value = route[size_t(slot)].path;
+        if (ring)
+            if (const auto lanes = ring->slice_lanes(index * 256, route[size_t(slot)].half)) {
+                value.right_q8 = (*lanes)[0];
+                value.left_q8 = (*lanes)[1];
+            }
+        return value;
+    };
+    auto at = [&](int32_t index) {
+        const int32_t slot = ring_slot_sample(index, front_q8, size);
+        PathSample value = raw(index);
         // 0x004547e0 updates a previous slice when its forward neighbour
         // is built. At an integral lane width, widening nudges the lane
         // word by one Q8 unit; physical edge coordinates are unchanged.
         if (slot + 1 < (front_q8 >> 8) && slot + 1 < size) {
-            const auto& forward = route[size_t(slot + 1)].path;
+            const auto forward = raw(index + 1);
             if ((value.right_q8 & 255) == 0 && forward.right_q8 > value.right_q8) ++value.right_q8;
             if ((value.left_q8 & 255) == 0 && forward.left_q8 > value.left_q8) ++value.left_q8;
         }

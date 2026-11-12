@@ -346,9 +346,9 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                 },
                 exe, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector,
                                const PedestrianLook& look) {
-                    return scene->pedestrian_graphics_valid(route, s, selector, look);
+                    return scene->pedestrian_graphics_valid(route, s, selector, look, true);
                 }, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector) {
-                    return scene->pedestrian_look(route, s, selector);
+                    return scene->pedestrian_look(route, s, selector, true);
                 });
         } else {
             out.pedestrians = std::make_unique<PedestrianSystem>(

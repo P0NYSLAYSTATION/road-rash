@@ -236,6 +236,7 @@ class TrafficSystem {
     void set_road_motion(std::function<std::optional<std::pair<int32_t, int32_t>>(int32_t)> source) {
         road_motion_ = std::move(source);
     }
+    void set_ring_source(std::function<const TrackRing*(int32_t)> source) { ring_source_ = std::move(source); }
     const VehicleLibrary& library() const { return *library_; }
     // 0x00437e60 car LOD after the move, using the pre-driver ring camera.
     static int32_t schedule_interval(const TrafficCar&, int32_t camera_q8, int32_t player_velocity);
@@ -312,6 +313,7 @@ class TrafficSystem {
     std::function<int(const RouteSample&)> terrain_type_;
     std::function<void(Bike&, size_t, size_t)> wall_response_;
     std::function<std::optional<std::pair<int32_t, int32_t>>(int32_t)> road_motion_;
+    std::function<const TrackRing*(int32_t)> ring_source_;
     std::array<std::array<int32_t, 6>, 4> kind_templates_{};
     void init_car(Bike& body, int kind) const;
     uint8_t sprite_size_ = 10;

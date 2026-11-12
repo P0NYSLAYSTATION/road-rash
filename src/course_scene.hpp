@@ -85,9 +85,9 @@ class CourseScene {
     bool pedestrian_graphics_valid(uint32_t section, uint32_t local, uint8_t selector,
                                      const PedestrianLook&) const;
     const PedestrianLook* pedestrian_look(const std::vector<RouteSample>&, size_t sample,
-                                           uint8_t selector) const;
+                                           uint8_t selector, bool exact_front = false) const;
     bool pedestrian_graphics_valid(const std::vector<RouteSample>&, size_t sample, uint8_t selector,
-                                     const PedestrianLook&) const;
+                                     const PedestrianLook&, bool exact_front = false) const;
     // Marking flag 0x40 on a mountain sample: drawn as a tunnel (type 3).
     bool tunnel(uint32_t section, uint32_t local) const;
     // 0x0041c200 rail height ((1<<+0x1b)<<+0x19)*4 of the sample's CESR

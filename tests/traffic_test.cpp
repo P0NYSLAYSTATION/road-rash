@@ -4,6 +4,7 @@
 #include "assets.hpp"
 #include "course.hpp"
 #include "course_scene.hpp"
+#include "track_ring.hpp"
 #include <filesystem>
 #include <algorithm>
 #include <iostream>
@@ -279,6 +280,35 @@ static void test_recycled_pool_order() {
     system.step(route, 120 * 256, 200 * 256, 100, 120 * 256, 0, [] { return 1u; }, 1);
     if (!cars[1].active || cars[1].serial != 1)
         throw std::runtime_error("car pool must reuse the last returned slot, not the first inactive");
+}
+
+static void test_physical_lane_probe() {
+    rr::Course course;
+    course.root = 20;
+    course.sections.resize(1);
+    course.sections[0].samples.resize(800, rr::PathSample{0, 0, 500, 500, 341, 298});
+    for (size_t i = 200; i < 800; ++i) {
+        course.sections[0].samples[i].left_q8 = 700;
+        course.sections[0].samples[i].right_q8 = 600;
+    }
+    course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 0, 0, 800});
+    course.nodes.emplace(40, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.set_ring_source([&](int32_t) { return &ring; });
+    const std::vector<rr::RouteSample> canonical(800, lane_sample(512, 512));
+    rr::TrafficCar car;
+    car.position = 100 * 256;
+    auto probe = system.lane_probe(car, canonical, ring.front_q8());
+    if (probe.right_q8 != 298 || probe.left_q8 != 341)
+        throw std::runtime_error("car lane planning must read physical lane words rather than canonical route values");
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    probe = system.lane_probe(car, canonical, ring.front_q8());
+    if (probe.right_q8 != 600 || probe.left_q8 != 700)
+        throw std::runtime_error("a stale car slice must expose its rebuilt physical slot lane words");
 }
 
 static void test_lane_validity_linked_slots() {
@@ -1350,6 +1380,7 @@ int main() {
         test_car_schedule_motion();
         test_lane_validity_stop();
         test_lane_validity_linked_slots();
+        test_physical_lane_probe();
         test_spawn_and_move();
         test_zone_events();
         test_intersections();

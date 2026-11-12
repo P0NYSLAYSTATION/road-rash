@@ -487,6 +487,7 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         const auto& path = path_of(half);
         stored.location[h] = {half.node, uint32_t(half.position >> 8)};
         stored.motion[h] = {path.bend, path.rise};
+        stored.lanes[h] = {path.right_q8, path.left_q8};
         stored.motion_valid |= uint8_t(1u << h);
         stored.edges[h] = {half.offset - path.left - path.shoulder_left,
                            half.offset + path.right + path.shoulder_right};

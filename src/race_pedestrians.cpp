@@ -235,12 +235,13 @@ void Race::load_pedestrian_looks() {
         p.pre_draw_resources = {p.loaded(), p.has(0), p.has(5)};
         if (p.loaded()) continue;
         if (p.body.sample < first || int64_t(p.body.sample) * 256 > int64_t(camera) + 0x1e00) continue;
-        const auto& road = route_of(p.body);
+        const auto& road = route_of(riders_[0]);
         // 0x0044acd0 resolves a global family slot, advanced by the front
-        // MSRR walker. CourseScene's query already adds view_slices, so
-        // subtract that bias to query the actual front cursor once.
+        // MSRR walker. Query its global front coordinate directly: subtracting
+        //and re-adding view_slices inside a section can fire events beyond
+        //that section's actual terminal cursor.
         const size_t front =
-            ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
+            ring_ ? size_t(std::max(0, ring_->front_q8() >> 8)) : p.body.sample;
         const auto* current = pedestrians_->look(road, std::min(front, road.size() - 1), p.selector);
         if (!current) continue;
         p.look = current;
@@ -551,9 +552,18 @@ void Race::think_pedestrian(Pedestrian& p) {
         b.i32(0x5c) = heading;
     }
     if (p.loaded()) {
-        const auto& road = route_of(p.body);
+        //The global family slots follow the player's committed front walker,
+        //not a pedestrian's retained historical split arm.
+        const auto& road = route_of(riders_[0]);
         const size_t front =
-            ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
+            ring_ ? size_t(std::max(0, ring_->front_q8() >> 8)) : p.body.sample;
+        if (ring_ && std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+            const auto state = ring_->diagnostic_state();
+            const auto& s = road[std::min(front, road.size() - 1)];
+            std::fprintf(stderr, "ped-family-cursor serial %u ped-route %d player-route %d query %zu section %u local %u physical-node %u physical-position %d\n",
+                         unsigned(p.serial), p.body.route, riders_[0].route, front, s.section, s.local,
+                         state.front.node, state.front.position);
+        }
         if (!pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look)) {
             // 0x0044143b..0x00441474: replaced graphics lose their RRAN
             // header. Clear the loaded flag and descriptor; the old bank
@@ -716,6 +726,7 @@ void Race::collide_pedestrians() {
 }
 void Race::attach_terrain_type() {
     if (traffic_ && terrain_source_) {
+        traffic_->set_ring_source([this](int32_t position) { return nearest_ring(position); });
         traffic_->set_terrain_type([this](const RouteSample& s) { return int(ground(s).type); });
         traffic_->set_road_motion([this](int32_t position) -> std::optional<std::pair<int32_t, int32_t>> {
             const auto* ring = nearest_ring(position);
