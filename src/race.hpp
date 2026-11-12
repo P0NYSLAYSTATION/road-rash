@@ -568,6 +568,7 @@ class Race {
     // replaces the legacy hazard/DZHR spans in the sweep.
     using StaticFrames = std::function<const AnimationFrame*(uint32_t section, uint32_t local,
                                                              uint8_t selector, bool billboard)>;
+    void set_road_separation_limits(const std::array<int32_t, 32>& limits) { road_separation_limits_ = limits; }
     void set_static_frames(StaticFrames frames);
     // Plan 34 Task 3: size the ring-terrain overlay (scene section lengths)
     // and record one ring slice's terrain for the simulation.
@@ -898,6 +899,7 @@ class Race {
     uint32_t slice_ac(int road, size_t sample) const { return slot_ac_[size_t(road)][sample & 127]; }
     CowVector<StaticSlice> statics_[2]; // mutable (ring builds), copy-on-write for snapshots
     StaticFrames static_frames_;
+    std::optional<std::array<int32_t, 32>> road_separation_limits_;
     Rider static_actor_{}; // 0x004c3e90 static hazard object (rebuilt per hit)
     std::array<RoadsideNode, 20> roadside_nodes_{};
     uint32_t roadside_order_ = 0;

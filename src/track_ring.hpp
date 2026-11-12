@@ -103,6 +103,9 @@ class TrackRing {
     bool forward_closed(int32_t position, uint8_t half) const {
         return (shoulders_[size_t((uint32_t(position) >> 8) & 127)].closed & (1u << half)) != 0;
     }
+    int32_t slice_countdown(int32_t position) const {
+        return shoulders_[size_t((uint32_t(position) >> 8) & 127)].countdown;
+    }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
     // Terrain slice exported by a walker at its current sample.
@@ -187,6 +190,7 @@ class TrackRing {
     struct Shoulders {
         uint8_t count = 0;
         uint8_t closed = 0;
+        int8_t countdown = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
     };
     std::array<Shoulders, 128> shoulders_{};

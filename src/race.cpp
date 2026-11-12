@@ -1223,6 +1223,22 @@ void Race::apply_static_boxes() {
         for (size_t i = size_t(std::max<int64_t>((camera >> 8) - 1, 0));
              i < road.size() && int64_t(i) * 256 <= reach; ++i)
             if (road[i].built && !road[i].boxes_ready) {
+                if (ring_ && road_separation_limits_) {
+                    const auto& view = route();
+                    const size_t first = size_t(camera >> 8);
+                    if (i < view.size() && first < view.size() && view[i].dual) {
+                        const auto& candidate = (*routes_[k])[i];
+                        const bool own = candidate.node == view[i].node;
+                        const bool opposite = candidate.node == view[i].other_node;
+                        if (!own && !opposite) continue;
+                        const size_t depth = i >= first ? std::min(i - first, size_t(31)) : 0;
+                        const uint8_t event = ring_->slice_event(int32_t(i * 256));
+                        if (!own && !secondary_road_visible(event, ring_->slice_countdown(int32_t(i * 256)),
+                                view[first].dual, ring_->slice_countdown(int32_t(first * 256)),
+                                ground(route_half(view[first], 0)).type == 0, view[i].x_sep, (*road_separation_limits_)[depth]))
+                            continue;
+                    }
+                }
                 road.mut(i).boxes_ready = true;
                 // 0x0044b630 writes +0xac only for an indexed frame-2 texture
                 // (0xbc614e record: word [3], the flags) that has boxes.
@@ -1275,6 +1291,10 @@ bool Race::sweep_statics(Rider& r, Rider* half_owner) {
         const int32_t base = bb.lateral * 0x100;
         for (const auto& box : bb.frame->boxes) {
             if (!overlaps(box, base)) continue;
+            if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+                std::fprintf(stderr, "billboard-contact rider %td route %d sample %zu n %zu type %u selector %u lateral %d box %d/%d/%d/%d\n",
+                             &r - riders_.data(), r.route, r.sample, n, unsigned(bb.type), unsigned(bb.selector), bb.lateral,
+                             box[0], box[1], box[2], box[3]);
             // 0x00437750: a car (+0xc4 & 0x10) meets only type-0 billboards;
             // the sweep still ends at the first overlap.
             if (static_car_ && bb.type != 0) return true;
@@ -5010,6 +5030,15 @@ void Race::step(std::span<const uint32_t> words) {
         std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"));
     auto phase = [&](const char* label) {
         if (trace) std::fprintf(stderr, "phase %d %s rng %u\n", ticks_, label, seed_);
+        if (trace)
+            for (size_t i = 0; i < riders_.size(); ++i) {
+                const auto& r = riders_[i];
+                if (!r.parked) continue;
+                std::fprintf(stderr, "parked %zu %s pos %d dt %d pace %d wait %d live-distance %d live-ticks %d section %zu local_q8 %d next %d last %d\n",
+                             i, label, r.bike.i32(0x1c), r.bike.i32(0x18), r.bike.i32(0x314), r.bike.i32(0x318),
+                             r.bike.i32(0x310), r.bike.i32(0x30c), size_t(r.virtual_section), r.virtual_local,
+                             r.sched_next, r.sched_last);
+            }
         if (trace && std::getenv("RR_SIM_TRACE_RIDER")) {
             const size_t i = size_t(std::atoi(std::getenv("RR_SIM_TRACE_RIDER")));
             if (i < riders_.size()) {

@@ -2,6 +2,11 @@
 
 ## Windows continuation — November 12, 2026
 
+Latest first gap is6604 (parked position223502/223501), after6603 exact ticks
+including RNG. Original secondary-road visibility prevented the false6557
+decal contact; the native box-loading gate now reproduces it. See the
+[scenery continuation](../agent-handoffs/parity-scenery-culling-20261112.md).
+
 Latest continuation supersedes the6007 first-gap statement below: the same
 completed Hiway trace matches through6556; first gap6557 is opponent steering
 original2310/native3465. Graph finish discovery, AI roadway masks and

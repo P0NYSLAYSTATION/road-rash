@@ -1,5 +1,16 @@
 # Binary evidence and next work
 
+## November 12, 2026 — secondary-road culling controls box loading
+
+00444553..004445d0 can hide the roadway opposite the camera before scenery
+dispatch, leaving its collision boxes unloaded.00444e70 derives32 separation
+limits from4734a0 and fixed depth scales46f498,+0x200 per entry. Events4/6 use
+the current slice countdown; other events use the camera countdown and require
+a dual camera road. The terrain0 condition reads physical half0 at the camera.
+Hiway6557 direct capture confirms invisible half1, selector133/type11, box
+count0; native had incorrectly loaded its box and applied a decal impulse.
+[Capture hashes and address evidence](agent-handoffs/parity-scenery-culling-20261112.md).
+
 ## November 12, 2026 — finish and split initialization
 
 00407410 follows graph preferred byte18 until00454253 discovers a global

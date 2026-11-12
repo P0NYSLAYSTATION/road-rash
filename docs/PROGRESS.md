@@ -1,5 +1,15 @@
 # Port progress
 
+## November 12, 2026 — scenery road visibility
+
+The completed Hiway recording now matches through6603 including RNG. The6557
+steering gap was a false decal contact: the original hides the other roadway
+and leaves that billboard's collision boxes unloaded. Native simulation now
+applies the original depth-margin/countdown gate before loading those boxes.
+First remaining gap6604 is a parked bike/half position223502 versus223501.
+Napa2400 and City600 remain exact. Full native gate106 passed,35 skips, no
+failures. [Evidence and remaining work](agent-handoffs/parity-scenery-culling-20261112.md).
+
 ## November 12, 2026 — graph finish and physical split shoulders
 
 The same completed Hiway recording now matches through6556 with one initial

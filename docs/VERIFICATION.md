@@ -1,6 +1,29 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — scenery half-cull gate
+
+`build/scenery-road-cull-full-build.log` succeeds. Normal-host native gate
+`build/scenery-road-cull-native-tests.log`:106 passed,35 explicit skips,
+zero failures. `build/scenery-road-cull-regressions.json` passes established
+Napa2400/City600 strict human replays. The unchanged completed Hiway fixture
+now matches through6603 including RNG;6604 parked-position gap remains
+(`build/hiway-scenery-road-cull.json`, exits1). Two diagnostic original prefixes
+retain6600 validated control words each and restore the working DLL. These
+are not new whole-race acceptance. [Evidence](agent-handoffs/parity-scenery-culling-20261112.md).
+
 ## November 12, 2026 — graph finish and physical split gate
+
+Published [1.1.4](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.4)
+from clean c8f72b60d645939effdf5efc796c1730d77e8e0a. Installer SHA256
+`2adac8847e91d754f4a7f5ef4da99d9992c6a5c0df92f6558a83e057ed7a3fef`;
+public download checksum verified (`build/v114-publish.log`). Isolated test-AppId
+upgrade1.1.3->1.1.4 preserved600 files, including game data, saves, settings,
+3DO audio and soundfonts, with no asset arguments and a passing installed-menu
+smoke test (`build/parity-v114-upgrade-validation.json`). Clean source build and
+public/test installer logs: `build/v114-clean-source-build.log`,
+`build/v114-installer-build.log`, `build/v114-test-installer-build.log`.
+Fresh release regression receipt `build/v114-release-regressions.json` passes
+both established human captures. Asset-free package includes no disc content.
 
 MSVC Release build succeeds (`build/closed-split-link-build.log`). Normal-host
 `RR_ASSETS=E:/RR ctest --test-dir build/release --output-on-failure`:141 registered,

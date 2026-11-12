@@ -471,6 +471,7 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink, w.front);
     auto& stored = shoulders_[size_t((uint32_t(ring_q8) >> 8) & 127)];
     stored.closed = 0;
+    stored.countdown = int8_t(w.countdown);
     stored.count = w.dual ? 2 : 1;
     auto& previous = shoulders_[size_t(((uint32_t(ring_q8) >> 8) - 1) & 127)];
     //00454c80: collapsing a committed split leaves the discarded half's

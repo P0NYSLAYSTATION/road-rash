@@ -388,6 +388,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
         if (assets.scene) {
             auto* scene = assets.scene.get();
             Race* r = race.get();
+            r->set_road_separation_limits(read_road_separation_limits(exe));
             r->set_static_frames([scene](uint32_t section, uint32_t local, uint8_t selector, bool billboard) {
                 return scene->static_frame(section, local, selector, billboard);
             });

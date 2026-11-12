@@ -467,6 +467,13 @@ static void dump_sim_tick(void) {
         int addr_index = 0;
         for (int guard = 0; node && node != end && guard < 512; ++guard) {
             if (!readable(node, 0xe4)) break;
+            if (g_ai_probe_tick >= 0 && tick >= g_ai_probe_tick - 20 && tick <= g_ai_probe_tick + 1 &&
+                readable(node, 0x31c) && RD32(node + 0xc4) == 4 && !RD8(node + 0x300))
+                fprintf(g_out, "# parked-state tick=%d actor=%u pos=%d dt=%d pace=%d wait=%d live-distance=%d live-ticks=%d node=%u local_q8=%d next=%d last=%d\n",
+                        tick, (unsigned)node, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x18),
+                        (int32_t)RD32(node + 0x314), (int32_t)RD32(node + 0x318), (int32_t)RD32(node + 0x310),
+                        (int32_t)RD32(node + 0x30c), RD32(node + 0x304), (int32_t)RD32(node + 0x308),
+                        (int32_t)RD32(node + 0xc), (int32_t)RD32(node + 0x10));
             if (g_order && g_sim_frames > 0 && player && readable(player, 0x300)) {
                 const uint32_t type = (uint32_t)sim_field_value(node, 0xc4, 4, 0);
                 const int32_t d = (int32_t)RD32(node + 0x1c) - (int32_t)RD32(player + 0x1c);
@@ -668,6 +675,18 @@ static void dump_sim_tick(void) {
                                 (int32_t)RD32(sl + 0xcc), (int32_t)RD32(sl + 0xe0), (int32_t)RD32(sl + 0xe4),
                                 (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec),
                                 (int32_t)RD32(sl + 0x14c), (int32_t)RD32(sl + 0x158));
+                        if (sl && readable(sl, 0x64))
+                            for (int n = 0; n < RD8(sl + 0x3d) && n < 2; ++n) {
+                                uintptr_t entry = sl + 0x40 + n * 16;
+                                uintptr_t boxes = (uint32_t)RD32(entry + 4);
+                                fprintf(g_out, "# slice-billboard tick=%d slot=%d n=%d selector=%u flags=%u type=%u count=%u lateral=%d boxes=%u",
+                                        tick, slot, n, RD8(entry), RD8(entry + 1), RD8(entry + 2), RD8(entry + 3),
+                                        (int32_t)RD32(entry + 8), (unsigned)boxes);
+                                if (RD8(entry + 3) && boxes && readable(boxes, 16))
+                                    fprintf(g_out, " first=%d/%d/%d/%d", (int32_t)RD32(boxes),
+                                            (int32_t)RD32(boxes + 4), (int32_t)RD32(boxes + 8), (int32_t)RD32(boxes + 12));
+                                fputc('\n', g_out);
+                            }
                     }
                     const uint32_t off = rr_sim_rider_fields[f].offset;
                     /* Only bike-half words are mapped (see REVERSE_ENGINEERING.md).
@@ -964,6 +983,30 @@ static void capture_police_spawn(void) {
 
 // Preserve the original player-think entry and count actual visits to its
 // human-control branch. The five copied entry bytes contain no relative operand.
+static void __fastcall rr_static_view_probe(uintptr_t self) {
+    int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 80 && tick <= g_ai_probe_tick)
+        for (int h = 0; h < (int)RD32(self + 4) && h < 2; ++h) {
+            uintptr_t view = (uint32_t)RD32(self + 0x14 + h * 4);
+            uintptr_t sl = view && readable(view, 0x104) ? (uint32_t)RD32(view + 0xc) : 0;
+            if (sl && readable(sl, 0x64) && RD8(sl + 0x3d) && RD8(sl + 0x40) == 133)
+                fprintf(g_out, "# static-view tick=%d half=%d slice=%u local=%d depth=%d visible=%u road=%d/%d selector=%u flags=%u boxes=%u\n",
+                        tick, h, (unsigned)sl, (int32_t)RD32(sl + 4), (int32_t)RD32(view + 0x18),
+                        RD8(view + 0x100), (int32_t)RD32(view + 0x60), (int32_t)RD32(view + 0x68),
+                        RD8(sl + 0x40), RD8(sl + 0x41), RD8(sl + 0x43));
+        }
+    ((void(__fastcall*)(uintptr_t))0x00443b40)(self);
+}
+static void __fastcall rr_billboard_draw_probe(uintptr_t self, int32_t mask, int32_t left, int32_t right) {
+    uintptr_t sl = (uint32_t)RD32(self + 0xc);
+    int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 80 && tick <= g_ai_probe_tick && sl && readable(sl, 0x64) &&
+        RD8(sl + 0x3d) && RD8(sl + 0x40) == 133)
+        fprintf(g_out, "# billboard-draw tick=%d slice=%u local=%d depth=%d mask=%u limits=%d/%d flags=%u boxes=%u\n",
+                tick, (unsigned)sl, (int32_t)RD32(sl + 4), (int32_t)RD32(self + 0x18), (unsigned)mask,
+                left, right, RD8(sl + 0x41), RD8(sl + 0x43));
+    ((void(__fastcall*)(uintptr_t,int32_t,int32_t,int32_t))0x0044b980)(self,mask,left,right);
+}
 static void __fastcall rr_ai_curve_probe(uintptr_t self) {
     ((void(__fastcall*)(uintptr_t))0x004090a0)(self);
     if (g_out && RD32(0x004b7ecc) == g_ai_probe_tick) {
@@ -4628,6 +4671,15 @@ static int rr_install_hooks(void) {
        (!rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
         !rr_patch_call((uint8_t*)0x00409e29,0x004090a0,rr_ai_curve_probe))) {
         if(g_out)fputs("# patch installation failed at AI target probe\n",g_out);
+        return 0;
+    }
+    if(g_ai_probe_tick >= 0 &&
+       (!rr_patch_call((uint8_t*)0x00443b1b,0x00443b40,rr_static_view_probe) ||
+        !rr_patch_call((uint8_t*)0x00443b2a,0x00443b40,rr_static_view_probe) ||
+        !rr_patch_call((uint8_t*)0x0043864c,0x0044b980,rr_billboard_draw_probe) ||
+        !rr_patch_call((uint8_t*)0x004386d5,0x0044b980,rr_billboard_draw_probe) ||
+        !rr_patch_call((uint8_t*)0x00438764,0x0044b980,rr_billboard_draw_probe))) {
+        if(g_out)fputs("# patch installation failed at static view probe\n",g_out);
         return 0;
     }
     if(g_slice_probe >= 0 &&

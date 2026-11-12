@@ -18,6 +18,17 @@ int main() {
             std::cerr << message << '\n';
         }
     };
+    //00444553: independent branches of the original secondary-road draw gate.
+    check(rr::secondary_road_visible(5, -1, false, -1, false, 1001, 1000),
+          "a common camera road retains both approaching split roads");
+    check(rr::secondary_road_visible(5, 1, true, 1, false, 1000, 1000) &&
+              !rr::secondary_road_visible(5, 1, true, 1, false, 1001, 1000),
+          "dual-camera separation culling is strict at the margin");
+    check(!rr::secondary_road_visible(5, 1, true, 0, true, 0, 1000) &&
+              rr::secondary_road_visible(6, 0, true, -1, true, 0, 1000) &&
+              !rr::secondary_road_visible(6, -1, true, 1, true, 0, 1000),
+          "merge events use the current signed countdown; other events use the camera countdown");
+
     // Original 0x00453030 enters node.next as half0 and node.previous
     // as half1. Whichever route is selected, its other slice must refer
     // to the opposite section and carry that section's events.
