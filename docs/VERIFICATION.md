@@ -1,5 +1,19 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — strict completed Hiway acceptance
+
+`build/hiway-finish-place-animation.json`: acceptance_met=true, all14084 ticks
+identical, including RNG, with `--mode acceptance --whole-race`, no reanchor.
+The original immutable trace SHA256 remains
+0fe2e9d7dd984990c528ee4b05cf80015c37b2e7a84b2c442e0b524e27d5975d.
+It reaches original finish outcome3. Strict Napa2400/City600 remain exact
+(`build/hiway-complete-regressions.json`). MSVC Release build succeeds; SDL native
+gate104 passed,35 explicit skips,zero failures; two unavailable Direct3D checks
+excluded (`build/hiway-complete-full-build.log`, `build/hiway-complete-native-tests.log`).
+New tests cover recycled pedestrian allocation/reset/LIFO and finish-half timing
+plus post-finish contact eligibility. Broader course acceptance remains open.
+[Detailed evidence](agent-handoffs/parity-finish-pools-20261112.md).
+
 ## November 12, 2026 — physical static collision gate
 
 `build/hiway-physical-static-half.json`: exact through11158 including RNG;

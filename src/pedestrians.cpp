@@ -21,36 +21,22 @@ void PedestrianSystem::reset() {
     built_back = built_front = 0;
     spawned_ = 0;
     serial_ = 0;
+    free_order_ = 0;
 }
 bool PedestrianSystem::consume(uint32_t section, uint32_t local, size_t index) {
     return consumed_.emplace(section, local, index).second;
 }
 void PedestrianSystem::apply_template(Bike& b) const {
-    // 0x00438930: +0xc0 byte, +0xc4 type, +0x14 first interval; 0x004387a0:
-    // template words +0x1c.. to the object words listed below.
-    b.u8(0xc0) = uint8_t((template_[0] & ~8) | 4); // 0x00437bb0 inserts the scheduler node
-    b.i32(0xc4) = template_[1];
+    //004387a0 resets only its explicit fields. The retained pool image
+    //keeps +108/+10c until the first movement pass, as for bikes and cars.
+    std::array<int32_t, 26> words{};
+    for (size_t i = 0; i < template_.size(); ++i) words[i] = template_[i];
+    init_object(b, words);
     b.i32(0x14) = template_[2];
-    static constexpr std::array<std::pair<int, int>, 18> words{{{0x1c, 0x148},
-                                                                {0x20, 0x14c},
-                                                                {0x24, 0x150},
-                                                                {0x28, 0x154},
-                                                                {0x2c, 0x160},
-                                                                {0x30, 0x168},
-                                                                {0x34, 0x16c},
-                                                                {0x38, 0x1b4},
-                                                                {0x3c, 0x1b8},
-                                                                {0x40, 0x170},
-                                                                {0x44, 0x174},
-                                                                {0x48, 0x178},
-                                                                {0x4c, 0x17c},
-                                                                {0x50, 0x180},
-                                                                {0x54, 0x194},
-                                                                {0x58, 0x1a4},
-                                                                {0x5c, 0x1a8},
-                                                                {0x60, 0x1ac}}};
-    for (const auto& [from, to] : words) b.i32(to) = template_[size_t(from / 4)];
-    b.i32(0x11c) = -0x25;
+    //00438930's generic node allocation also resets elapsed time and
+    //projection/orientation state before004387a0 applies motion constants.
+    for (int offset : {0x18, 0x58, 0x5c, 0x60, 0xa8, 0xac, 0xb0, 0xb4, 0xbc})
+        b.i32(offset) = 0;
 }
 
 std::optional<DrawNode> pedestrian_node(const Pedestrian& p, const RoadSlice& near, const RoadSlice& far,

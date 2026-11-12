@@ -1,5 +1,21 @@
 # Port progress
 
+## November 12, 2026 — complete Hiway human replay
+
+The unchanged completed Hiway recording now passes strict whole-race acceptance:
+14084 ticks identical, including RNG, free-running from one seed anchor. Source
+trace SHA2560fe2e9d7dd984990c528ee4b05cf80015c37b2e7a84b2c442e0b524e27d5975d;
+`build/hiway-finish-place-animation.json` reports acceptance_met=true.
+This proves this level1/seed1/input race, not every route/level or every track.
+Parking now preserves physical graph coordinates; AI targets read physical lanes;
+pedestrian slots retain original allocation fields and reuse the last returned
+slot. Finished actors keep scheduled AI/motion and flag-driven contacts. Live
+finish latching belongs to the half mover without clamping the bike. The player's
+victory animation uses finish place. Full MSVC build and SDL gate pass:104 tests,
+35 explicit skips,zero failures; two unavailable Direct3D checks excluded. Strict
+Napa2400/City600 regressions pass. Remaining tracks are still open; multiplayer
+stays held. [Evidence](agent-handoffs/parity-finish-pools-20261112.md).
+
 ## November 12, 2026 — physical static-collision identity
 
 Hiway matches through11158 including RNG on the unchanged completed recording.

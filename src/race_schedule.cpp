@@ -236,8 +236,7 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
     if (pedestrians_) {
         for (auto& p : pedestrians_->pool())
             if (p.pending_remove) {
-                p.active = false;
-                p.pending_remove = false;
+                pedestrians_->recycle(p);
             }
         for (size_t i = 0; i < pedestrians_->pool().size(); ++i) {
             const auto& p = pedestrians_->pool()[i];
@@ -361,6 +360,18 @@ void Race::run_half_node(Rider& r, uint32_t controls, bool countdown) {
     // then the +0x1f8 finish delta and the place refresh - the body words
     // and the ring node position stay live for the scans behind it.
     if (crash_library_ && r.bike.i32(0x2f4) && r.crash_active) crash_body_motion(r, r.half_dt);
+    //00406890 latches finish from the half mover, without clamping the
+    //bike's preceding movement to the line. Parked riders finish virtually.
+    const int32_t finish = known_finish_q8();
+    if (r.half_slice_present && finish != 0 && r.half_mirror.position >= finish &&
+        (r.half_object.u8(0xc0) & 0x10) == 0) {
+        r.half_object.u8(0xc0) |= 0x10;
+        r.bike.u8(0xc0) |= 0x10;
+        if (!r.finished && !r.cop) {
+            r.finished = true;
+            r.finish_tick = ticks_;
+        }
+    }
     r.half_sched_interval = schedule_interval(r, true);
     if (r.live && (r.half_mirror.lateral < -0xc8000 || r.half_mirror.lateral > 0xc8000))
         r.half_mirror.lateral = std::clamp<int32_t>(r.half_mirror.lateral, -0xc8000, 0xc8000);
@@ -380,7 +391,8 @@ void Race::run_half_node(Rider& r, uint32_t controls, bool countdown) {
 
 void Race::think_half(Rider& r, uint32_t controls, bool countdown) {
     const bool player = human(r);
-    if (r.finished) return;
+    //00407bd0 still runs AI transitions and replanning after the finish
+    //latch; the bike's bit0x10 makes throttle select braking.
     // The countdown ticks run the whole think (0x00407f30 advances the
     // riding animation from tick 1 on napa-field-l1-20261017).
     (void)countdown;
@@ -489,10 +501,7 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
     // at tick 1 on napa-field-l1-20261017).
     (void)countdown;
     {
-        if (r.finished) { // coast to a stop past the line
-            drive_mode(b, 0);
-            integrate_speed(b, tables_, 0);
-        } else if (crash_library_ && b.i32(0x2f4)) {
+        if (crash_library_ && b.i32(0x2f4)) {
             // 0x004060b0's +0x300 path: the riderless bike keeps its own
             // animation advance (the crashed branch of the bike think
             // 0x00407a90) and the 0x0043a580 move on the bike node; the
@@ -612,6 +621,16 @@ void Race::park(Rider& r) {
     const auto& road = route_of(r);
     r.virtual_section = section_start(road, r.sample);
     r.virtual_local = int32_t(r.sample - r.virtual_section) * 256;
+    if (const auto* ring = nearest_ring(b.i32(0x1c)))
+        if (const auto physical = ring->slice_location(int32_t(r.sample * 256), road[r.sample].half)) {
+            const auto node = std::find_if(road.begin(), road.end(), [&](const RouteSample& s) {
+                return s.node == physical->first;
+            });
+            if (node != road.end()) {
+                r.virtual_section = section_start(road, size_t(node - road.begin()));
+                r.virtual_local = int32_t(physical->second * 256);
+            }
+        }
     b.i32(0x314) =
         parked_pace(b.i32(0x310), b.i32(0x30c), nearest_human(b.i32(0x1c)).bike.i32(0x1c) < b.i32(0x1c));
     r.live = false;  // 0x00431960(bike, 0)
@@ -708,6 +727,11 @@ void Race::move_bike_parked(Rider& r) {
         const int32_t hi = has1 ? int32_t(location1->second) * 256
                                : closed ? int32_t(*closed) * 256 : length * 256 - 1;
         const int32_t v = r.virtual_local;
+        if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+            std::fprintf(stderr, "wake-window slot %d node %u local %d bounds %d/%d trackers %zu/%zu nodes %u/%u locals %u/%u has %d/%d closed %d\n",
+                         r.slot, node, v, lo, hi, t0, t1, location0 ? location0->first : 0,
+                         location1 ? location1->first : 0, location0 ? location0->second : 0,
+                         location1 ? location1->second : 0, has0, has1, bool(closed));
         if (v < lo || hi < v) continue;
         bool use0 = has0;
         if (has0 && has1) use0 = std::abs(v - lo) <= std::abs(v - hi);

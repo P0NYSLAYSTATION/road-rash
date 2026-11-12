@@ -1,5 +1,22 @@
 # Binary evidence and next work
 
+## November 12, 2026 — parking, allocation and finish scheduling
+
+00439390 copies physical node/local into parked bookkeeping. Original Hiway11159
+rider9 local26614 versus old native26358 proves the lost256; preserving physical
+location resolves early wake.00409225/0040923c read the next physical slice's+2c
+lane word; canonical widths produced target31488 instead of95488 at12064.
+004387a0 preserves+108/+10c while clearing its explicit motion fields;00438930
+still resets elapsed time+18 and projection/orientation state.004409e0 leaves the
+crossing lane+1fc. Pool return00438c20 inserts at tail through00438a60/00438a20;
+allocation00438c10/00438a80 removes that same tail, so the last returned slot is
+reused. First-free native scanning lost prior occupant velocities at13472.
+00407bd0 continues AI after finish;004368f0 contacts use tick/flags, with no
+logical finished exemption.00406890 checks the half's own scheduled position and
+latches00437800 without clamping bike motion.0040815f reads finish place004c7ff0
+for the player victory animation (places1..3), not a default zero counter.
+Together these resolve the completed Hiway recording through14084 including RNG.
+
 ## November 12, 2026 — physical half owns static builds
 
 00454240 writes statics to its physical half; matching canonical section/local

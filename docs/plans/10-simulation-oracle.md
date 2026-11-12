@@ -1,5 +1,11 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## Completed Hiway checkpoint — November 12, 2026
+
+Strict whole-race human replay passes all14084 ticks including RNG on the
+unchanged level1/seed1 recording. All-track/all-level acceptance remains open;
+multiplayer stays held. See [evidence](../agent-handoffs/parity-finish-pools-20261112.md).
+
 ## Physical statics checkpoint — November 12, 2026
 
 Exact Hiway prefix11158 includes RNG. Physical-half static builds restore10073

@@ -162,13 +162,18 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
     const int32_t player = ring_setup_ ? 0 : player_half_position(); // local_8
     Pedestrian* slot = nullptr;
     for (auto& p : system.pool())
-        if (!p.active) {
+        if (!p.active && (!slot || p.free_order > slot->free_order)) {
             slot = &p;
-            break;
         }
     if (!slot) return; // pool full: 0x004387a0 returns null, the record is still consumed
     Pedestrian& p = *slot;
+    //00438c10 returns the existing pool storage. 004387a0 clears selected
+    //motion fields, but not +108/+10c; 004409e0 leaves crossing lane+1fc.
+    const auto previous_image = p.body.bike.m;
+    const int8_t previous_lane = p.lane;
     p = Pedestrian{};
+    p.body.bike.m = previous_image;
+    p.lane = previous_lane;
     p.active = true;
     Bike& b = p.body.bike;
     system.apply_template(b);
@@ -285,7 +290,7 @@ void Race::run_ped_node(Pedestrian& p) {
         // Nulled-callback solo replays keep their measured same-step removal
         // contract; only the live move-slot path defers unlink.
         if (freeze_actors_) {
-            p.active = false;
+            pedestrians_->recycle(p);
             return;
         }
         // 0x00437c10 -> 0x00437be0: disabled now, still in the list through
@@ -303,8 +308,7 @@ void Race::step_pedestrians() {
     for (auto& p : pedestrians_->pool()) {
         // 0x00437df0 removes last tick's marked nodes before scheduling.
         if (p.pending_remove) {
-            p.active = false;
-            p.pending_remove = false;
+            pedestrians_->recycle(p);
             continue;
         }
         if (!p.active || p.next_tick > ticks_) continue;

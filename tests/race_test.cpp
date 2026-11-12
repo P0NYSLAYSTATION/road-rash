@@ -204,6 +204,44 @@ int main() {
     }
     // AI riders cross the same line: the field orders by finish tick.
     {
+        rr::Race live_finish(straight(2000), straight(2000), t, spec, 90);
+        live_finish.set_live_schedule(true);
+        const int32_t line = 100 * 256;
+        live_finish.set_finish_q8(line);
+        auto& rider = live_finish.riders()[0];
+        rider.bike.i32(0x1c) = line + 60;
+        rider.sample = rider.previous_sample = 100;
+        rider.half_mirror.position = line + 60;
+        rider.half_mirror.sample = 100;
+        rider.sched_next = 100;
+        rider.half_sched_next = 1;
+        live_finish.countdown_step();
+        check(rider.finished && rider.finish_tick == 1 && rider.bike.i32(0x1c) == line + 60,
+              "live half latches the overshot finish without a bike move or position clamp");
+        check((rider.half_object.u8(0xc0) & 0x10) && (rider.bike.u8(0xc0) & 0x10),
+              "finish latch marks both scheduled objects");
+    }
+    {
+        rr::Opponent opponent{test_spec(), 90, 0, 0, 0, 1};
+        auto second = opponent;
+        second.slot = 2;
+        rr::Race stopped(straight(2000), straight(2000), t, spec, 90, {opponent, second});
+        for (size_t i = 1; i < stopped.riders().size(); ++i) {
+            auto& r = stopped.riders()[i];
+            r.finished = true;
+            r.bike.u8(0xc0) |= 0x10;
+            r.bike.i32(0x1c) = 100 * 256 + 128;
+            r.bike.i32(0x174) = 7680;
+        }
+        stopped.riders()[1].bike.i32(0x28) = 0;
+        stopped.riders()[2].bike.i32(0x28) = 8192;
+        stopped.step(0);
+        check(stopped.riders()[1].bike.i32(0x28) != 0 || stopped.riders()[2].bike.i32(0x28) != 8192 ||
+                  stopped.riders()[1].bike.i32(0x1c) != 100 * 256 + 128 ||
+                  stopped.riders()[2].bike.i32(0x1c) != 100 * 256 + 128,
+              "finished bikes retain flag-driven collision separation");
+    }
+    {
         rr::Opponent slowf{test_spec(), 90, 0, 0, 0, 1};
         rr::Race ff(straight(2000), straight(2000), t, spec, 90, {slowf});
         const int32_t line = int32_t((0x3200 >> 8) + 400) << 8;

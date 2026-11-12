@@ -146,6 +146,45 @@ void initial_pedestrian_overlap(const Fixture& f) {
     check(race->rng_state() == rng, "unloaded pedestrian separation must consume no random draws");
 }
 
+void recycled_pedestrian(const Fixture& f) {
+    auto race = f.race(0);
+    auto system = f.pedestrians();
+    race->set_pedestrians(system.get());
+    auto& p = system->pool()[0];
+    p.body.bike.i32(0x108) = 73;
+    p.body.bike.i32(0x10c) = 160;
+    p.body.bike.i32(0x104) = 999;
+    p.body.bike.i32(0xec) = 999;
+    p.body.bike.i32(0x128) = 999;
+    p.body.bike.i32(0x18) = 48;
+    p.lane = -2;
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+    section.scenery_events.push_back({0x80000000u | (50u << 24) | (15u << 20) | (194u << 8), 0});
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 300});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    race->set_track_ring(&ring);
+    check(p.active && system->spawned() == 1, "synthetic ring must reuse the first pedestrian slot");
+    check(p.body.bike.i32(0x108) == 73 && p.body.bike.i32(0x10c) == 160 && p.lane == -2,
+          "recycled pedestrians retain previous velocities and crossing lane until movement");
+    check(p.body.bike.i32(0x104) == 0 && p.body.bike.i32(0xec) == 0 && p.body.bike.i32(0x128) == 0 &&
+              p.body.bike.i32(0x18) == 0,
+          "allocation still resets current velocity, speed, heading and elapsed time");
+    auto& later = system->pool()[1];
+    later.active = true;
+    later.body.bike.i32(0x10c) = -77;
+    system->recycle(p);
+    system->recycle(later);
+    rr::TrackRing next_ring(course, 0);
+    race->set_track_ring(&next_ring);
+    check(later.active && !p.active && later.body.bike.i32(0x10c) == -77,
+          "allocation reuses the most recently returned slot and its retained motion");
+}
+
 void roadside_pool(const Fixture& f) {
     auto race = f.race(0);
     race->set_live_schedule(true);
@@ -438,6 +477,7 @@ int main(int argc, char** argv) {
         family_buffer_tail();
         retained_road_slice();
         Fixture city("CITY");
+        recycled_pedestrian(city);
         roadside_pool(city);
         initial_pedestrian_overlap(city);
         graphics_replacement(city);

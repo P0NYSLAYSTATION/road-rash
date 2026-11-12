@@ -16,6 +16,7 @@ namespace rr {
 struct Pedestrian {
     bool active = false;
     bool pending_remove = false; // 0x00437c10 mark; 0x00437df0 unlinks on the next tick
+    uint64_t free_order = 0; // original pool returns and allocates at the list tail
     Rider body; // object image (+0x1c position, +0x28 lateral, motion words) and route bookkeeping
     const PedestrianLook* look =
         nullptr; // 0x00440b80: null when category-2 resources 0/1 are missing (+0x1e0 stays 0)
@@ -71,6 +72,10 @@ class PedestrianSystem {
     bool consume(uint32_t section, uint32_t local, size_t index);
     // Copies template 0x0046dde0 into a fresh object image (0x00438930 / 0x004387a0).
     void apply_template(Bike&) const;
+    void recycle(Pedestrian& p) {
+        p.active = p.pending_remove = false;
+        p.free_order = ++free_order_;
+    }
     int32_t spawned() const { return spawned_; }
     uint16_t next_serial() { return serial_++; }
     void reset_serial() { serial_ = 0; } // 0x00442a3d -> 0x0044f460, after initial ring setup
@@ -88,6 +93,7 @@ class PedestrianSystem {
     std::vector<Pedestrian> pool_;
     std::set<std::tuple<uint32_t, uint32_t, size_t>> consumed_;
     uint16_t serial_ = 0;
+    uint64_t free_order_ = 0;
 };
 
 // Native draw node for one pedestrian through the actor billboard path

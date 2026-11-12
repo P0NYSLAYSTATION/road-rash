@@ -67,8 +67,11 @@ uint64_t state_hash(const RaceInstance& in) {
     if (in.pedestrians)
         for (const Pedestrian& p : in.pedestrians->pool()) {
             f.i64(p.active);
-            if (!p.active) continue;
+            f.i64(int64_t(p.free_order));
+            f.i64(p.lane);
+            //Returned slots retain motion consumed by a later allocation.
             f.bytes(p.body.bike.m);
+            if (!p.active) continue;
             f.i64(p.state);
             f.i64(p.type);
             f.i64(p.side);

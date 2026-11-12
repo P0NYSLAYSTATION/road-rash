@@ -448,7 +448,9 @@ void Race::cross_sample(Rider& r, int32_t delta) {
     // target as fallback for standalone fixtures. +0x2c is nonzero for every inserted
     // scheduler actor (bike.cpp scheduler insert), so the gate passes here.
     const int32_t known_finish = known_finish_q8();
-    if (known_finish != 0 && (b.u8(0xc0) & 0x10) == 0 && int32_t(to) >= known_finish) {
+    //Live00406890 tests the half's position on its own scheduled move,
+    //after the bike has crossed freely. Standalone fixtures latch here.
+    if (!live_schedule_ && known_finish != 0 && (b.u8(0xc0) & 0x10) == 0 && int32_t(to) >= known_finish) {
         const size_t start_sample = r.sample;
         to = uint32_t(known_finish);
         b.i32(0x134) = int32_t(from);
@@ -771,7 +773,7 @@ void Race::collide(Rider& ra, Rider& rb) {
 // the native call sits at the same point in Race::step (after collide pairs,
 // before the camera update), for every rider, player and AI.
 void Race::collide_traffic(Rider& r) {
-    if (!traffic_ || r.finished) return;
+    if (!traffic_) return;
     if (live_schedule_ && (r.bike.u8(0xc0) & 5) != 5) return; // parked: not a contact candidate
     // No crash gate here: 0x004368f0 checks only tick/flags/geometry, not
     // +0x2f4, so separation (0x00436a40) runs for crashed riders too, and
@@ -955,7 +957,7 @@ void Race::collide_car_statics() {
 // never is) and 0x004046b0 for the half, whose randomized 0x00439270 move
 // draws rand() (traffic-field L5 tick 1303: car 13e1e28 vs rider 7 half).
 void Race::collide_traffic_half(Rider& owner) {
-    if (!traffic_ || !live_schedule_ || owner.finished || owner.frozen || !owner.crash_active ||
+    if (!traffic_ || !live_schedule_ || owner.frozen || !owner.crash_active ||
         owner.half_frozen)
         return;
     constexpr int32_t car_half_length = 64;   // 0x00475698 +0x48
@@ -1104,7 +1106,6 @@ std::vector<DzhrSolid> dzhr_solids_for_sample(int32_t centre_q8, const std::vect
 // half the bike's; reason 1 through knock_off, small-gap speed transfer,
 // big-gap crash entry reason 1). No RNG, no allocation in the tick path.
 void Race::collide_hazards(Rider& r) {
-    if (r.finished) return;
     if (!statics_[r.route].empty()) {
         // 0x004373f0 sweep + 0x00437660 static: the original runs this for
         // crashed riders too (split-left 2056: the crashed bike takes the
@@ -3297,7 +3298,10 @@ void Race::ai_straight_target(Rider& r) {
     const auto& route = route_of(r);
     const size_t next = ring_ && ring_->forward_closed(int32_t(r.sample * 256), route[r.sample].half)
                             ? r.sample : std::min(r.sample + 1, route.size() - 1);
-    const int32_t lanes = route[next].path.right_q8 >> 8;
+    int32_t lanes = route[next].path.right_q8 >> 8;
+    if (const auto* ring = nearest_ring(b.i32(0x1c)))
+        if (const auto physical = ring->slice_lanes(int32_t(next * 256), route[next].half))
+            lanes = (*physical)[0] >> 8;
     int32_t lane = 0;
     if (ai.lane == 1)
         lane = (lanes - 1) / 2;
@@ -4563,6 +4567,9 @@ void Race::advance_ride_animation(Rider& r, bool player) {
     input.flags = r.bike.u8(0x278);
     input.player = player;
     input.wrecked = (r.bike.u8(0xc0) & 0x10) != 0;
+    //0040815f reads the player's latched finish place (004c7ff0),
+    //so only places1..3 select the victory animation after the finish.
+    input.wreck_count = r.finished ? place(size_t(&r - riders_.data())) : 0;
     // 0x00407f30 reads DAT_004b7ef4 before the driver updates the camera.
     input.camera_distance =
         std::abs(r.bike.i32(0x1c) - int32_t(live_schedule_ ? previous_camera_position_ : camera_position()));
@@ -4877,7 +4884,7 @@ void Race::collide_riders() {
         if (a.rider >= 0 && a.type == 8) {
             Rider& owner = riders_[size_t(a.rider)];
             const Bike& body = owner.crash_actor.motion;
-            if (!owner.crash_active || owner.frozen || owner.finished ||
+            if (!owner.crash_active || owner.frozen ||
                 (live_schedule_ && (owner.half_sched_last != ticks_ || ((body.u8(0xc0) | 4) & 6) != 6)))
                 continue;
             if (std::abs(int32_t(uint32_t(body.i32(0x1c)) & 0xff) - 0x80) < body.i32(0x178)) {
@@ -4902,7 +4909,7 @@ void Race::collide_riders() {
         if (!rider_or_ped(a)) continue;
         if (a.rider >= 0 && a.type != 8) {
             const Rider& r = riders_[size_t(a.rider)];
-            if (r.frozen || r.finished) continue;
+            if (r.frozen) continue;
             // 0x004368f0 outer: +0x10 == tick with flags & 6 == 6. Live
             // checks the scheduler image; solo keeps the frozen skip but
             // must still enforce the flags (e.g. split-left 845: the player
@@ -4944,7 +4951,7 @@ void Race::collide_riders() {
             } else if (a.rider >= 0 || b.rider >= 0) {
                 Rider& r = riders_[size_t(a.rider >= 0 ? a.rider : b.rider)];
                 Pedestrian& p = pedestrians_->pool()[size_t(a.rider >= 0 ? b.pedestrian : a.pedestrian)];
-                if (!r.finished && r.bike.i32(0x2f4) == 0)
+                if (r.bike.i32(0x2f4) == 0)
                     contact_rider_pedestrian(r, p, a.rider >= 0); // 0x004049c0 rejects crashed riders
             } else {
                 auto& first = pedestrians_->pool()[size_t(a.pedestrian)];

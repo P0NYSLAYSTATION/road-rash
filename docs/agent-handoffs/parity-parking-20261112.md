@@ -1,5 +1,11 @@
 # Parking continuation and retained road pointers
 
+## Superseding complete Hiway checkpoint
+
+All14084 ticks of the unchanged completed human Hiway trace now pass strict
+whole-race parity including RNG. See [current handoff](parity-finish-pools-20261112.md).
+Older first-gap and WIP descriptions below are historical. Other tracks remain open.
+
 ## Physical statics continuation — latest state
 
 Published1.1.12 at98062ddd68a2e1f1912efe17cecf60543783a5e3; public installer
