@@ -1,5 +1,15 @@
 # Port progress
 
+## November 12, 2026 — parking, retained halves and standings
+
+The completed Hiway recording now matches through8131 including RNG, using
+one initial anchor. Branch-filtered parked pace bands, discarded-arm parking,
+retained tracker bounds, physical half1 motion data and literal roadway-mask
+standings resolve the6604..6703 gaps. First remaining gap8132 is ring actor
+0x336fb08 lateral152320 versus201994. Napa2400/City600 remain exact. Full-race
+and all-track parity remain unfinished; multiplayer stays on hold.
+[Evidence and current validation](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — scenery road visibility
 
 The completed Hiway recording now matches through6603 including RNG. The6557

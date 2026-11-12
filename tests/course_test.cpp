@@ -54,6 +54,12 @@ int main() {
         c.nodes.emplace(120, rr::CourseNode{120, 0, 140, 100, 3, 300});
         c.nodes.emplace(140, rr::CourseNode{140, 4});
         c.nodes.emplace(160, rr::CourseNode{160, 3});
+        rr::mark_course_branches(c);
+        check(rr::shared_course_branch(c, 20, 60) && rr::shared_course_branch(c, 20, 80) &&
+                  rr::shared_course_branch(c, 60, 120),
+              "common roads share pace bands with either branch");
+        check(!rr::shared_course_branch(c, 60, 80) && rr::shared_course_branch(c, 60, 60),
+              "the parked pace band excludes opposite arms of the same split");
         c.sections[3].events.push_back({100, 101, 6, {1, 0, 0}});
         check(rr::graph_finish_distance(c, 20, 25, 0) == 700 * 256 - 25,
               "finish graph follows the preferred branch and preserves the local fraction");

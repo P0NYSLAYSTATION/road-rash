@@ -412,7 +412,20 @@ void Race::accumulate(Rider& r, uint32_t from, uint32_t to, size_t from_sample, 
     };
     const auto& before = route[retained(from_sample)].path;
     const auto& after = route[retained(to_sample)].path;
-    accumulate_road_motion(b, tables_, from, to, before.bend, before.rise, after.bend, after.rise);
+    std::pair<int32_t, int32_t> before_motion{before.bend, before.rise}, after_motion{after.bend, after.rise};
+    if (const auto* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr) {
+        if (const auto motion = ring->retained_motion(int32_t(from_sample * 256), route[from_sample].half))
+            before_motion = *motion;
+        if (const auto motion = ring->retained_motion(int32_t(to_sample * 256), route[to_sample].half))
+            after_motion = *motion;
+    }
+    accumulate_road_motion(b, tables_, from, to, before_motion.first, before_motion.second,
+                           after_motion.first, after_motion.second);
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")) && b.i32(0xc4) == 0x20)
+        std::fprintf(stderr, "ped-motion pos %u/%u route %d samples %zu/%zu retained %zu/%zu halves %u/%u bend %d/%d rise %d/%d heading %d\n",
+                     from, to, r.route, from_sample, to_sample, retained(from_sample), retained(to_sample),
+                     unsigned(route[from_sample].half), unsigned(route[to_sample].half),
+                     before_motion.first, after_motion.first, before_motion.second, after_motion.second, int32_t(b.i32(0x128)));
 }
 
 void Race::cross_sample(Rider& r, int32_t delta) {
@@ -458,7 +471,11 @@ void Race::cross_sample(Rider& r, int32_t delta) {
     const size_t from_sample = r.sample;
     if (((to ^ from) & 0xffffff00u) != 0) {
         r.previous_sample = r.sample;
-        r.sample = to >> 8;
+        //00439390 follows the physical forward pointer. A discarded split
+        //half ends in a self-link even while the numeric position advances.
+        const bool closed = int32_t(to) > int32_t(from) && ring_ &&
+                            ring_->forward_closed(int32_t(r.sample * 256), route_of(r)[r.sample].half);
+        if (!closed) r.sample = to >> 8;
         // Entering a split: the side of half 0's right edge decides the branch (0x00439390).
         const auto& a = (*routes_[0])[r.sample];
         if (r.route == 0 && int32_t(to) > int32_t(from) && a.event == RoadEvent::split) {

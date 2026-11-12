@@ -106,6 +106,21 @@ class TrackRing {
     int32_t slice_countdown(int32_t position) const {
         return shoulders_[size_t((uint32_t(position) >> 8) & 127)].countdown;
     }
+    std::optional<std::pair<uint32_t, uint32_t>> slice_location(int32_t position, uint8_t half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!s.count) return std::nullopt;
+        return s.location[s.count == 1 ? 0 : half]; // graph node and section-local sample
+    }
+    std::optional<uint32_t> closed_upper(uint32_t node, int32_t tracker_sample) const {
+        const auto found = closed_ends_->find(node);
+        if (found == closed_ends_->end() || tracker_sample <= found->second.first) return std::nullopt;
+        return found->second.second;
+    }
+    std::optional<std::pair<int32_t, int32_t>> retained_motion(int32_t position, uint8_t physical_half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!(s.motion_valid & (1u << physical_half))) return std::nullopt;
+        return s.motion[physical_half]; // unused half1 survives a common-half0 rebuild
+    }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
     // Terrain slice exported by a walker at its current sample.
@@ -191,9 +206,14 @@ class TrackRing {
         uint8_t count = 0;
         uint8_t closed = 0;
         int8_t countdown = 0;
+        uint8_t motion_valid = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
+        std::array<std::pair<uint32_t, uint32_t>, 2> location{};
+        std::array<std::pair<int32_t, int32_t>, 2> motion{};
     };
     std::array<Shoulders, 128> shoulders_{};
+    using ClosedEnds = std::map<uint32_t, std::pair<int32_t, uint32_t>>;
+    std::shared_ptr<ClosedEnds> closed_ends_ = std::make_shared<ClosedEnds>();
     int32_t known_finish_ = 0;
     bool unsupported_ = false;
     SliceSink slice_sink_;

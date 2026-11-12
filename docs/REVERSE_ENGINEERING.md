@@ -1,5 +1,17 @@
 # Binary evidence and next work
 
+## November 12, 2026 — parking and retained physical halves
+
+00407610 filters parked pace candidates through00454040 branch flags40/80/C0
+and split identity.00439390 retains discarded-arm self-linked slices;
+00437e99 parks actors whose numeric coordinate passes that physical endpoint.
+00450e30 retains a stopped front tracker's upper bound until the back tracker
+leaves its node. A common-road half0 rebuild leaves physical half1 motion words
+untouched: the6670 pedestrian capture proves retained node/local12, bend114688,
+rise11 rather than future common sample1040.00407550 intersects both half
+slice+36 masks before using positions for place, falling back to finish deltas.
+[Measured captures and hashes](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — secondary-road culling controls box loading
 
 00444553..004445d0 can hide the roadway opposite the camera before scenery

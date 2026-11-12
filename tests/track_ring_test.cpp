@@ -98,6 +98,7 @@ void split_shoulders() {
             p.right = section == 1 ? 0 : 500;
             p.left_q8 = section == 1 ? 512 : 0;
             p.right_q8 = section == 1 ? 0 : 512;
+            p.rise = section == 1 ? 1 : 3;
         }
     rr::TrackRing ring(course, 0);
     const rr::TrackRing::Random random = [] { return 0u; };
@@ -111,6 +112,16 @@ void split_shoulders() {
     for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
     check(ring.forward_closed(381 * 256, 1) && !ring.forward_closed(381 * 256, 0),
           "discarded split half retains its self-link while the committed road continues");
+    const auto continued = ring.slice_location(382 * 256, 1);
+    check(continued && continued->first == 60 && continued->second == 82,
+          "a collapsed physical slot refers to the committed graph node even for a discarded-half lookup");
+    check(!ring.closed_upper(80, 381) && ring.closed_upper(80, 382) == 81,
+          "the forward tracker keeps the discarded arm's final local coordinate after reaching its self-link");
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    const auto old_half = ring.retained_motion(381 * 256, 1);
+    const auto new_half = ring.retained_motion(381 * 256, 0);
+    check(old_half && new_half && old_half->second == 3 && new_half->second == 1,
+          "rebuilding a common half0 preserves an old physical half1's motion words");
     check(saved.slice_shoulders(300 * 256, 0) == left,
           "a copied ring preserves physical shoulder geometry when the live slot is reused");
 }

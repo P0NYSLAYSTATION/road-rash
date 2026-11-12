@@ -323,26 +323,29 @@ void Race::parked_pace_band() {
     // in place order lose 60/30/15 of pace (DAT_004642e8, floor 3000), the
     // three nearest behind gain 60/30/15 (DAT_004642f8, cap 30000). A parked
     // rider qualifies unless its +0x304 node and the player's lie on the two
-    // branches of one split (0x00454040 node flags 0x40/0x80); the branch
-    // test is not modelled (every parked rider qualifies), which holds while
-    // the field stays on the trunk.
+    // branches of one split (00454040 node flags40/80 and section+20 group).
     if (pace_band_tick_ > ticks_ || riders_.empty()) return;
     pace_band_tick_ = ticks_ + 0x3c;
-    std::array<std::optional<int32_t>, 16> by_place{};
-    std::array<Rider*, 16> who{};
-    for (auto& r : riders_)
-        if (!r.cop && !r.live && r.place > 0 && r.place < 0x11) {
-            by_place[size_t(r.place - 1)] = r.bike.i32(0x314);
-            who[size_t(r.place - 1)] = &r;
-        }
     // Plan 34: the band forms around every human in seat order (one human:
     // the original band around the player).
     for (int seat = 0; seat < humans(); ++seat) {
         const Rider& h = riders_[size_t(human_rider(seat))];
-        if (seat == 0 || human(h)) pace_band(by_place, h.place);
+        if (seat != 0 && !human(h)) continue;
+        std::array<std::optional<int32_t>, 16> by_place{};
+        std::array<Rider*, 16> who{};
+        const auto& human_road = route_of(h);
+        for (auto& r : riders_)
+            if (!r.cop && !r.live && r.place > 0 && r.place < 0x11) {
+                const auto& road = route_of(r);
+                if (finish_course_ && !shared_course_branch(*finish_course_, road[r.virtual_section].node,
+                                                            human_road[h.sample].node)) continue;
+                by_place[size_t(r.place - 1)] = r.bike.i32(0x314);
+                who[size_t(r.place - 1)] = &r;
+            }
+        pace_band(by_place, h.place);
+        for (size_t k = 0; k < 16; ++k)
+            if (who[k]) who[k]->bike.i32(0x314) = *by_place[k];
     }
-    for (size_t k = 0; k < 16; ++k)
-        if (who[k]) who[k]->bike.i32(0x314) = *by_place[k];
 }
 
 void Race::run_half_node(Rider& r, uint32_t controls, bool countdown) {
@@ -449,6 +452,11 @@ void Race::run_bike_node(Rider& r, uint32_t controls, bool countdown) {
         bool outside = true; // every window (plan 34 C2; one ring: the original test)
         for (const TrackRing* w : rings_)
             if (w && !(s < (w->back_q8() >> 8) || s > (w->front_q8() >> 8) - 1)) outside = false;
+        //00437e99..00437eb7 also parks a rider that crossed the numeric
+        //coordinate of a physical self-linked end slice (including a
+        //discarded split arm inside the global ring window).
+        if (s != int32_t(r.sample) && ring_->forward_closed(int32_t(r.sample * 256), route_of(r)[r.sample].half))
+            outside = true;
         if (outside) park(r);
     }
     r.sched_interval = schedule_interval(r, false);
@@ -532,7 +540,8 @@ void Race::refresh_place(Rider& r) {
         if (j == i || riders_[j].cop) continue; // the place table 0x004c7fb0 holds no cop
         const Rider& o = riders_[j];
         const bool shared = o.half_slice_present && r.half_slice_present &&
-                            !(route_of(r)[r.sample].dual && o.route != r.route);
+                            shared_roadway((*routes_[r.half_mirror.route])[r.half_mirror.sample],
+                                           (*routes_[o.half_mirror.route])[o.half_mirror.sample]);
         if (shared ? o.half_mirror.position > r.half_mirror.position : o.finish_distance < r.finish_distance)
             ++place;
     }
@@ -677,12 +686,20 @@ void Race::move_bike_parked(Rider& r) {
         const int32_t back = w->back_q8() >> 8, front = w->front_q8() >> 8;
         const size_t t0 = size_t(back + tracker_back), t1 = size_t(back + tracker_front);
         if (t1 >= road.size()) continue;
-        const uint32_t section = road[r.virtual_section].section;
-        const bool has0 = road[t0].section == section, has1 = road[t1].section == section;
+        const uint32_t node = road[r.virtual_section].node;
+        const auto location0 = w->slice_location(int32_t(t0 * 256), road[t0].half);
+        const auto location1 = w->slice_location(int32_t(t1 * 256), road[t1].half);
+        const bool has0 = location0 && location0->first == node;
+        const bool has1 = location1 && location1->first == node;
         if (!has0 && !has1) continue;
         const int32_t length = section_length(road, r.virtual_section);
-        const int32_t lo = has0 ? int32_t(road[t0].local) * 256 : 0;
-        const int32_t hi = has1 ? int32_t(road[t1].local) * 256 : length * 256 - 1;
+        const int32_t lo = has0 ? int32_t(location0->second) * 256 : 0;
+        //00450e30..00450e4d preserves tracker1's last sub-slice when its
+        //forward link is self. Until tracker0 leaves this node, that stale
+        //upper endpoint still limits waking on the discarded arm.
+        const auto closed = has0 && !has1 ? w->closed_upper(node, int32_t(t1)) : std::nullopt;
+        const int32_t hi = has1 ? int32_t(location1->second) * 256
+                               : closed ? int32_t(*closed) * 256 : length * 256 - 1;
         const int32_t v = r.virtual_local;
         if (v < lo || hi < v) continue;
         bool use0 = has0;
@@ -726,17 +743,6 @@ void Race::wake(Rider& r, size_t sample) {
     r.live = true;                            // 0x00431960(bike, 1)
     if (b.i32(0x2f4) == 0) live_standings(r); // 0x004067d0
     // 0x00407550: refresh the half's place now.
-    const size_t i = size_t(&r - riders_.data());
-    int place = 1;
-    for (size_t j = 0; j < riders_.size(); ++j) {
-        if (j == i || riders_[j].cop) continue;
-        const Rider& o = riders_[j];
-        const bool shared =
-            o.half_slice_present && r.half_slice_present && !(road[r.sample].dual && o.route != r.route);
-        if (shared ? o.half_mirror.position > r.half_mirror.position : o.finish_distance < r.finish_distance)
-            ++place;
-    }
-    r.place = place;
-    r.place_refresh = r.half_sched_last + 0x3c;
+    refresh_place(r);
 }
 } // namespace rr

@@ -360,7 +360,45 @@ Course read_course(const std::vector<uint8_t>& bytes) {
     }
     if (course.nodes.size() != graph.u32(8))
         throw std::runtime_error("Unreachable nodes or incorrect graph count");
+    mark_course_branches(course);
     return course;
+}
+
+void mark_course_branches(Course& course) {
+    //00454040 walks both split arms, then the merged common road. The
+    //original stores the split identity in its sections andC0/40/80 in nodes.
+    for (auto& [id, n] : course.nodes) n.branch_flags = 0;
+    for (auto& s : course.sections) s.branch_group = 0;
+    size_t visits = 0;
+    auto walk = [&](auto&& self, uint32_t at, uint32_t group, uint8_t half) -> void {
+        for (;;) {
+            if (++visits > course.nodes.size() * 4 + 1) throw std::runtime_error("Cycle in course branch marking");
+            auto& n = course.nodes.at(at);
+            if (n.branch_flags & 0xc0) return;
+            if (n.kind == 0) {
+                n.branch_flags = group ? (half ? 0x80 : 0x40) : 0xc0;
+                course.sections.at(n.link).branch_group = group;
+                at = n.next;
+            } else if (n.kind == 1) {
+                self(self, n.next, n.offset, 0);
+                group = n.offset;
+                half = 1;
+                at = n.previous;
+            } else if (n.kind == 2) {
+                group = 0;
+                half = 0;
+                at = n.link;
+            } else return;
+        }
+    };
+    walk(walk, course.root, 0, 0);
+}
+
+bool shared_course_branch(const Course& course, uint32_t a, uint32_t b) {
+    const auto& first = course.nodes.at(a);
+    const auto& second = course.nodes.at(b);
+    return (first.branch_flags & second.branch_flags & 0xc0) != 0 ||
+           course.sections.at(first.link).branch_group != course.sections.at(second.link).branch_group;
 }
 
 namespace {

@@ -476,11 +476,18 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     auto& previous = shoulders_[size_t(((uint32_t(ring_q8) >> 8) - 1) & 127)];
     //00454c80: collapsing a committed split leaves the discarded half's
     //last forward link pointing to itself; it does not enter the chosen road.
-    if (w.front && !w.dual && previous.count == 2 && w.event != 1 && branch_committed_)
+    if (w.front && !w.dual && previous.count == 2 && w.event != 1 && branch_committed_) {
         previous.closed |= uint8_t(1u << (chosen_half_ ^ 1));
+        const auto [node, local] = previous.location[chosen_half_ ^ 1];
+        if (closed_ends_.use_count() != 1) closed_ends_ = std::make_shared<ClosedEnds>(*closed_ends_);
+        (*closed_ends_)[node] = {(ring_q8 >> 8) - 1, local};
+    }
     for (uint8_t h = 0; h < stored.count; ++h) {
         const auto& half = w.halves[w.dual ? h : w.active];
         const auto& path = path_of(half);
+        stored.location[h] = {half.node, uint32_t(half.position >> 8)};
+        stored.motion[h] = {path.bend, path.rise};
+        stored.motion_valid |= uint8_t(1u << h);
         stored.edges[h] = {half.offset - path.left - path.shoulder_left,
                            half.offset + path.right + path.shoulder_right};
     }
@@ -544,6 +551,7 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
 void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sink) {
     known_finish_ = 0;
     shoulders_ = {};
+    closed_ends_ = std::make_shared<ClosedEnds>();
     windows_ = std::make_shared<WindowCache>();
     random_ = &random;
     std::vector<uint32_t> visited;

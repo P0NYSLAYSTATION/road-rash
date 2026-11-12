@@ -58,12 +58,14 @@ struct CourseSection {
     // 0x00452cb0(...,0) exposes one slice at position length before rewinding.
     PathSample backward_endpoint{0, 0, 500, 500, 512, 512};
     std::optional<PathSample> forward_start; // after00452e10's zero-distance iterator step
+    uint32_t branch_group = 0; // runtime section+20, split node owning this branch
 };
 struct CourseNode {
     uint32_t offset, kind, next = 0, previous = 0, link = 0, length = 0;
     // Split/merge byte +0x19: the half 0x00453030 steps first (traversal [1]).
     int8_t primary = 0;
     uint8_t preferred = 0; // node+18, default outgoing half used by00407410
+    uint8_t branch_flags = 0; //00454040: commonC0, split.next40, split.previous80
 };
 struct Course {
     uint32_t root;
@@ -94,6 +96,8 @@ inline bool shared_roadway(const RouteSample& a, const RouteSample& b) {
 // Select one physical sub-slice while preserving the opposite half's metadata.
 RouteSample route_half(const RouteSample& sample, uint8_t half);
 Course read_course(const std::vector<uint8_t>& bytes);
+void mark_course_branches(Course&);
+bool shared_course_branch(const Course&, uint32_t first_node, uint32_t second_node);
 // Split node offsets in traversal order (kind 1 nodes reached from root).
 // Census key: one branch bit per split, in this order (26 combos total:
 // CITY 2, HIWAY 4, MEDLY 8, NAPA 8, CANYN 4).

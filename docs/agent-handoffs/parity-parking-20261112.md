@@ -1,0 +1,117 @@
+# Parking continuation and retained road pointers
+
+Baseline be17861, branch codex/simulation-parity. This continuation is in
+progress; the working-tree parking changes are not yet committed or released.
+The ongoing user instruction is to continue autonomously until all tracks have
+start-to-finish parity. Multiplayer remains on hold. The saved task API reports
+the older long-running goal paused; that state cannot be resumed by update_goal.
+Continue the authorized work within the active turn; do not stop after status.
+
+## Published checkpoint
+
+Release1.1.5 is published from clean be178614925c8fed4010aac443935b08649fc37e:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.5
+Installer SHA256 a54c47de63edd4777c42454537748d01c9f7d09ed8dba8a530ae31cdf00d5103.
+Public download verified (`build/v115-publish.log`). Isolated test-AppId update
+1.1.4->1.1.5 preserved600 files and passed installed-menu smoke
+(`build/parity-v115-upgrade-validation.json`); its preference intentionally uses
+renderer=sdl. Published1.1.4 checkpoint c8f72b6 is also intact.
+
+## Measured parking progress
+
+Unchanged completed Hiway fixture14084 ticks, seed1, outcome3, SHA256
+0fe2e9d7dd984990c528ee4b05cf80015c37b2e7a84b2c442e0b524e27d5975d.
+Current replay matches through8131 including RNG with one initial anchor.
+First gap8132: ring actor0x336fb08 lateral152320/native201994.
+`build/hiway-standings-road-mask.json` records that remaining failure (exit1).
+
+-6604: parked rider9 pace9619 versus9634 caused position223501 versus223502.
+ Original00407610 filters opposite branches using00454040 graph flags40/80/C0
+ and section+20 split identity before assigning the60/30/15 pace bands.
+ Native previously included every parked rider. The graph marker now follows
+ the original traversal, and each human's band filters branch membership.
+ Direct capture `hiway-parked-position-6610.tsv`, SHA256
+ 5f04bf484f46b63e901b8cc99af90b35888b1f1653869c0bbddd3739292e297a,
+ proves original pace9604 before6601 and9634 afterwards. The opposite-arm
+ parked rider remains8677, while the next trailing riders receive60/30/15.
+ All6610 recorded controls validate and the working DLL was restored.
+-6607: original00439390 retains a discarded arm's self-linked physical
+ slice even when numeric position crosses its coordinate.00437e99..00437eb7
+ parks the actor when the coordinate no longer agrees with that end slice.
+ Native now retains that physical sample and applies the parking test.
+-6637:00450e30..00450e4d preserves tracker1's last upper endpoint after its
+ self-link stops it. Native's missing-front-tracker fallback admitted the
+ whole branch and woke the actor early. Physical ring location lookup and
+ a copied-on-write map of closed-arm upper endpoints now bound that wake
+ while tracker0 remains on the arm. Full bidirectional tracker cloning and
+ arbitrary hand-over are not claimed by this forward fix.
+
+Files changed: src/course.{cpp,hpp}, src/race.cpp, src/race_schedule.cpp,
+src/track_ring.{cpp,hpp}, tests/course_test.cpp, tests/track_ring_test.cpp;
+oracle/aweman_proxy.c and race.cpp additionally contain optional diagnostics.
+Synthetic tests cover branch eligibility, retained physical graph locations,
+discarded self-links and the retained upper endpoint. Snapshot copies share
+the endpoint map; a new closure clones it only when shared.
+
+## Validation and desktop limitation
+
+Final checkpoint build succeeds (`build/parking-checkpoint-full-build.log`).
+The fresh SDL native gate passes104 tests with35 explicit skips and zero
+failures,139 registered (`build/parking-checkpoint-native-tests.log`); the two
+Direct3D tests remain explicitly excluded. Strict Napa2400/City600 pass
+(`build/parking-checkpoint-regressions.json`). The initial transient tooling
+failure described below is superseded by this clean run, not hidden.
+
+`build/closed-tracker-upper-full-build.log` succeeds after correcting a C++20
+shared_ptr::unique compile error to use_count (first failed command recorded
+in `build/closed-tracker-upper-build.log`).
+`build/closed-tracker-upper-regressions.json`: Napa2400/City600 strict passes.
+`RR_ASSETS=E:/RR RR_RENDERER=sdl ctest --test-dir build/release
+--exclude-regex '^(directx9-main-window|integer-framebuffer)$'
+passes104 tests with35 corpus/platform skips,139 registered and no failures
+(`build/closed-tracker-upper-native-tests.log`). Two Direct3D tests are excluded,
+not passed. A default full attempt failed five graphics/launch checks.
+
+The published1.1.5 binary also fails when forced to RR_RENDERER=dx9
+(`build/v115-dx9-display-baseline.log`); its default SDL success is not Direct3D
+evidence. A separate temporary hidden-window WinAPI probe reads32-bit desktop,
+1920x1080/60Hz, display format22 and CreateDevice HRESULT0x88760868
+(D3DERR_DEVICELOST), `build/dx9-device-state.json`. No display mode was changed.
+Do not modify the renderer or bless those failures to clear the gate. Continue
+headless parity, explicitly report unavailable Direct3D checks, and retry when
+the desktop/device state changes. No graphics source changed in these fixes.
+
+## Retained-half motion evidence and next action
+
+Original diagnostic `hiway-ped-retained-slice-6680` completed with6680 validated
+controls and restored the working DLL. SHA256
+0d03874705791dfc45b90cc18c0e4eb1d0b52ea157bc5829ecccd071b4be888e.
+It used exact E:/RR and the measured initial extra-AI speed table.
+At6670 both physical pointers remain4858724, half1, local12, encoded bend114688,
+rise11. Native had read logical future common sample1040 with bend13/rise-13.
+The physical half1 words survive a common-half0 rebuild. The ring now preserves
+motion words separately per physical half, including copied save states.
+The unchanged completed trace confirms the fix through6702. No original
+capture process remains active.
+
+`build/retained-half-motion-full-build.log` succeeds. Strict regression receipt
+`build/retained-half-motion-regressions.json` passes Napa2400/City600.
+The SDL suite first reported103 passes,35 skips and one tooling temporary-file
+replacement PermissionError. The isolated tooling retry passed
+(`build/retained-half-motion-tooling-retry.log`). Two Direct3D checks remain
+explicitly excluded. This is not a clean single-run full-suite pass.
+
+Next gap6703 is place, not a roadway-state word.00407550 tests both halves'
+slice+36 masks before comparing positions; otherwise it compares finish deltas.
+The route shortcut is replaced with that literal predicate using both half
+mirrors' samples, also reusing refresh_place during wake. The full Hiway replay
+measures exact through8131. Napa2400/City600 regressions still pass.
+
+Next coherent parking checkpoint needs refreshed docs/status, commit/push and
+new installer1.1.6 with an isolated1.1.5 upgrade check. Scripts in
+C:/Users/eddj9/Documents/New project/publish-v115.py and
+verify-parity-v115-upgrade.py are templates. Keep source clean throughout final
+build/installer/publication checks. No commercial assets in releases.
+
+Independent Napa moving1259 and City moving1251 still differ. Medly's old
+scripted wreck is not finish evidence. All-track full-race parity is unfinished.

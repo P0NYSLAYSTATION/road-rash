@@ -2,6 +2,13 @@
 
 ## Windows continuation — November 12, 2026
 
+Current continuation supersedes the historical first-gap statements below:
+the unchanged completed Hiway trace matches through8131 including RNG.
+First gap8132 is ring actor0x336fb08 lateral152320/native201994.
+Parking, retained physical half motion and standings evidence is in the
+[current handoff](../agent-handoffs/parity-parking-20261112.md). Complete
+all-track start-to-finish parity remains open; multiplayer stays on hold.
+
 Latest first gap is6604 (parked position223502/223501), after6603 exact ticks
 including RNG. Original secondary-road visibility prevented the false6557
 decal contact; the native box-loading gate now reproduces it. See the

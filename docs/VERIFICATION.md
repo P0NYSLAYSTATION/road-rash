@@ -1,5 +1,17 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — parking and physical-half continuation
+
+`build/hiway-standings-road-mask.json` checks the unchanged14084-tick completed
+Hiway original trace with one initial RNG anchor: exact through8131, first
+difference8132 ring actor0x336fb08 lateral152320/native201994. Exit1 remains
+an acceptance failure, not a whole-race pass. The strict Napa2400/City600
+regressions pass (`build/parking-checkpoint-regressions.json`). Original
+diagnostic6680-tick prefix validates all controls and restores E:/RR's DLL.
+Current Direct3D device creation is unavailable even for published1.1.5
+(HRESULT0x88760868); SDL checks explicitly exclude two Direct3D tests.
+[Full evidence and validation receipts](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — scenery half-cull gate
 
 `build/scenery-road-cull-full-build.log` succeeds. Normal-host native gate

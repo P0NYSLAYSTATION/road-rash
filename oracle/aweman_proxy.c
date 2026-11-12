@@ -467,6 +467,18 @@ static void dump_sim_tick(void) {
         int addr_index = 0;
         for (int guard = 0; node && node != end && guard < 512; ++guard) {
             if (!readable(node, 0xe4)) break;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) && RD32(node + 0xc4) == 0x20) {
+                fprintf(g_out, "# ped-motion tick=%d actor=%u pos=%d previous_pos=%d heading=%d",
+                        tick, (unsigned)node, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x134), (int32_t)RD32(node + 0x128));
+                for (int k = 0; k < 2; ++k) {
+                    uintptr_t sl = (uint32_t)RD32(node + 0x13c + k * 4);
+                    if (sl && readable(sl, 0xbc))
+                        fprintf(g_out, " %s=%u,node%u,local%d,half%u,bend%d,rise%d",
+                                k ? "current" : "previous", (unsigned)sl, RD32(sl), (int32_t)RD32(sl + 4),
+                                RD8(sl + 0x36), (int32_t)RD32(sl + 0xb4), (int32_t)RD32(sl + 0xb8));
+                }
+                fputc('\n', g_out);
+            }
             if (g_ai_probe_tick >= 0 && tick >= g_ai_probe_tick - 20 && tick <= g_ai_probe_tick + 1 &&
                 readable(node, 0x31c) && RD32(node + 0xc4) == 4 && !RD8(node + 0x300))
                 fprintf(g_out, "# parked-state tick=%d actor=%u pos=%d dt=%d pace=%d wait=%d live-distance=%d live-ticks=%d node=%u local_q8=%d next=%d last=%d\n",
