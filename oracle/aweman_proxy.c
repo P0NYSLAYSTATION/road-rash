@@ -185,6 +185,27 @@ static uint32_t __cdecl hook_controls(void) {
     if (!g_drive) return ((uint32_t(__cdecl*)(void))0x0044f800)();
     uint32_t controls = 1;          // original accelerate bit
     if (g_drive == 3) return 1 | 4; // plan 11a Task 3 Step 5: accelerate + hold left (crest hunting)
+    if (g_drive == 4) {
+        //Conservative human inputs for sustained captures, without touching
+        //simulation state: predict lateral drift and limit speed in curves.
+        const uintptr_t rider = (uint32_t)RD32(0x004642d8);
+        if (!readable(rider, 0x144)) return controls;
+        uintptr_t slice = (uint32_t)RD32(rider + 0x2c);
+        if (!readable(slice, 0xe8)) slice = (uint32_t)RD32(rider + 0x140);
+        if (!readable(slice, 0xe8)) return controls;
+        const int64_t centre = ((int64_t)(int32_t)RD32(slice + 0xe0) +
+                                (int32_t)RD32(slice + 0xe4)) * 128;
+        const int64_t predicted = (int32_t)RD32(rider + 0x28) +
+                                  (int64_t)(int32_t)RD32(rider + 0x10c) * 8;
+        const int32_t bend = (int32_t)RD32(slice + 0xb4);
+        int32_t target = abs(bend) >= 6 ? 4000 : 6000;
+        if (llabs(centre - predicted) > 100 * 256) target = 2500;
+        const int32_t speed = (int32_t)RD32(rider + 0xec);
+        controls = speed < target - 200 ? 1 : speed > target + 200 ? 2 : 0;
+        if (centre - predicted > 10 * 256) controls |= 0x200;
+        if (centre - predicted < -10 * 256) controls |= 4;
+        return controls;
+    }
     if (g_drive == 2) {
         const uintptr_t rider = *(uint32_t*)0x004642d8;
         if (readable(rider, 0x144)) {
@@ -213,6 +234,7 @@ static void capture_keyboard_axes(uint32_t controls) {
     typedef void (__fastcall *key_axis_fn)(int);
     const key_axis_fn key_axis = (key_axis_fn)0x0044fa50;
     if (controls & 1) key_axis(0);
+    if (controls & 2) key_axis(1);
     if (controls & 4) key_axis(2);
     else if (controls & 0x200) key_axis(9);
 }
@@ -401,7 +423,7 @@ static void dump_sim_tick(void) {
         fprintf(g_record, "%x\n", (uint32_t)RD32(0x004b7ed0));
         fflush(g_record); // the replay reader consumes one hexadecimal word per tick
     }
-    if (g_drive == 2 && getenv("RR_ORACLE_DRIVER_TRACE")) {
+    if ((g_drive == 2 || g_drive == 4) && getenv("RR_ORACLE_DRIVER_TRACE")) {
         const uintptr_t bike = (uint32_t)RD32(0x004642d8);
         if (readable(bike, 0x144)) {
             const uintptr_t active = (uint32_t)RD32(bike + 0x2c);
@@ -4673,7 +4695,7 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_DRIVE", buf, sizeof buf)) {
         g_drive = atoi(buf);
-        if (g_drive < 0 || g_drive > 3) return 0;
+        if (g_drive < 0 || g_drive > 4) return 0;
     }
     if (GetEnvironmentVariableA("RR_ORACLE_SIM", buf, sizeof buf)) g_sim = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_SEED", buf, sizeof buf)) g_seed = atoi(buf);

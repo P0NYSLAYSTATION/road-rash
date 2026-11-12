@@ -1,5 +1,10 @@
 # Binary evidence and next work
 
+## November 12, 2026 — traffic scans and finished scheduler
+
+0044e958/66/6e reads projected obstacle velocity +108/+10c, not scalar +ec. City1559 speed386/projected382 crosses an integer target threshold. 00449d1b/64 retains equal-position nodes;00449d30 filters physical roadway bits. 00455155 skips4547e0 smoothing for event4 before a merge. 00405da3 computes the police initial target from persistent speed before replan and00406cc3 pursuit overwrite. Original scheduling continues during result delay after every rider finishes. These corrections match complete Napa29055 including RNG.
+[Evidence](agent-handoffs/parity-projected-velocity-20261112.md).
+
 ## November 12, 2026 — original mixed contacts and removal stores
 
 00436994 terminates the entire inner collision scan at the first eligible object

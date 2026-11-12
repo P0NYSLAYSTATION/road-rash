@@ -220,6 +220,9 @@ int main() {
               "live half latches the overshot finish without a bike move or position clamp");
         check((rider.half_object.u8(0xc0) & 0x10) && (rider.bike.u8(0xc0) & 0x10),
               "finish latch marks both scheduled objects");
+        live_finish.step(0);
+        check(live_finish.ticks() == 2,
+              "live scheduler continues through the result delay when every rider has finished");
     }
     {
         rr::Opponent opponent{test_spec(), 90, 0, 0, 0, 1};

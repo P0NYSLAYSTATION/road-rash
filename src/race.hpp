@@ -803,7 +803,7 @@ class Race {
     uint32_t random();
     int name_roll_ = -1;
     size_t built_riders_ = SIZE_MAX; // build_draws: riders 0x00405600 has built so far (scan limit)
-    void spawn_brain(Rider& r, size_t built);
+    void spawn_brain(Rider& r, size_t built, bool retain_speeds = false);
     struct PoliceSetup {
         PoliceConfig config;
         std::vector<BikeSpec> specs;

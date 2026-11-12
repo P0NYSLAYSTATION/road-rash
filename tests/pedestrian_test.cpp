@@ -233,6 +233,41 @@ void pedestrian_statics(const Fixture& f) {
         }
 }
 
+void pedestrian_shoulders(const Fixture& f) {
+    std::vector<rr::RouteSample> road(400);
+    for (auto& s : road) {
+        s.path.left = s.path.right = 500;
+        s.path.left_q8 = s.path.right_q8 = 512;
+        s.path.shoulder_left = s.path.shoulder_right = 250;
+    }
+    rr::TerrainSlice terrain;
+    terrain.type = 0;
+    rr::Race race(road, road, f.physics, f.specs.at(0), 90);
+    race.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+    race.set_live_schedule(true);
+    race.riders()[0].sched_next = race.riders()[0].half_sched_next = 1000;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [](const rr::RouteSample&, uint8_t) -> const rr::PedestrianLook* { return nullptr; }, f.exe);
+    race.set_pedestrians(&system);
+    for (int side : {-1, 1}) {
+        auto& p = system.pool()[0];
+        p = rr::Pedestrian{};
+        system.apply_template(p.body.bike);
+        p.active = true;
+        p.type = 10;
+        p.state = 7;
+        p.body.sample = p.body.previous_sample = 55;
+        p.body.bike.i32(0x1c) = p.anchor = 55 * 256;
+        p.body.bike.i32(0x28) = side * 800 * 256;
+        p.next_tick = race.ticks() + 1;
+        race.countdown_step();
+        check(std::abs(p.body.bike.i32(0x28)) <= 750 * 256,
+              "pedestrian mover must clamp both shoulder boundaries before vertical settling");
+    }
+}
+
 void roadside_pool(const Fixture& f) {
     auto race = f.race(0);
     race->set_live_schedule(true);
@@ -527,6 +562,7 @@ int main(int argc, char** argv) {
         Fixture city("CITY");
         recycled_pedestrian(city);
         pedestrian_statics(city);
+        pedestrian_shoulders(city);
         roadside_pool(city);
         initial_pedestrian_overlap(city);
         graphics_replacement(city);

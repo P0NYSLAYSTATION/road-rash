@@ -543,7 +543,7 @@ void Race::move_along(Rider& r, int32_t distance, bool sweep) {
     if (unit < 0) first = -first;
     cross_sample(r, first);
     int32_t bend = b.i32(0x130), rise = b.i32(0x12c);
-    for (int32_t n = magnitude >> 8; n > 0 && !r.finished; --n) {
+    for (int32_t n = magnitude >> 8; n > 0 && (live_schedule_ || !r.finished); --n) {
         cross_sample(r, unit);
         bend += b.i32(0x130);
         rise += b.i32(0x12c);
@@ -2227,10 +2227,19 @@ void Race::walls(Rider& r, const Bike* owner) {
         return d ? value + trunc256(fraction * d) : value;
     };
     const auto& route = route_of(r);
-    const size_t next_sample = std::min(r.sample + 1, route.size() - 1);
-    const size_t wall_previous = r.wall_previous_sample.value_or(r.previous_sample);
-    const size_t previous_next = std::min(wall_previous + 1, route.size() - 1);
-    const SubSliceView cur = sub_slice(r, r.sample), nxt = sub_slice(r, next_sample);
+    auto physical = [&](size_t sample) {
+        const auto* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr;
+        if (!ring) return std::min(sample, route.size() - 1);
+        const int64_t back = ring->back_q8() >> 8;
+        const int64_t slot = back + ((int64_t(sample) - back) & 127);
+        return size_t(std::clamp<int64_t>(slot, 0, int64_t(route.size() - 1)));
+    };
+    //A due actor can move once after its ring slot has been rebuilt.
+    //0043a610 reads those physical slice pointers, not historical geometry.
+    const size_t current = physical(r.sample), next_sample = physical(r.sample + 1);
+    const size_t previous = r.wall_previous_sample.value_or(r.previous_sample);
+    const size_t wall_previous = physical(previous), previous_next = physical(previous + 1);
+    const SubSliceView cur = sub_slice(r, current), nxt = sub_slice(r, next_sample);
     const SubSliceView prev = sub_slice(r, wall_previous), prev_next = sub_slice(r, previous_next);
     const int32_t hw = b.i32(0x174);
     int32_t hi = (b.i32(0x28) + hw) >> 8;
@@ -3006,8 +3015,8 @@ void Race::contact_car_nodes(const ScanObject& a, const ScanObject& b) {
                 random() % 10 == 1 && car.kind != 0)
                 sound(SoundEvent::horn, car.motion);
             car.motion.u8(0x1f4) = 1;
-            if ((car.kind & 1) && car.motion.i32(0x1f8) == 0 && (other.type & 0xc))
-                car.motion.i32(0x1f8) = 0xf0;
+            if ((car.kind & 1) && car.motion.i32(0x1f8) == 0)
+                car.motion.i32(0x1f8) = (other.type & 0xc) ? 0xf0 : 0x3c;
         } else if (self.pedestrian >= 0) {
             const auto& car = traffic_->cars()[size_t(other.car)];
             hit_pedestrian(pedestrians_->pool()[size_t(self.pedestrian)],
@@ -3948,7 +3957,7 @@ void Race::build_draws() {
 // 0x004091f0 straight target, bike lateral = target x, the wreck timers
 // +0x30c/+0x310/+0x314, place word 0, then 0x004082f0. Stamina, weapon,
 // condition and the standings words are set by the Race constructor.
-void Race::spawn_brain(Rider& r, size_t built) {
+void Race::spawn_brain(Rider& r, size_t built, bool retain_speeds) {
     AiState& ai = r.brain;
     // The brain is a 0x004c6b40 personality copy (0x00407990): its speed
     // words +0x1a0/+0x1a4 are 0 in every record, so 0x004091f0 below sees
@@ -3956,8 +3965,11 @@ void Race::spawn_brain(Rider& r, size_t built) {
     // in one process, so a later race starts from the previous race's words;
     // the next think recomputes the target, so only an unstepped (human)
     // brain keeps that difference, and the native rebuilds brains per race.
-    ai.current_speed = 0;
-    ai.current2 = 0;
+    // Police respawns share their persistent personality within this race.
+    if (!retain_speeds) {
+        ai.current_speed = 0;
+        ai.current2 = 0;
+    }
     ai.state = 0;
     ai.state_flag = 0;
     ai.target_rider = ai.nbr_ahead = ai.nbr_behind = -1;
@@ -4054,6 +4066,11 @@ bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
     ai.reach = w[0x1d4 / 4];
     ai.word_184 = w[0x184 / 4];
     ai.lane = in.lane;
+    //00405da3 chooses the initial target before004082f0 replans and
+    //00406cc3 replaces pursuit speed. The persistent personality still
+    //contains the previous cop's speed at that first target calculation.
+    ai.current_speed = police_->config.personality[0x1a4 / 4];
+    ai.current2 = police_->config.personality[0x1a0 / 4];
     riders_.push_back(std::move(r));
     Rider& cop = riders_.back();
     const int index = int(riders_.size()) - 1;
@@ -4064,7 +4081,7 @@ bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
     // level speed words (traffic-field box capture tick 4096: a cop 39
     // slices behind the player finds no target and starts in state 1).
     cop.cop = false;
-    spawn_brain(cop, riders_.size()); // 0x00405c80
+    spawn_brain(cop, riders_.size(), true); // 0x00405c80
     cop.cop = true;
     // 0x00406b80 tail: pursuit speed from +0x1bc[level], overwritten after the build.
     cop.brain.current_speed = w[0x1a4 / 4];
@@ -4157,6 +4174,8 @@ void Race::remove_cop() {
         for (size_t i = 0; i < 3; ++i) words[0x12c / 4 + i] = ai.ease[i];
         for (size_t i = 0; i < ai.state_ticks.size(); ++i) words[0x138 / 4 + i] = ai.state_ticks[i];
         words[0x188 / 4] = ai.replan_ticks;
+        words[0x1a4 / 4] = ai.current_speed;
+        words[0x1a0 / 4] = ai.current2;
     }
     schedule_.erase(std::remove_if(schedule_.begin(), schedule_.end(),
                                    [&](const ScheduleNode& n) { return n.rider == index; }),
@@ -5247,7 +5266,9 @@ void Race::step(std::span<const uint32_t> words) {
     controls_.fill(0);
     for (size_t i = 0; i < words.size() && i < controls_.size(); ++i) controls_[i] = words[i];
     const uint32_t controls = controls_[0];
-    if (riders_[0].finished &&
+    //The original scheduler continues during the result-screen delay even
+    //when the player was the last rider to finish (Napa tick29015).
+    if (!live_schedule_ && riders_[0].finished &&
         std::all_of(riders_.begin(), riders_.end(), [](const Rider& r) { return r.cop || r.finished; }))
         return;
     ++ticks_;

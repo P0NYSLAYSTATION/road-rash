@@ -1,6 +1,7 @@
 #include "traffic.hpp"
 #include "track_ring.hpp"
 #include <cstdlib>
+#include <cstdio>
 #include "actor_render.hpp"
 #include "exe_tables.hpp"
 #include "crash.hpp"
@@ -335,7 +336,11 @@ TrafficSystem::LaneProbe TrafficSystem::lane_probe(const TrafficCar& car,
         // 0x004547e0 updates a previous slice when its forward neighbour
         // is built. At an integral lane width, widening nudges the lane
         // word by one Q8 unit; physical edge coordinates are unchanged.
-        if (slot + 1 < (front_q8 >> 8) && slot + 1 < size) {
+        //00455155 skips4547e0 for event4, the last split sub-slice
+        //before a merge. Its one-lane words do not widen toward the
+        //combined two-lane common road (Napa tick16584).
+        const uint8_t event = ring ? ring->slice_event(index * 256) : uint8_t(route[size_t(slot)].event);
+        if (event != 4 && slot + 1 < (front_q8 >> 8) && slot + 1 < size) {
             const auto forward = raw(index + 1);
             if ((value.right_q8 & 255) == 0 && forward.right_q8 > value.right_q8) ++value.right_q8;
             if ((value.left_q8 & 255) == 0 && forward.left_q8 > value.left_q8) ++value.left_q8;
@@ -381,6 +386,11 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
         for (size_t i = 0; i < signals_.size(); ++i) {
             const auto& s = signals_[i];
             if (!s.active || s.index != want) continue;
+            //00449d30 rejects nodes on the opposite physical roadway.
+            //Both halves can have active intersections at the same distance.
+            const size_t ss = size_t(std::clamp(s.position_q8 >> 8, 0, int32_t(route.size() - 1)));
+            const uint8_t half = s.controller >= 0 ? controllers_[size_t(s.controller)].half : route[ss].half;
+            if (!shared_roadway(at, route_half(route[ss], half))) continue;
             const int32_t ahead = kind == 0 ? s.position_q8 - car.position : car.position - s.position_q8;
             if (ahead < 0 || ahead >= best) continue;
             best = ahead;
@@ -401,7 +411,10 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
         int32_t distance;
         if (!(kind & 1)) {
             distance = kind == 0 ? o.position - car.position : car.position - o.position;
-            if (distance <= 0 || distance >= (gap_unit << 5)) return;
+            // 0x00449d1b/64 checks only the upper reach bound while
+            // traversing the ordered list; a distinct equal-position node
+            // is still an obstacle (Napa conservative capture tick 2111).
+            if (distance < 0 || distance >= (gap_unit << 5)) return;
             const size_t os =
                 size_t(std::clamp(o.position, int32_t(0), int32_t((route.size() - 1) * 256)) >> 8);
             if (lane_of(o.lateral, route[os].offset) != car.lane) return;
@@ -419,14 +432,22 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
             obstacle = o;
         }
     };
-    for (const auto& other : cars_) {
-        if (!other.active || &other == &car) continue;
-        const int32_t forward = other.kind == 2 ? -other.speed : (other.kind & 1) ? 0 : other.speed;
-        const int32_t across = other.kind == 1 ? other.speed : other.kind == 3 ? -other.speed : 0;
-        consider({other.position, other.lateral, forward, across, other.motion.i32(0x108), 0x10});
+    if (obstacle_scan_) {
+        if (const auto o = obstacle_scan_(car, gap_unit << 5))
+            obstacle = Other{o->position, o->lateral, o->velocity, o->lateral_velocity, o->velocity, o->type};
+    } else {
+        for (const auto& other : cars_) {
+            if (!other.active || &other == &car) continue;
+            // 0x0044e958/66/6e reads the mover's projected velocity, not the
+            // scalar speed. Heading and slope can put these across different
+            // integer target-speed thresholds (City tick 1559: 382 versus 386).
+            const int32_t forward = other.motion.i32(0x108);
+            const int32_t across = other.motion.i32(0x10c);
+            consider({other.position, other.lateral, forward, across, other.motion.i32(0x108), 0x10});
+        }
+        for (const auto& o : obstacles_)
+            consider({o.position, o.lateral, o.velocity, o.lateral_velocity, o.velocity, o.type});
     }
-    for (const auto& o : obstacles_)
-        consider({o.position, o.lateral, o.velocity, o.lateral_velocity, o.velocity, o.type});
     car.lane_changed = false;
     if (obstacle) {
         gap = kind == 0   ? (obstacle->position - car.position) >> 4
@@ -567,6 +588,20 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
     if (target < 0) target = 0;
     if (hurry) target *= 2;
     const int32_t rate = (car.phase * ((current < target / 2 || hurry) ? 0x24 : 0x12)) >> 8;
+    if (std::getenv("RR_SIM_TRACE_TICK") && car.last_tick == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+        std::fprintf(stderr, "traffic-plan serial %u kind %d pos %d speed %d target %d rate %d gap %d window %d obstacle %u/%d/%d/%d/%d signal %d\n",
+                     unsigned(car.serial), kind, car.position, car.speed, target, rate, gap, window,
+                     obstacle ? obstacle->type : 0, obstacle ? obstacle->position : 0,
+                     obstacle ? obstacle->lateral : 0, obstacle ? obstacle->velocity : 0,
+                     obstacle ? obstacle->lateral_velocity : 0, car.signal);
+        if (car.signal >= 0) {
+            const auto& s = signals_[size_t(car.signal)];
+            if (s.controller >= 0) {
+                const auto& c = controllers_[size_t(s.controller)];
+                std::fprintf(stderr, "traffic-signal pos %d phase %d bounds %d/%d\n", s.position_q8, s.phase, c.start_q8, c.end_q8);
+            }
+        }
+    }
     return {target * 100, rate};
 }
 

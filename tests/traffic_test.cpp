@@ -350,6 +350,9 @@ static void test_lane_validity_linked_slots() {
         if (system.lane_probe(probe_car, probe_route, 159 * 256).left_q8 != 512 ||
             system.lane_probe(probe_car, probe_route, 160 * 256).left_q8 != 513)
             throw std::runtime_error("widening must nudge the preceding integral lane word after build");
+        probe_route[158].event = static_cast<rr::RoadEvent>(4);
+        if (system.lane_probe(probe_car, probe_route, 160 * 256).left_q8 != 512)
+            throw std::runtime_error("last split slice must not widen into the merged common road");
     }
     auto drive_at = [&](uint8_t kind, int8_t lane, int32_t sample, int32_t speed) {
         system.begin_schedule(route, front, random, 1);
@@ -415,6 +418,46 @@ static void test_crossing_obstacle_reach() {
     const auto clear = drive(1000);
     if (clear <= 0 || drive(-128) != clear || drive(128) != clear || drive(-127) != 0 || drive(127) != 0)
         throw std::runtime_error("crossing obstacle strict longitudinal reach");
+}
+
+// Traffic following reads the obstacle mover's projected velocity (+108),
+// which can differ from its scalar speed on a slope or during a turn.
+static void test_follow_projected_velocity() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    auto drive = [&](int32_t scalar, int32_t projected, int32_t gap = 928) {
+        rr::TrafficSystem traffic(library, synthetic_exe());
+        traffic.configure(6);
+        traffic.set_spawn_enabled(false);
+        std::vector<rr::RouteSample> road(800, lane_sample(0x200, 0x200));
+        for (auto& sample : road) {
+            sample.offset = 0;
+            sample.path.left = sample.path.right = 500;
+        }
+        auto& follower = traffic.cars_mut()[0];
+        follower.active = true;
+        follower.kind = 2;
+        follower.lane = -1;
+        follower.position = 0x12000;
+        follower.lateral = -32000;
+        follower.speed = 1560;
+        follower.phase = 256;
+        follower.next_tick = 1;
+        auto& leader = traffic.cars_mut()[1];
+        leader.active = true;
+        leader.kind = 2;
+        leader.lane = -1;
+        leader.position = follower.position - gap;
+        leader.lateral = -32000;
+        leader.speed = scalar;
+        leader.motion.i32(0x108) = -projected;
+        traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+        return follower.speed;
+    };
+    const auto projected = drive(386, 382);
+    if (projected != drive(382, 382) || projected == drive(386, 386))
+        throw std::runtime_error("car following must use projected rather than scalar velocity");
+    if (drive(386, 382, 0) >= drive(386, 382, -1))
+        throw std::runtime_error("equal-position lane obstacle must remain in the scan");
 }
 
 static void test_deferred_car_teardown(bool lateral = false) {
@@ -1118,6 +1161,23 @@ static void test_opposite_intersection() {
     if (signals != 1 || !system.controllers()[0].active || system.controllers()[0].half != 1)
         throw std::runtime_error(
             "opposite intersection must not create a signal for the selected road's left lanes");
+    // The signal exists on half1, but a car on half0 must not latch it.
+    auto& car = system.cars_mut()[0];
+    car = rr::TrafficCar{};
+    car.active = true;
+    car.kind = 0;
+    car.phase = 256;
+    car.position = 95 * 256;
+    car.lateral = 1125 * 256;
+    car.speed = 2000;
+    car.next_tick = 101;
+    system.run_car(0, route, camera, camera + 0x5100, 0, 0, [] { return 1u; }, 101, 0);
+    if (car.signal >= 0) throw std::runtime_error("car latched the opposite roadway's signal");
+    for (auto& sample : route) sample = rr::route_half(sample, 1);
+    car.next_tick = 102;
+    system.run_car(0, route, camera, camera + 0x5100, 0, 0, [] { return 1u; }, 102, 0);
+    if (car.signal < 0) throw std::runtime_error("car ignored its own roadway's signal");
+
 }
 
 static void test_intersections() {
@@ -1376,6 +1436,7 @@ int main() {
         test_deferred_car_teardown();
         test_deferred_car_teardown(true);
         test_crossing_obstacle_reach();
+        test_follow_projected_velocity();
         test_countdown_timers();
         test_countdown_initial_fill();
         test_countdown_disabled_spawn_expiry();

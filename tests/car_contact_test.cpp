@@ -242,6 +242,28 @@ int main() {
             if (scenario == 1)
                 check(car.motion.i32(0x1f8) == 240, "crossing car contact with bike starts240 tick pause");
         }
+        {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            race.set_live_schedule(true);
+            race.riders()[0].frozen = true;
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& approach = traffic.cars_mut()[0];
+            approach.active = true;
+            approach.position = 100 * 256 - 32;
+            approach.next_tick = 1;
+            car_body(approach);
+            auto& crossing = traffic.cars_mut()[1];
+            crossing.active = true;
+            crossing.kind = 1;
+            crossing.position = 100 * 256;
+            crossing.next_tick = 100;
+            car_body(crossing);
+            race.step(0);
+            check(crossing.motion.i32(0x1f8) == 60,
+                  "crossing car contact with another car starts a60 tick pause");
+        }
         for (bool blocker : {false, true}) {
             rr::Opponent opponent{rr::BikeSpec{}, 90, 0, 0, 0, 1};
             rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90, {opponent});

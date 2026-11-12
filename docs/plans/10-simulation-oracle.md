@@ -1,5 +1,10 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## November 12, 2026 — complete Napa checkpoint
+
+Strict whole-race Napa L1/seed1 human replay matches all29055 ticks including RNG. Hiway14084 full regression remains exact; four prefixes pass. Full MSVC Release and SDL gate pass104 with35 explicit skips, two unavailable D3D exclusions. Completed City33819 matches18,307 ticks; first fails18,308 pedestrian resource availability. Medly ended in arrest. Other tracks/levels/branches remain open; multiplayer stays held.
+[Evidence](../agent-handoffs/parity-projected-velocity-20261112.md).
+
 ## Mixed-contact checkpoint — November 12, 2026
 
 Complete Hiway14084 and moving Napa2400 now match including RNG. Moving City

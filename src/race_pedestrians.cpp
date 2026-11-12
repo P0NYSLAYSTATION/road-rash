@@ -589,8 +589,17 @@ void Race::move_pedestrian(Pedestrian& p) {
         b.i32(0x114) = b.i32(0x118) = 0;
         b.u8(0x164) = 0;
     }
-    integrate_speed(b, tables_, surface_class(edges(p.body, p.body.sample), b.i32(0x28)));
+    size_t surface_sample = p.body.sample;
+    if (const auto* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr) {
+        const int64_t back = ring->back_q8() >> 8;
+        surface_sample = size_t(std::clamp<int64_t>(back + ((int64_t(surface_sample) - back) & 127),
+                                                  0, int64_t(route_of(p.body).size() - 1)));
+    }
+    integrate_speed(b, tables_, surface_class(edges(p.body, surface_sample), b.i32(0x28)));
     advance_actor_motion(b, tables_, [&](int32_t distance) { move_along(p.body, distance); });
+    //0043adf1 runs the shared wall/shoulder response for pedestrians too,
+    //before vertical settling. City6207 clamps the walker to the shoulder.
+    walls(p.body);
     vertical(p.body);
     const int32_t gap = int32_t(uint32_t(p.anchor) - uint32_t(b.i32(0x1c)));
     if (magnitude(gap) > 0x1ff) {
@@ -731,6 +740,55 @@ void Race::collide_pedestrians() {
 }
 void Race::attach_terrain_type() {
     if (traffic_ && terrain_source_) {
+        traffic_->set_obstacle_scan([this](const TrafficCar& car, int32_t reach) -> std::optional<TrafficObstacle> {
+            build_scan_list();
+            int at = -1;
+            const int index = int(&car - traffic_->cars().data());
+            for (size_t i = 0; i < scan_.size(); ++i)
+                if (scan_[i].car == index) { at = int(i); break; }
+            const int32_t origin = car.position;
+            auto lateral_next = [&](int from) {
+                if (from < 0) return -1;
+                const auto self = scan_[size_t(from)];
+                auto side = [&](bool forward) {
+                    int current = from;
+                    for (;;) {
+                        const int32_t range = 128 + (forward ? self.position - scan_[size_t(current)].position
+                                                                           : scan_[size_t(current)].position - self.position);
+                        current = scan_next(current, 0x3f, forward, range);
+                        if (current < 0) return -1;
+                        const int32_t x = scan_[size_t(current)].lateral;
+                        if (x != self.lateral && (self.lateral < x) == (car.kind == 1)) return current;
+                    }
+                };
+                const int forward = side(true), backward = side(false);
+                if (forward < 0) return backward;
+                if (backward < 0) return forward;
+                return (scan_[size_t(forward)].lateral > scan_[size_t(backward)].lateral) == (car.kind == 1)
+                           ? backward : forward;
+            };
+            for (;;) {
+                at = (car.kind & 1) ? lateral_next(at) : scan_next(at, 0x3f, car.kind == 0, reach);
+                if (at < 0) return std::nullopt;
+                const auto& o = scan_[size_t(at)];
+                if (car.kind & 1) {
+                    if (((o.position ^ origin) & ~255) != 0) continue;
+                } else {
+                    const int32_t delta = int32_t(uint32_t(o.lateral) - uint32_t(o.sample->offset * 256));
+                    const int lane = int8_t(int32_t(int64_t(delta / 256) / 250) - (delta < 0 ? 1 : 0));
+                    if (lane != car.lane) continue;
+                }
+                int32_t across = 0;
+                if (o.car >= 0) across = traffic_->cars()[size_t(o.car)].motion.i32(0x10c);
+                else if (o.pedestrian >= 0) across = pedestrians_->pool()[size_t(o.pedestrian)].body.bike.i32(0x10c);
+                else if (o.rider >= 0) {
+                    const auto& r = riders_[size_t(o.rider)];
+                    across = o.type == 4 ? r.bike.i32(0x10c)
+                             : r.crash_active ? r.crash_actor.motion.i32(0x10c) : r.half_mirror.lat_vel;
+                }
+                return TrafficObstacle{o.position, o.lateral, o.speed, across, o.type};
+            }
+        });
         traffic_->set_ring_source([this](int32_t position) { return nearest_ring(position); });
         traffic_->set_terrain_type([this](const RouteSample& s) { return int(ground(s).type); });
         traffic_->set_road_motion([this](int32_t position) -> std::optional<std::pair<int32_t, int32_t>> {

@@ -1,5 +1,10 @@
 # Port progress
 
+## November 12, 2026 — complete Napa human replay
+
+Napa L1/seed1 now passes strict whole-race human acceptance: all29,055 ticks identical including RNG from one seed anchor. Traffic uses projected car velocities, accepts equal-position obstacles, and rejects opposite-road signals. Police respawns retain initial target speed; merge lane smoothing respects event4. Live simulation continues through the all-finished result delay. City moving2400 is exact; the new completed City recording matches18,307 ticks; first differs18,308. Strict full Hiway14,084 and Napa29,055 regressions pass, plus four short fixtures. Full Release build and SDL gate pass104 tests with35 explicit skips and two unavailable D3D checks excluded. Multiplayer stays held.
+[Evidence](agent-handoffs/parity-projected-velocity-20261112.md).
+
 ## November 12, 2026 — one ordered contact walk
 
 Moving Napa now matches all2400 captured ticks including RNG. Live cars, riders,

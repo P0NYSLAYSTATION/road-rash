@@ -1,5 +1,10 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — complete Napa acceptance
+
+`build/napa-result-delay.json`: acceptance_met=true, all29055 ticks identical including RNG, strict whole-race single-anchor human replay. Original trace SHA88182a0ca77be490a2ef1789211debaa76aa001e492e245f7f113caa2f56350c; receipt confirms outcome3 and working DLL restored. City moving2400 passes (`build/city-projected-velocity.json`). Full original City33819 finishes but replay matches18,307 ticks; first fails18,308 pedestrian resource availability. `build/v1116-hiway-acceptance.json` passes both full races; `build/v1116-release-regressions.json` passes four prefixes. Full MSVC Release and SDL gate:104 passed,35 explicit skips,zero failures, two unavailable Direct3D checks excluded (`build/projected-final-full-build.log`, `build/projected-final-native-tests.log`).
+[Evidence](agent-handoffs/parity-projected-velocity-20261112.md).
+
 ## November 12, 2026 — mixed contacts and removal gates
 
 `build/mixed-contact-final-hiway.json`: strict whole-race Hiway14084 exact including

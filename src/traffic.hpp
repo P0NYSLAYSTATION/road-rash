@@ -223,6 +223,9 @@ class TrafficSystem {
     int pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane) const;
     // Non-car obstacles for this tick's lane scans (set by Race before step).
     std::vector<TrafficObstacle>& obstacles() { return obstacles_; }
+    //Live0044a070 scans scheduler links, preserving equal-position order.
+    using ObstacleScan = std::function<std::optional<TrafficObstacle>(const TrafficCar&, int32_t)>;
+    void set_obstacle_scan(ObstacleScan scan) { obstacle_scan_ = std::move(scan); }
     // Terrain type of a route sample (0x00454240 +0x3c), for 0x0041eca0's
     // short-phase test; without it the long table is always used.
     void set_terrain_type(std::function<int(const RouteSample&)> source) {
@@ -279,6 +282,7 @@ class TrafficSystem {
     std::pair<int32_t, int32_t> plan_speed(TrafficCar&, const std::vector<RouteSample>& route,
                                            int32_t front_q8);
     const VehicleLibrary* library_; // pointer: copied into race snapshots (plan 34 Task 3)
+    ObstacleScan obstacle_scan_;
     PhysicsTables physics_;
     std::array<int32_t, 26> car_template_{};
     uint32_t tick_ = 0;

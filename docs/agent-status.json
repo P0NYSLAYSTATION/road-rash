@@ -18,9 +18,10 @@
     {
       "area": "Simulation parity",
       "implementation": "Original live rider/car scheduler, native countdown, scene construction, AI combat/relationships, car callbacks, marking lifetimes and single-anchor replay",
-      "verification": "Windows mixed-contact continuation: moving Napa2400/2400 exact including RNG; complete Hiway14084/14084 remains exact (November12); Windows fork: unchanged completed Hiway L1/seed1 human recording14084/14084 ticks identical including RNG, strict whole-race acceptance, single anchor (November12); fresh independent14084-tick prefix also exact; Napa L1 full live field2400/2400 ticks identical with RNG; corrected schema2 also2400/2400 including valid car metadata and all AI animation/relationship fields; strict human1431/1431 identical; City level-byte-2 parked captures (cops 4552 with the original arrest, two RANDLOG runs 2400) identical in RNG and ring-window riders (November 3); Napa traffic-field 4381/4381 identical with RNG (November 4 remount copy-back; steal-farm 7872 (split-ring/physical-road fixes), steal-farm-l1 5697)",
-      "remaining": "Other tracks and levels from start to finish; longer Napa captures; moving City tick1559 car position34152/native34150; arbitrary branches, pedestrian projected-x draw test and behavior outside measured recordings",
+      "verification": "Windows November12: strict whole-race Napa L1/seed1 human29055/29055 including RNG; complete Hiway14084/14084 including RNG. City moving2400 exact; new completed33819 original recording matches18307 before a pedestrian graphics-availability gap. Single-anchor free-run; immutable trace receipts. Both whole-race strict regressions and four prefixes pass. MSVC Release/SDL gate104 passed,35 explicit skips, two unavailable D3D checks excluded.",
+      "remaining": "City tick18308 pedestrian graphics availability; completed Medly/Canyn recordings and strict full-race comparisons; other levels/branches and behavior outside measured recordings. Multiplayer held.",
       "evidence": [
+        "agent-handoffs/parity-projected-velocity-20261112.md",
         "agent-handoffs/parity-mixed-contacts-20261112.md",
         "agent-handoffs/parity-finish-pools-20261112.md",
         "SIM_SCENARIOS.md",
@@ -35,9 +36,9 @@
     },
     {
       "area": "Napa race",
-      "implementation": "Native scene/actors/traffic with remaining systems; police helpers exist but no live cops",
-      "verification": "Component comparisons are partial evidence; human physics gates demo-tuned",
-      "remaining": "Car contact, actor nodes, human-gate ports, live police, and full-race acceptance",
+      "implementation": "Native scene, riders, traffic, live police and collision scheduling",
+      "verification": "Strict completed L1/seed1 human recording29055/29055 ticks identical including RNG, single seed anchor (Windows November12)",
+      "remaining": "Other levels, branches, inputs and behavior outside the measured recording",
       "evidence": [
         "NAPA_IMPLEMENTATION.md",
         "plans/11a-napa-playtest-fixes.md",
@@ -49,8 +50,8 @@
     {
       "area": "Other courses",
       "implementation": "Course data supported; composed renderer work pending",
-      "verification": "Hiway L1/seed1 human full race14084/14084 exact including RNG (Windows fork, November12)",
-      "remaining": "Complete CITY/MEDLY/CANYN and other Hiway levels/branches; Napa full-race acceptance remains separate",
+      "verification": "Hiway L1/seed1 human full race14084 exact including RNG; completed City33819 recording exact through18307 (Windows November12)",
+      "remaining": "City18308 pedestrian draw resources; finished Medly/Canyn recordings and strict whole-race parity; other levels and branches",
       "evidence": [
         "plans/17-all-courses-port.md",
         "agent-handoffs/parity-finish-pools-20261112.md"
