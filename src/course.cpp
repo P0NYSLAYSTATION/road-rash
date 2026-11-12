@@ -55,7 +55,7 @@ struct Field {
 };
 template <class Emit>
 void walk_intervals(const Reader& r, size_t chunk, const char* tag, size_t stride,
-                    std::initializer_list<Field> fields, uint32_t count, Emit emit) {
+                    std::initializer_list<Field> fields, uint32_t count, Emit emit, bool step_zero = false) {
     r.chunk(chunk, tag, 16, stride);
     const uint32_t n = r.u32(chunk + 8);
     if (!n) throw std::runtime_error("Empty interval table");
@@ -66,6 +66,10 @@ void walk_intervals(const Reader& r, size_t chunk, const char* tag, size_t strid
     std::vector<int64_t> value;
     for (const auto& f : fields) value.push_back(int64_t(r.byte(record(0) + f.first)) * 65536);
     for (uint32_t j = 0; j < count; ++j) {
+        if (!j && step_zero && r.u32(record(k) + 4) == 0) {
+            size_t i = 0;
+            for (const auto& f : fields) value[i++] = int64_t(r.byte(record(k) + f.last)) * 65536;
+        }
         if (j) {
             const uint32_t end = r.u32(record(k) + 4);
             if (j < end) {
@@ -282,6 +286,42 @@ Course read_course(const std::vector<uint8_t>& bytes) {
                 section.terrain.end_selectors =
                     std::array<uint8_t, 2>{uint8_t(segments.byte(after)), uint8_t(segments.byte(after + 1))};
         }
+        //00452e10 steps every iterator even for a zero residual at section
+        //entry. Keep the untouched initializer in samples[0] for component
+        //fixtures, and the live forward result separately.
+        auto& first = section.forward_start.emplace(section.samples.front());
+        if (lanes)
+            walk_intervals(segments, lanes, "NALR", 20, {{8, 10, 12}, {9, 11, 16}}, 1,
+                           [&](uint32_t, const std::vector<int64_t>& q16, size_t) {
+                               first.left_q8 = int32_t(q16[0] / 256);
+                               first.right_q8 = int32_t(q16[1] / 256);
+                               first.left = first.left_q8 * 250 / 256;
+                               first.right = first.right_q8 * 250 / 256;
+                           }, true);
+        if (sides)
+            walk_intervals(segments, sides, "DLSR", 36,
+                           {{8, 10, 20}, {9, 11, 24}, {12, 14, 28}, {13, 15, 32}}, 1,
+                           [&](uint32_t, const std::vector<int64_t>& q16, size_t) {
+                               first.shoulder_left = int32_t(q16[0] >> 16);
+                               first.shoulder_right = int32_t(q16[1] >> 16);
+                               first.height_left = int32_t(q16[2] >> 16);
+                               first.height_right = int32_t(q16[3] >> 16);
+                           }, true);
+        if (!section.events.empty()) {
+            const auto& e = section.events.front();
+            if (e.start <= 0 && e.end >= 0) {
+                first.event_type = uint8_t(e.raw_type + 1);
+                first.zone_end = e.end == 0 && first.event_type != 4 && first.event_type != 5 && first.event_type != 7;
+                if (first.event_type == 4) first.marking_flags = 0x40;
+                else if (first.event_type == 5 || first.event_type == 7 || e.end == 0) first.marking_flags = 0;
+                else if (e.start == 0) first.marking_flags = 8;
+                else if (e.end == 1) first.marking_flags = 16;
+                else if (first.event_type == 1) {
+                    const int64_t middle = int64_t(e.end) + e.start;
+                    first.marking_flags = middle == 0 || middle == 1 ? 0x22 : uint8_t(0x20 + (e.end < -int64_t(e.start) + 1));
+                } else first.marking_flags = 0x21;
+            }
+        }
         course.sections.push_back(std::move(section));
     }
     // 0x00447b80 links +8/+12 for kind 0; +8/+12/+16 for kinds 1/2.
@@ -303,6 +343,10 @@ Course read_course(const std::vector<uint8_t>& bytes) {
             node.link = graph.u32(offset + 16);
             node.length = graph.u32(offset + 20);
             node.primary = int8_t(graph.u32(offset + 24) >> 8);
+            if (node.kind == 1) {
+                node.preferred = uint8_t(graph.u32(offset + 24));
+                if (node.preferred > 1) throw std::runtime_error("Invalid preferred course branch");
+            }
             pending.push_back(node.next);
             pending.push_back(node.previous);
             if (node.kind)
@@ -339,7 +383,7 @@ std::vector<RouteSample> branch_forward(const Course& course, uint32_t offset) {
         if (node.kind != 0) return samples;
         const auto& section = course.sections.at(node.link);
         for (uint32_t i = 0; i < node.length; ++i)
-            samples.push_back({section.samples.at(i), offset, node.link, i});
+            samples.push_back({!i && section.forward_start ? *section.forward_start : section.samples.at(i), offset, node.link, i});
         offset = node.next;
     }
     throw std::runtime_error("Cycle in course branch");
@@ -457,6 +501,34 @@ RaceBounds race_bounds(const std::vector<uint8_t>& exe, const Course& course, in
     return RaceBounds{start, finish, 0};
 }
 
+int32_t section_finish_sample(const CourseSection& section, int level) {
+    for (const auto& e : section.events)
+        if (e.raw_type == 6 && int(e.params[0]) - level == 1) return e.start;
+    return 0;
+}
+
+int32_t graph_finish_distance(const Course& course, uint32_t node, int32_t local_q8, int level) {
+    int64_t distance = -int64_t(local_q8);
+    for (size_t guard = 0; guard <= course.nodes.size(); ++guard) {
+        const auto it = course.nodes.find(node);
+        if (it == course.nodes.end()) throw std::runtime_error("Missing finish traversal node");
+        const auto& n = it->second;
+        if (n.kind == 0) {
+            const int32_t finish = section_finish_sample(course.sections.at(n.link), level);
+            if (finish) return int32_t(uint32_t(distance + int64_t(finish) * 256));
+            distance += int64_t(n.length) * 256;
+            node = n.next;
+        } else if (n.kind == 1) {
+            node = n.preferred ? n.previous : n.next;
+        } else if (n.kind == 2) {
+            node = n.link;
+        } else {
+            return INT32_MAX; //004074c3: no finish before a terminal node
+        }
+    }
+    throw std::runtime_error("Cycle in finish traversal");
+}
+
 int32_t finish_event_sample(const Course& course, const std::vector<RouteSample>& route, int level) {
     // 0x004525c0 scans CESR entries (header20, stride12) for raw type 6 with
     // signed parameter byte +9 such that parameter-level==1; it returns the
@@ -499,7 +571,7 @@ std::vector<RouteSample> make_route_indexed(const Course& course, const std::vec
         if (node.kind == 0) {
             const auto& section = course.sections.at(node.link);
             for (uint32_t i = 0; i < node.length; ++i)
-                route.push_back({section.samples.at(i), offset, node.link, i});
+                route.push_back({!i && section.forward_start ? *section.forward_start : section.samples.at(i), offset, node.link, i});
             arrived = offset;
             offset = node.next;
         } else if (node.kind == 1) {

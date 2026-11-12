@@ -14,6 +14,26 @@ import uuid
 from agent_common import ROOT, ResourceClaims, atomic_json, sha256
 
 
+def validate_recorded_controls(trace, controls):
+    """Check the replay's hexadecimal words against every captured input, streaming both."""
+    count = 0
+    with Path(trace).open(encoding='utf-8') as source, Path(controls).open(encoding='ascii') as recorded:
+        for line in source:
+            if not line.startswith('controls\t'):
+                continue
+            word = recorded.readline().strip()
+            if not re.fullmatch(r'[0-9a-fA-F]+', word):
+                raise ValueError(f'missing/invalid recorded control at frame {count}')
+            if int(word, 16) != int(line.split('\t', 1)[1]):
+                raise ValueError(f'recorded control differs at frame {count}')
+            count += 1
+        if recorded.read():
+            raise ValueError('extra recorded controls')
+    if not count:
+        raise ValueError('no recorded controls')
+    return count
+
+
 def validate_trace(path, simulation=False, expected_exe=None, expected_frames=None):
     """Validate every field while retaining only one frame, including full-race traces."""
     header, current, ended = {}, None, False
@@ -221,6 +241,8 @@ def capture(args):
                 controls = prefix / 'drive_c' / (tag + '.controls')
                 if record and not controls.is_file():
                     raise ValueError('recorded controls missing')
+                if record:
+                    info['recorded_controls_count'] = validate_recorded_controls(trace, controls)
                 if controls.is_file():
                     companions.append(controls)
                 info.update({'requested_scenario': args.scenario, 'proxy_sha256': dll_hash,

@@ -1,5 +1,32 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — graph finish and physical split gate
+
+MSVC Release build succeeds (`build/closed-split-link-build.log`). Normal-host
+`RR_ASSETS=E:/RR ctest --test-dir build/release --output-on-failure`:141 registered,
+106 passed,35 explicit corpus/platform skips, zero failures
+(`build/split-link-final-native-tests.log`). The hardcoded reference-path wiring
+test skips; explicit `rr-game --console --assets E:/RR --race --print-wiring`
+passes with terrain/traffic/pedestrians/ring/crash/ride/nitro/finish/personalities
+enabled and15 racers (`build/split-geometry-live-wiring.log`). Earlier transient
+D3D9 initialization failures passed on recheck before the final full gate;
+no display code changed to bypass them.
+
+`build/split-link-parity-corpus.json`: Napa-expanded2400 and City-signal600 pass
+strictly. Longer moving Napa first gap remains1259, City1251; this aggregate
+command exits1 and is not a passing all-track gate. The unchanged completed
+Hiway human trace now matches through6556;6557 steering remains different
+(`build/hiway-closed-split-link.json`, command exits1). Acceptance replays anchor
+once and never reseed. Original6600-tick diagnostic records all controls and
+restores the working AWEMAN32.DLL; it is not a completed-race fixture.
+
+Tooling regression25 tests, two platform skips, no failures; the restricted
+temporary-directory run failed with filesystem permissions, then the normal-host
+run passed (`build/recorded-controls-tooling-tests.log`). Synthetic shoulder,
+copied ring and discarded-half self-link tests pass as part of the final gate.
+Full start-to-finish parity across all tracks is still open. See
+[current evidence](agent-handoffs/parity-split-geometry-20261112.md).
+
 ## November 12, 2026 — scheduler/resource progress gate
 
 Current Release build: `powershell -ExecutionPolicy Bypass -File

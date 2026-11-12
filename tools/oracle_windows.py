@@ -111,7 +111,7 @@ def working_registry(install):
     finally:winreg.DeleteKeyEx(winreg.HKEY_CURRENT_USER,path,winreg.KEY_WOW64_32KEY)
 
 def capture(args):
-    from oracle_capture import validate_trace,publish_capture
+    from oracle_capture import validate_trace,validate_recorded_controls,publish_capture
     import re
     if os.name!='nt':raise ValueError('Native capture requires Windows')
     if not re.fullmatch(r'[A-Za-z0-9_-]+',args.scenario):raise ValueError('Invalid scenario name')
@@ -147,6 +147,7 @@ def capture(args):
                         if env.get('RR_ORACLE_FRAMES') and info['frames'] > int(env['RR_ORACLE_FRAMES']):
                             raise ValueError('Capture exceeded requested tick limit')
                         if record and not controls.is_file():raise ValueError('Recorded controls missing')
+                        if record:info['recorded_controls_count']=validate_recorded_controls(trace,controls)
                         if env.get('RR_ORACLE_HUMAN','0')!='0' and info['control_branch']!='human':
                             raise ValueError('Capture does not prove execution of the original human-control branch')
                 # Do not accept or replace any output until restoration succeeded.

@@ -75,7 +75,7 @@ void Race::init_live_rider(Rider& r, int32_t interval) {
     r.bike.i32(0x314) = 0;
     r.bike.i32(0x318) = 0;
     // 0x00405c80: half +0x1f8 = 0x00407410, the distance to the finish.
-    if (finish_q8_ != 0) r.finish_distance = finish_q8_ - b.i32(0x1c);
+    if (finish_q8_ != 0) r.finish_distance = remaining_finish_distance(r, b.i32(0x1c));
 }
 
 void Race::schedule_add(int rider) {
@@ -517,7 +517,7 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
         if (road[std::min(r.sample, road.size() - 1)].node == node_before)
             r.finish_distance += before - after;
         else if (finish_q8_ != 0)
-            r.finish_distance = finish_q8_ - after;
+            r.finish_distance = remaining_finish_distance(r, after);
         if (r.place_refresh <= r.half_sched_last) refresh_place(r); // 0x004075f0 -> 0x00407550
     }
     b.i32(0x310) += after - before;
@@ -587,7 +587,7 @@ void Race::park(Rider& r) {
         r.stamina.current = r.stamina.max;
         r.crash_active = false;
         live_standings(r);
-        if (finish_q8_ != 0) r.finish_distance = finish_q8_ - r.half_mirror.position;
+        if (finish_q8_ != 0) r.finish_distance = remaining_finish_distance(r, r.half_mirror.position);
     }
     // Pace: live distance per live tick (Q8), 95% ahead of the player
     // (DAT_00464304) or 105% behind (DAT_00464308).
@@ -631,8 +631,12 @@ void Race::move_bike_parked(Rider& r) {
         // Virtual finish: the finish section's +0x10 -> +0x2c finish sample.
         if (finish_q8_ != 0) {
             const size_t finish = size_t(finish_q8_ >> 8);
-            if (finish < road.size() && section_start(road, finish) == r.virtual_section) {
-                const int32_t local = int32_t(finish - r.virtual_section) * 256;
+            const int32_t local = finish_course_
+                                      ? section_finish_sample(finish_course_->sections.at(
+                                                                  road[r.virtual_section].section), level_) * 256
+                                      : finish < road.size() && section_start(road, finish) == r.virtual_section
+                                            ? int32_t(finish - r.virtual_section) * 256 : 0;
+            if (local != 0) {
                 if (local != 0 && r.finish_distance < 1) {
                     if ((b.u8(0xc0) & 0x10) == 0) { // 0x00437800
                         b.u8(0xc0) |= 0x10;
@@ -661,7 +665,7 @@ void Race::move_bike_parked(Rider& r) {
             r.virtual_section = next;
             length = section_length(road, r.virtual_section);
         }
-        if (section_changed && finish_q8_ != 0) r.finish_distance = finish_q8_ - b.i32(0x1c); // 0x00407410
+        if (section_changed && finish_q8_ != 0) r.finish_distance = remaining_finish_distance(r, b.i32(0x1c)); // 0x00407410
     }
     // Wake test against the ring trackers in this section (TrackRing walks
     // both split branches in lockstep, so road[t0]/road[t1] are the tracker

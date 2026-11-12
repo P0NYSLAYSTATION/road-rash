@@ -107,7 +107,7 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
         size_t event = 0;
         for (size_t j = 0; j < section.samples.size(); ++j) {
             if (j) iterator.step(256);
-            const auto& path = section.samples[j];
+            const auto& path = !j && section.forward_start ? *section.forward_start : section.samples[j];
             auto t = iterator.slice(-path.left - path.shoulder_left, path.right + path.shoulder_right);
             if (t.type == 4 && path.marking_flags && !(path.marking_flags & 0x40))
                 for (auto& point : t.points) point[1] = 0;

@@ -19,7 +19,7 @@ from agent_common import ResourceClaims, atomic_json, run_logged, source_identit
 from agent_gate import ctest_counts
 from agent_status import render
 from build_info import identity, write_header
-from oracle_capture import capture, validate_trace
+from oracle_capture import capture, validate_trace, validate_recorded_controls
 from verify_sim import classify, verify
 
 EXE = 'a' * 64
@@ -61,6 +61,16 @@ class Tooling(unittest.TestCase):
         # The name cannot substitute for an instrumented branch.
         p.write_text(trace().replace('synthetic', 'sim-napa-solo-human'))
         self.assertEqual(validate_trace(p, True)['control_branch'], 'unverified')
+
+    def test_recorded_controls_match_hexadecimal_replay_words(self):
+        p = self.write('controls.tsv', trace(0).replace('controls\t1\n', 'controls\t512\n', 1))
+        recorded = self.write('record.controls', '200\n1\n')
+        self.assertEqual(validate_recorded_controls(p, recorded), 2)
+        for words in ['', '200\n', '512\n1\n', '200\n1\n1\n', 'bad-input\n1\n']:
+            with self.subTest(words=words):
+                recorded.write_text(words)
+                with self.assertRaises(ValueError):
+                    validate_recorded_controls(p, recorded)
 
     def test_incomplete_duplicate_noncontiguous_and_wrong_exe_rejected(self):
         p = self.write('bad.tsv', '')

@@ -671,7 +671,7 @@ void Race::contact_pedestrian(Rider& self, Pedestrian& p) {
     if (s.i32(0xec) < -1000) s.i32(0xec) = -1000;
     s.i32(0xf4) = std::clamp(int32_t(s.i32(0xf4)), -10000, 10000);
     if (live_schedule_ && s.i32(0x2f4) == 0 && finish_q8_ != 0)
-        self.finish_distance = finish_q8_ - self.half_mirror.position;
+        self.finish_distance = remaining_finish_distance(self, self.half_mirror.position);
 }
 
 void Race::contact_rider_pedestrian(Rider& r, Pedestrian& p, bool rider_outer) {

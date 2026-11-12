@@ -540,12 +540,12 @@ class Race {
         return out;
     }
     const std::vector<RouteSample>& route_for(int road) const { return *routes_[road]; }
-    // Finish line 0x00454240/0x00406890/0x00437800: nonzero global finish
-    // DAT_004b6e58 (Q8 position) ends the race when the actor's +0x1c
-    // reaches it (with the +0x2c nonzero scheduler gate and +0xc0 bit 0x10
-    // latch). 0 keeps the legacy route-end rule for synthetic routes.
+    // Configured finish for UI and standalone fixtures. With a course graph,
+    // the live ring discovers DAT_004b6e58 only upon building its section;
+    // 00407410 uses graph distance before then. 0 keeps synthetic route-end semantics.
     void set_finish_q8(int32_t q8) { finish_q8_ = q8; }
     int32_t finish_q8() const { return finish_q8_; }
+    void set_finish_course(const Course* course) { finish_course_ = course; }
     // Course-load hazard table (plan 16 Task 2): one span list per route
     // sample per road (index by route_for(road)[sample]); empty by default.
     void set_hazards(std::vector<std::vector<RoadHazard>> road0, std::vector<std::vector<RoadHazard>> road1) {
@@ -625,6 +625,9 @@ class Race {
     }
 
   private:
+    int32_t known_finish_q8() const;
+    int32_t remaining_finish_distance(const Rider&, int32_t position) const;
+    PathSample slice_path(const RouteSample&, size_t sample) const;
     SliceEdges edges(const Rider&, size_t sample) const;
     void move_along(Rider&, int32_t distance, bool accumulate_sweep = true);
     void cross_sample(Rider&, int32_t delta);
@@ -919,7 +922,8 @@ class Race {
     bool joy_active_ = false;                  // DAT_00476c98 (set_joystick_analog)
     int32_t joy_throttle_ = 0, joy_steer_ = 0; // DAT_004b7e78 / DAT_004b7e7c
     int32_t road_base_ = 0;                    // absolute Q8 anchor (ctor param)
-    int32_t finish_q8_ = 0; // global finish DAT_004b6e58 (Q8); 0 = route end (0x00454240/0x00406890)
+    int32_t finish_q8_ = 0; // configured target; live DAT_004b6e58 belongs to TrackRing
+    const Course* finish_course_ = nullptr; // immutable graph; actual finish discovered by the ring
     // 0x00465a10: per-level overtake eagerness, read once from the EXE; empty
     // image -> no table (the draw alone decides, as before).
     std::optional<std::array<int32_t, 5>> overtake_eagerness_;

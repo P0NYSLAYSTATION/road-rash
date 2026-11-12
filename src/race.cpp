@@ -349,15 +349,49 @@ void Race::set_demo_hold(bool v, int base_speed, int lane, int32_t bias, int wea
     }
 }
 
+PathSample Race::slice_path(const RouteSample& s, size_t sample) const {
+    auto p = s.path;
+    const int32_t position = int32_t(sample * 256);
+    if (ring_ && position >= ring_->back_q8() && position < ring_->front_q8())
+        if (const auto shoulders = ring_->slice_shoulders(position, s.half)) {
+            p.shoulder_left = s.offset - p.left - (*shoulders)[0];
+            p.shoulder_right = (*shoulders)[1] - s.offset - p.right;
+        }
+    return p;
+}
+
 SliceEdges Race::edges(const Rider& r, size_t i) const {
     const auto& s = route_of(r)[i];
+    const auto path = slice_path(s, i);
     // Imported terrain is attached by the game; standalone physics fixtures keep their original synthetic sides.
     return {s.offset - s.path.left,
             s.offset + s.path.right,
-            s.offset - s.path.left - s.path.shoulder_left,
-            s.offset + s.path.right + s.path.shoulder_right,
+            s.offset - path.left - path.shoulder_left,
+            s.offset + path.right + path.shoulder_right,
             terrain_source_ ? s.path.marking_flags : uint8_t(0),
             terrain_source_ ? ground(s).type : uint8_t(0)};
+}
+
+int32_t Race::known_finish_q8() const {
+    if (!finish_course_) return finish_q8_;
+    for (const TrackRing* ring : rings_)
+        if (ring && ring->known_finish_q8()) return ring->known_finish_q8();
+    return 0;
+}
+
+int32_t Race::remaining_finish_distance(const Rider& r, int32_t position) const {
+    if (!finish_course_) return finish_q8_ - position;
+    const bool slice = r.crash_active ? r.half_slice_present : r.bike_slice_present;
+    const int32_t finish = known_finish_q8();
+    if (finish && slice) return finish - position; //00407426: only a discovered line is absolute
+    const int road = r.crash_active ? r.crash_actor.route : r.route;
+    const auto& route = *routes_[road];
+    const size_t sample = slice ? std::min(size_t(std::max(position, 0) >> 8), route.size() - 1)
+                                : std::min(r.virtual_section, route.size() - 1);
+    const auto& s = route[sample];
+    const int32_t whole = slice ? int32_t(s.local * 256) : r.virtual_local & ~255;
+    const int32_t local = whole | (position & 255); //00407490 retains the actor's fraction
+    return graph_finish_distance(*finish_course_, s.node, local, level_);
 }
 
 void Race::accumulate(Rider& r, uint32_t from, uint32_t to, size_t from_sample, size_t to_sample) {
@@ -390,12 +424,13 @@ void Race::cross_sample(Rider& r, int32_t delta) {
     if (int32_t(to) < 0) to = 0;
     // 0x00406890: finish when the nonzero global DAT_004b6e58 is reached
     // (with the +0x2c scheduler gate and the +0xc0 bit-0x10 latch moving to
-    // 0x00437800). finish_q8_ carries DAT_004b6e58; 0 keeps route-end
-    // semantics for synthetic routes. +0x2c is nonzero for every inserted
+    // 0x00437800). Read the discovered DAT_004b6e58, with the configured
+    // target as fallback for standalone fixtures. +0x2c is nonzero for every inserted
     // scheduler actor (bike.cpp scheduler insert), so the gate passes here.
-    if (finish_q8_ != 0 && (b.u8(0xc0) & 0x10) == 0 && int32_t(to) >= finish_q8_) {
+    const int32_t known_finish = known_finish_q8();
+    if (known_finish != 0 && (b.u8(0xc0) & 0x10) == 0 && int32_t(to) >= known_finish) {
         const size_t start_sample = r.sample;
-        to = uint32_t(finish_q8_);
+        to = uint32_t(known_finish);
         b.i32(0x134) = int32_t(from);
         b.i32(0x1c) = int32_t(to);
         b.i32(0x138) = int32_t(to);
@@ -967,7 +1002,7 @@ void Race::collide_traffic_half(Rider& owner) {
         for (int off = 0x180; off <= 0x1a0; off += 4) owner.half_object.i32(off) = detached.bike.i32(off);
         owner.ride_animation = owner.crash_actor.animation;
         sync_half_mirror(owner);
-        if (finish_q8_) owner.finish_distance = finish_q8_ - detached.bike.i32(0x1c);
+        if (finish_q8_) owner.finish_distance = remaining_finish_distance(owner, detached.bike.i32(0x1c));
     }
 }
 // BORR span builder (plan 16 Task 2): the 0x00451cb0 lateral-slot walk over
@@ -1275,7 +1310,7 @@ bool Race::sweep_statics(Rider& r, Rider* half_owner) {
                 bike.i32(0xec) = std::clamp(int32_t(bike.i32(0xec)), -1000, 30000);
                 bike.i32(0xf4) = std::clamp(int32_t(bike.i32(0xf4)), -10000, 0x600);
                 if (live_schedule_ && bike.i32(0x2f4) == 0 && finish_q8_ != 0)
-                    r.finish_distance = finish_q8_ - r.half_mirror.position;
+                    r.finish_distance = remaining_finish_distance(r, r.half_mirror.position);
             }
             return true;
         }
@@ -1474,7 +1509,7 @@ void Race::contact_static(Rider& self, Rider& other) {
     if (s.i32(0xec) > 30000) s.i32(0xec) = 30000;
     if (s.i32(0xec) < -1000) s.i32(0xec) = -1000;
     if (live_schedule_ && s.i32(0x2f4) == 0 && finish_q8_ != 0)
-        self.finish_distance = finish_q8_ - self.half_mirror.position;
+        self.finish_distance = remaining_finish_distance(self, self.half_mirror.position);
 }
 
 void Race::contact_hazard(Rider& self, int32_t hazard_lo_q8, int32_t hazard_hi_q8) {
@@ -1747,7 +1782,7 @@ void Race::contact_car(Rider& self, TrafficCar& car) {
         s.i32(0x288) = std::max(-lim, std::min(lim, next));
     }
     if (live_schedule_ && s.i32(0x2f4) == 0 && finish_q8_ != 0)
-        self.finish_distance = finish_q8_ - self.half_mirror.position;
+        self.finish_distance = remaining_finish_distance(self, self.half_mirror.position);
 }
 
 // Crash entries for contact 0x00403d60. crash_car keeps the reason-2 car path;
@@ -1817,7 +1852,7 @@ void Race::crash_entry(Rider& r, int32_t reason, std::optional<std::array<int32_
         // discarding any split-branch walk offset. That reset is what lets
         // a branch rider rejoining the trunk (e.g. L5d tick 2267) match.
         if (finish_q8_ != 0 && r.bike_slice_present)
-            r.finish_distance = finish_q8_ - r.crash_actor.motion.i32(0x1c);
+            r.finish_distance = remaining_finish_distance(r, r.crash_actor.motion.i32(0x1c));
         return;
     }
     // Stand-in (no crash library): the shared helper already computed the
@@ -1970,7 +2005,7 @@ void Race::contact(Rider& self, Rider& other) {
     // An uncrashed rider's half recomputes +0x1f8 (0x00407410 from its own
     // position, which the half took at the bike's last move).
     if (live_schedule_ && s.i32(0x2f4) == 0 && finish_q8_ != 0)
-        self.finish_distance = finish_q8_ - self.half_mirror.position;
+        self.finish_distance = remaining_finish_distance(self, self.half_mirror.position);
 }
 void Race::move(Rider& r, bool player) {
     // 0x004395e0 (single player, no network ghost branch).
@@ -2025,7 +2060,7 @@ void Race::move(Rider& r, bool player) {
 Race::SubSliceView Race::sub_slice(const Rider& r, size_t sample) const {
     const auto& route = route_of(r);
     const auto& rs = route[std::min(sample, route.size() - 1)];
-    const auto& path = rs.path;
+    const auto path = slice_path(rs, sample);
     SubSliceView v;
     const TerrainSlice& t = ground(rs);
     v.type = t.type;
@@ -2269,7 +2304,8 @@ void Race::vertical(Rider& r) {
         // 0x00439b10 case4 follows sub-slice +0x0c. At a split
         // the common road's right-forward link is physical half1.
         if (next.dual && next.event == RoadEvent::split) next = route_half(next, 1);
-        ground = terrain_height(this->ground(current), current.path, this->ground(next), next.path,
+        ground = terrain_height(this->ground(current), slice_path(current, r.sample), this->ground(next),
+                                slice_path(next, std::min(r.sample + 1, route.size() - 1)),
                                 b.i32(0x28) - current.offset * 256, uint8_t(b.i32(0x1c)),
                                 next.offset - current.offset, current.offset);
     }
@@ -2361,7 +2397,7 @@ void Race::crash(Rider& r) {
         // 0x00403d60 tail (same as crash_entry): recompute the half's
         // +0x1f8 on the crash body; direct when the finish is known.
         if (finish_q8_ != 0 && r.bike_slice_present)
-            r.finish_distance = finish_q8_ - r.crash_actor.motion.i32(0x1c);
+            r.finish_distance = remaining_finish_distance(r, r.crash_actor.motion.i32(0x1c));
         return;
     }
     // Simplified stand-in for 0x00403d60: fall, slide to a stop, then remount on the road.
@@ -2541,7 +2577,7 @@ void Race::crash_recovery(Rider& r, bool player, uint32_t controls) {
         // the bike's position (0x004067d0 copy-back). Direct path with the
         // finish known (traffic-field-body tick 2575: +0x1f8 1496540 ->
         // 1496547, the 7-unit body-to-bike gap).
-        if (finish_q8_ != 0 && r.bike_slice_present) r.finish_distance = finish_q8_ - body.motion.i32(0x1c);
+        if (finish_q8_ != 0 && r.bike_slice_present) r.finish_distance = remaining_finish_distance(r, body.motion.i32(0x1c));
         return;
     }
     if (action == CrashRecoveryAction::wrecked) bike.i32(0x2f0) = 0;
@@ -2595,8 +2631,9 @@ int32_t Race::curvature(const Rider& r, size_t sample, int samples) const {
     // 0x00449b40: average of sub-slice +0xb4 (atan(bend) << 14, 0x00454240) over the next samples.
     const auto& route = route_of(r);
     int64_t sum = 0;
+    std::optional<int32_t> closed;
     for (int k = 0; k < samples && sample + size_t(k) < route.size(); ++k) {
-        int32_t slot_sample = int32_t(sample) + k;
+        int32_t slot_sample = closed ? *closed : int32_t(sample) + k;
         if (ring_) {
             // 0x00449b40 follows circular slice links, not future course
             // data. At the front edge these slots still hold the prior lap
@@ -2607,6 +2644,8 @@ int32_t Race::curvature(const Rider& r, size_t sample, int samples) const {
             slot_sample = std::clamp(slot_sample, 0, int32_t(route.size()) - 1);
         }
         sum += wrap_angle(atan_ratio(tables_, route[size_t(slot_sample)].path.bend) * (1 << 14));
+        if (ring_ && ring_->forward_closed(slot_sample * 256, route[size_t(slot_sample)].half))
+            closed = slot_sample;
     }
     return int32_t(sum / samples);
 }
@@ -2795,12 +2834,14 @@ int Race::scan_next(int from, uint32_t mask, bool forward, int32_t window) const
     if (forward) {
         for (size_t k = size_t(from) + 1; k < scan_.size(); ++k) {
             if (window <= scan_[k].position - f.position) return -1;
-            if (scan_[k].sample && (scan_[k].type & mask)) return int(k);
+            if (scan_[k].sample && (scan_[k].type & mask) && shared_roadway(*f.sample, *scan_[k].sample))
+                return int(k);
         }
     } else {
         for (int k = from - 1; k >= 0; --k) {
             if (window <= f.position - scan_[size_t(k)].position) return -1;
-            if (scan_[size_t(k)].sample && (scan_[size_t(k)].type & mask)) return k;
+            if (scan_[size_t(k)].sample && (scan_[size_t(k)].type & mask) &&
+                shared_roadway(*f.sample, *scan_[size_t(k)].sample)) return k;
         }
     }
     return -1;
@@ -3143,7 +3184,8 @@ void Race::ai_straight_target(Rider& r) {
     Bike& b = r.bike;
     AiState& ai = r.brain;
     const auto& route = route_of(r);
-    const size_t next = std::min(r.sample + 1, route.size() - 1);
+    const size_t next = ring_ && ring_->forward_closed(int32_t(r.sample * 256), route[r.sample].half)
+                            ? r.sample : std::min(r.sample + 1, route.size() - 1);
     const int32_t lanes = route[next].path.right_q8 >> 8;
     int32_t lane = 0;
     if (ai.lane == 1)
@@ -3949,6 +3991,7 @@ RaceSnapshot Race::snapshot() const {
     // beyond the field vector the snapshot already builds.
     if (traffic_) traffic_->append_snapshot(out.fields);
     if (live_schedule_) {
+        out.fields.push_back({"finish.known", known_finish_q8()});
         out.fields.push_back({"roadside.creation", roadside_order_});
         for (size_t i = 0; i < roadside_nodes_.size(); ++i) {
             const auto& n = roadside_nodes_[i];
@@ -4545,7 +4588,7 @@ void Race::update_halves() {
     // riders keep the body-based distance (entry direct path + per-tick
     // body delta in crash_body_motion).
     for (auto& r : riders_)
-        if (finish_q8_ != 0 && r.bike.i32(0x2f4) == 0) r.finish_distance = finish_q8_ - r.bike.i32(0x1c);
+        if (finish_q8_ != 0 && r.bike.i32(0x2f4) == 0) r.finish_distance = remaining_finish_distance(r, r.bike.i32(0x1c));
     for (size_t i = 0; i < riders_.size(); ++i) {
         Rider& r = riders_[i];
         // Frozen riders never move; crashed riders still refresh the place
@@ -4697,7 +4740,7 @@ void Race::collide_riders() {
             for (int off = 0x180; off <= 0x1a0; off += 4) r.half_object.i32(off) = detached.bike.i32(off);
             r.ride_animation = r.crash_actor.animation;
             sync_half_mirror(r);
-            if (finish_q8_) r.finish_distance = finish_q8_ - detached.bike.i32(0x1c);
+            if (finish_q8_) r.finish_distance = remaining_finish_distance(r, detached.bike.i32(0x1c));
         };
         save(a, ar);
         save(b, br);
@@ -4725,7 +4768,7 @@ void Race::collide_riders() {
                         owner.half_object.i32(off) = detached.bike.i32(off);
                     owner.ride_animation = owner.crash_actor.animation;
                     sync_half_mirror(owner);
-                    if (finish_q8_) owner.finish_distance = finish_q8_ - detached.bike.i32(0x1c);
+                    if (finish_q8_) owner.finish_distance = remaining_finish_distance(owner, detached.bike.i32(0x1c));
                 }
             }
         }
@@ -4974,6 +5017,12 @@ void Race::step(std::span<const uint32_t> words) {
                 std::fprintf(stderr, "body %zu %s pos %d lat %d speed %d steer %d rate %d crash %d\n", i,
                              label, r.bike.i32(0x1c), r.bike.i32(0x28), r.bike.i32(0xec), r.bike.i32(0x288),
                              r.bike.i32(0xf0), r.bike.i32(0x2f4));
+                const auto view = sub_slice(r, r.sample);
+                std::fprintf(stderr, "geometry %zu %s route %d sample %zu centre %d edges %d/%d shoulders %d/%d type %u flags %u event %u params %d/%u section %u local %u\n",
+                             i, label, r.route, r.sample, route_of(r)[r.sample].offset,
+                             view.e0, view.e4, view.e8, view.ec, unsigned(view.type), unsigned(view.flags),
+                             unsigned(view.event_type), int(view.p3a), unsigned(view.b3b),
+                             route_of(r)[r.sample].section, route_of(r)[r.sample].local);
             }
         }
     };

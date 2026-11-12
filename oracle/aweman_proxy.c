@@ -72,6 +72,8 @@ static int32_t g_order_range = 0x1000;
 static int g_police_probe;
 static int g_terrain_seeded;
 static int g_terrain_trace;
+static int g_slice_probe = -1;
+static int g_ai_probe_tick = -1;
 static void capture_terrain_seeded_and_exit(void);
 static void palette_hook_install(void);
 static uint32_t g_frame;
@@ -395,6 +397,10 @@ static void dump_sim_tick(void) {
             rr_log(key, (long long)g_randtrace_callers[i]);
         }
     rr_log("controls", (long long)(uint32_t)RD32(0x004b7ed0));
+    if (g_record) {
+        fprintf(g_record, "%x\n", (uint32_t)RD32(0x004b7ed0));
+        fflush(g_record); // the replay reader consumes one hexadecimal word per tick
+    }
     if (g_drive == 2 && getenv("RR_ORACLE_DRIVER_TRACE")) {
         const uintptr_t bike = (uint32_t)RD32(0x004642d8);
         if (readable(bike, 0x144)) {
@@ -651,6 +657,18 @@ static void dump_sim_tick(void) {
                     }
                 }
                 for (unsigned f = 0; f < RR_SIM_RIDER_FIELD_COUNT; ++f) {
+                    if (f == 0 && g_slice_probe >= 0 &&
+                        sim_field_value(node, 0xc4, 4, 0) == 4 &&
+                        ((int32_t)sim_field_value(node, 0x1c, 4, 1) >> 8) == g_slice_probe) {
+                        const uintptr_t sl = (uint32_t)sim_field_value(node, 0x2c, 4, 0);
+                        if (sl && readable(sl, 0x164))
+                            fprintf(g_out, "# rider-slice tick=%d slot=%d pos=%d lateral=%d slice=%u type=%u flags=%u halves=%u centre=%d edges=%d/%d shoulders=%d/%d bases=%d/%d\n",
+                                tick, slot, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x28),
+                                (uint32_t)sl, RD8(sl + 0x3c), RD8(sl + 0x37), RD8(sl + 0x36),
+                                (int32_t)RD32(sl + 0xcc), (int32_t)RD32(sl + 0xe0), (int32_t)RD32(sl + 0xe4),
+                                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec),
+                                (int32_t)RD32(sl + 0x14c), (int32_t)RD32(sl + 0x158));
+                    }
                     const uint32_t off = rr_sim_rider_fields[f].offset;
                     /* Only bike-half words are mapped (see REVERSE_ENGINEERING.md).
                      * The slice pointer is process-specific: keep it as debug-only
@@ -887,6 +905,10 @@ static void dump_sim_tick(void) {
         fputs("end\n", g_out);
         fclose(g_out);
         g_out = NULL;
+        if (g_record) {
+            fclose(g_record);
+            g_record = NULL;
+        }
         ExitProcess(0);
     }
 }
@@ -942,6 +964,37 @@ static void capture_police_spawn(void) {
 
 // Preserve the original player-think entry and count actual visits to its
 // human-control branch. The five copied entry bytes contain no relative operand.
+static void __fastcall rr_ai_curve_probe(uintptr_t self) {
+    ((void(__fastcall*)(uintptr_t))0x004090a0)(self);
+    if (g_out && RD32(0x004b7ecc) == g_ai_probe_tick) {
+        uintptr_t half = (uint32_t)RD32(self + 0x2fc);
+        uintptr_t brain = (uint32_t)RD32(half + 0x1d8);
+        fprintf(g_out, "# ai-target tick=%u actor=%u pos=%d lat=%d target=%d/%d lane=%d bias=%d\n",
+                RD32(0x004b7ecc), (unsigned)self, (int32_t)RD32(self + 0x1c), (int32_t)RD32(self + 0x28),
+                (int32_t)RD32(brain + 0x194), (int32_t)RD32(brain + 0x198),
+                (signed char)RD8(brain + 0x18c), (int32_t)RD32(brain + 0x190));
+        uintptr_t sl = (uint32_t)RD32(self + 0x2c);
+        for (int i = 0; i < 10 && sl && readable(sl, 0x164); ++i) {
+            fprintf(g_out, "# ai-road actor=%u i=%d slice=%u centre=%d bend=%d lanes=%d/%d halves=%u\n",
+                    (unsigned)self, i, (unsigned)sl, (int32_t)RD32(sl + 0xcc), (int32_t)RD32(sl + 0xb4),
+                    (int32_t)RD32(sl + 0x30), (int32_t)RD32(sl + 0x2c), RD8(sl + 0x36));
+            sl = (uint32_t)RD32(sl + 0x10);
+        }
+    }
+}
+static void __fastcall rr_wall_probe(uintptr_t self) {
+    uintptr_t sl = (uint32_t)RD32(self + 0x2c);
+    int probe = g_slice_probe >= 0 && ((int32_t)RD32(self + 0x1c) >> 8) == g_slice_probe;
+    if (probe && g_out && sl && readable(sl, 0x164))
+        fprintf(g_out, "# wall-entry tick=%u actor=%u kind=%u pos=%d lat=%d slice=%u type=%u event=%u flags=%u shoulders=%d/%d rate=%d\n",
+                RD32(0x004b7ecc), (unsigned)self, RD32(self + 0xc4), (int32_t)RD32(self + 0x1c),
+                (int32_t)RD32(self + 0x28), (unsigned)sl, RD8(sl + 0x3c), RD8(sl + 0x38), RD8(sl + 0x37),
+                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec), (int32_t)RD32(self + 0xf0));
+    ((void(__fastcall*)(uintptr_t))0x0043a610)(self);
+    if (probe && g_out)
+        fprintf(g_out, "# wall-exit actor=%u pos=%d lat=%d rate=%d\n", (unsigned)self,
+                (int32_t)RD32(self + 0x1c), (int32_t)RD32(self + 0x28), (int32_t)RD32(self + 0xf0));
+}
 typedef uint32_t (__fastcall *rr_player_think_fn)(uintptr_t,uint32_t);
 static rr_player_think_fn g_player_think_original;
 static uint32_t __fastcall rr_player_think_probe(uintptr_t self,uint32_t second){
@@ -4486,6 +4539,8 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_SEEDED", buf, sizeof buf))
         g_terrain_seeded = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_TRACE", buf, sizeof buf)) g_terrain_trace = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_SLICE_SAMPLE", buf, sizeof buf)) g_slice_probe = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_AI_TARGET_TICK", buf, sizeof buf)) g_ai_probe_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_SOLO", buf, sizeof buf)) g_solo = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_HUMAN", buf, sizeof buf)) g_human = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_KNOCK", buf, sizeof buf)) g_knock_tick = atoi(buf);
@@ -4569,6 +4624,18 @@ static int rr_install_hooks(void) {
         }
     }
     if(g_sim&&g_human&&!rr_install_player_probe())return 0;
+    if(g_ai_probe_tick >= 0 &&
+       (!rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
+        !rr_patch_call((uint8_t*)0x00409e29,0x004090a0,rr_ai_curve_probe))) {
+        if(g_out)fputs("# patch installation failed at AI target probe\n",g_out);
+        return 0;
+    }
+    if(g_slice_probe >= 0 &&
+       (!rr_patch_call((uint8_t*)0x0043a5fe,0x0043a610,rr_wall_probe) ||
+        !rr_patch_call((uint8_t*)0x0043adf1,0x0043a610,rr_wall_probe))) {
+        if(g_out)fputs("# patch installation failed at wall probe\n",g_out);
+        return 0;
+    }
     for (unsigned i = 0; i < count; ++i) {
         if (!rr_patch_call((uint8_t*)(uintptr_t)calls[i].site, calls[i].target, calls[i].hook)) {
             // Restore any earlier call sites on a protection failure.

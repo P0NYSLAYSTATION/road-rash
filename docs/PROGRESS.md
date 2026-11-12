@@ -1,5 +1,17 @@
 # Port progress
 
+## November 12, 2026 — graph finish and physical split shoulders
+
+The same completed Hiway recording now matches through6556 with one initial
+RNG anchor. Graph-relative finish distance resolves6007, shared-roadway AI
+scanning resolves6056, and zero-residual event initialization plus physical
+inner-shoulder narrowing resolves6254. Preserving the discarded half's terminal
+self-link resolves6552. First remaining gap6557 is opponent steering2310 versus
+3465. Napa2400 and City600 regressions stay exact.
+Recorded-controls companions are now written and checked against every TSV
+control before capture publication. See the [evidence and remaining work](agent-handoffs/parity-split-geometry-20261112.md).
+Whole-race parity across all tracks remains unfinished; multiplayer stays on hold.
+
 ## November 12, 2026 — scheduler, resource and split parity
 
 The completed Hiway original recording now matches through tick6006 with one

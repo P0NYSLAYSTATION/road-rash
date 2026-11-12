@@ -1,5 +1,20 @@
 # Binary evidence and next work
 
+## November 12, 2026 — finish and split initialization
+
+00407410 follows graph preferred byte18 until00454253 discovers a global
+finish on its section's first forward build.00449ce0 gates AI scans by shared
+slice+36 roadway bits.00452e10 updates CESR and width iterators even for a zero
+residual at section entry.00454890 scales inner shoulders by the measured
+window countdown and clips overlap against separation before scaling. Direct
+0043a610 entry/exit capture at Hiway6254 confirms type4/event5, shoulder250,
+lateral64979->72704 and steer rate-720->281. These replace the earlier
+assumption that raw section shoulders suffice at split entry. Details and
+immutable trace hashes: [handoff](agent-handoffs/parity-split-geometry-20261112.md).
+The6552 AI probe additionally proves that the discarded half's last+10 link
+is a self-link after the selected branch continues beyond its window. Repeating
+that slice fixes the curve average and one-unit lateral-target difference.
+
 ## November 12, 2026 — resource buffers and scheduler nodes
 
 Working-install disassembly confirms 00441445 tests a pedestrian's cached RRAN

@@ -70,6 +70,51 @@ rr::Course window_course(uint32_t branch_length) {
     return c;
 }
 
+void finish_discovery() {
+    auto course = window_course(400);
+    course.sections[3].events.push_back({100, 101, 6, {1, 0, 0}});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    check(ring.known_finish_q8() == 0, "finish global starts unknown outside its section");
+    for (int i = 130; i < 700; ++i) ring.advance(256, random, {});
+    check(ring.known_finish_q8() == 0, "entering the finish section does not discover an unbuilt slice");
+    ring.advance(256, random, {});
+    check(ring.known_finish_q8() == 800 * 256,
+          "first forward build in the finish section discovers its absolute coordinate");
+    const rr::TrackRing saved = ring;
+    ring.advance(-256, random, {});
+    check(ring.known_finish_q8() == saved.known_finish_q8(), "rewind preserves the discovered finish");
+    ring.setup(50 * 256, random, {});
+    check(ring.known_finish_q8() == 0, "new setup clears the previous race's discovered finish");
+}
+
+void split_shoulders() {
+    auto course = window_course(400);
+    for (size_t section : {1u, 2u})
+        for (auto& p : course.sections[section].samples) {
+            p.shoulder_left = p.shoulder_right = 224;
+            p.left = section == 1 ? 500 : 0;
+            p.right = section == 1 ? 0 : 500;
+            p.left_q8 = section == 1 ? 512 : 0;
+            p.right_q8 = section == 1 ? 0 : 512;
+        }
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(230 * 256, random, {}); // builds the split at300 within its128 slots
+    const auto left = ring.slice_shoulders(300 * 256, 0);
+    const auto right = ring.slice_shoulders(300 * 256, 1);
+    check(left && right && (*left)[1] == (*right)[0],
+          "the split's touching road edges have zero inner shoulders, not overlapping224-unit widths");
+    const rr::TrackRing saved = ring;
+    ring.commit_branch(0);
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    check(ring.forward_closed(381 * 256, 1) && !ring.forward_closed(381 * 256, 0),
+          "discarded split half retains its self-link while the committed road continues");
+    check(saved.slice_shoulders(300 * 256, 0) == left,
+          "a copied ring preserves physical shoulder geometry when the live slot is reused");
+}
+
 void backward_iterators() {
     auto course = synthetic_course();
     auto& section = course.sections[0];
@@ -182,6 +227,8 @@ void window_walks() {
 } // namespace
 
 int main() {
+    finish_discovery();
+    split_shoulders();
     window_walks();
     backward_iterators();
     const rr::Course course = synthetic_course();

@@ -2,6 +2,12 @@
 
 ## Windows continuation — November 12, 2026
 
+Latest continuation supersedes the6007 first-gap statement below: the same
+completed Hiway trace matches through6556; first gap6557 is opponent steering
+original2310/native3465. Graph finish discovery, AI roadway masks and
+physical inner-shoulder geometry were measured against E:/RR. See
+[current evidence](../agent-handoffs/parity-split-geometry-20261112.md).
+
 Strict replay of the completed Hiway human recording now matches ticks1..6006
 including RNG. First remaining gap6007 is graph-relative finish distance on an
 opponent's alternate branch; original227708/native232828. Complete all-track

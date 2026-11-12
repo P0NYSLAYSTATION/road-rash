@@ -90,10 +90,19 @@ class TrackRing {
     void advance(int32_t delta_q8, const Random&, const ActorSink&);
     int32_t front_q8() const { return front_; }
     int32_t back_q8() const { return back_; }
+    int32_t known_finish_q8() const { return known_finish_; }
     uint8_t slice_event(int32_t position_q8) const {
         return slice_events_[size_t((uint32_t(position_q8) >> 8) & 127)];
     }
     bool unsupported() const { return unsupported_; }
+    std::optional<std::array<int32_t, 2>> slice_shoulders(int32_t position, uint8_t half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!s.count) return std::nullopt;
+        return s.edges[s.count == 1 ? 0 : half];
+    }
+    bool forward_closed(int32_t position, uint8_t half) const {
+        return (shoulders_[size_t((uint32_t(position) >> 8) & 127)].closed & (1u << half)) != 0;
+    }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
     // Terrain slice exported by a walker at its current sample.
@@ -119,6 +128,7 @@ class TrackRing {
         int32_t index = 0;    // [2]
     };
     struct SectionWalker {
+        bool stepped = false;
         uint32_t node = 0;
         int32_t position = 0; // Q8 within the node's section
         int32_t offset = 0;   // section +0x0c, road lateral centre
@@ -156,7 +166,7 @@ class TrackRing {
     int step_section(SectionWalker&, int32_t delta);                    // 0x00452e10 section result (0/1/2/3)
     void collapse(Walker&);                                             // 0x00452fd0
     void step(Walker&, int32_t delta);                                  // 0x00453030 -> 0x00452e10
-    void build_half(SectionWalker&, int32_t ring_q8, const ActorSink&); // 0x00454240
+    void build_half(SectionWalker&, int32_t ring_q8, const ActorSink&, bool discover_finish); // 0x00454240
     void build_slice(Walker&, int32_t ring_q8, const ActorSink&);       // 0x00454c80 -> 0x00454240
     const Course* course_;
     int level_;
@@ -174,6 +184,13 @@ class TrackRing {
     bool branch_committed_ = false;
     uint8_t chosen_half_ = 0;
     std::array<uint8_t, 128> slice_events_{};
+    struct Shoulders {
+        uint8_t count = 0;
+        uint8_t closed = 0;
+        std::array<std::array<int32_t, 2>, 2> edges{};
+    };
+    std::array<Shoulders, 128> shoulders_{};
+    int32_t known_finish_ = 0;
     bool unsupported_ = false;
     SliceSink slice_sink_;
     StaticSink static_sink_;

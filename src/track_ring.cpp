@@ -245,6 +245,7 @@ void TrackRing::enter(SectionWalker& w, uint32_t offset, bool start) {
     const auto& node = node_of(*course_, offset);
     const auto& section = course_->sections.at(node.link);
     w.node = offset;
+    w.stepped = false;
     w.position = start ? 0 : int32_t(node.length) * 0x100;
     w.borr.init(&section.roadside_profiles, int32_t(section.samples.size()), start);
     w.terrain.reset();
@@ -399,6 +400,7 @@ void TrackRing::step(Walker& w, int32_t delta) {
 const PathSample& TrackRing::path_of(const SectionWalker& half) const {
     const auto& section = course_->sections.at(node_of(*course_, half.node).link);
     const size_t sample = size_t(half.position >> 8);
+    if (!sample && half.stepped && section.forward_start) return *section.forward_start;
     return sample == section.samples.size() ? section.backward_endpoint : section.samples.at(sample);
 }
 
@@ -430,6 +432,7 @@ int TrackRing::step_section(SectionWalker& w, int32_t delta) {
         result = 1;
     }
     w.position = next;
+    w.stepped = true;
     w.borr.step(delta);                    // 0x00451e20
     if (w.terrain) w.terrain->step(delta); // 0x004516e0
     // 0x00452230: skip records before the walker's sample.
@@ -464,17 +467,50 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     if (w.stopped) return;
     slice_events_[size_t((uint32_t(ring_q8) >> 8) & 127)] = w.event;
     // 0x00454c80 builds the selected half before its opposite.
-    build_half(w.halves[w.active], ring_q8, sink);
-    if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink);
+    build_half(w.halves[w.active], ring_q8, sink, w.front);
+    if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink, w.front);
+    auto& stored = shoulders_[size_t((uint32_t(ring_q8) >> 8) & 127)];
+    stored.closed = 0;
+    stored.count = w.dual ? 2 : 1;
+    auto& previous = shoulders_[size_t(((uint32_t(ring_q8) >> 8) - 1) & 127)];
+    //00454c80: collapsing a committed split leaves the discarded half's
+    //last forward link pointing to itself; it does not enter the chosen road.
+    if (w.front && !w.dual && previous.count == 2 && w.event != 1 && branch_committed_)
+        previous.closed |= uint8_t(1u << (chosen_half_ ^ 1));
+    for (uint8_t h = 0; h < stored.count; ++h) {
+        const auto& half = w.halves[w.dual ? h : w.active];
+        const auto& path = path_of(half);
+        stored.edges[h] = {half.offset - path.left - path.shoulder_left,
+                           half.offset + path.right + path.shoulder_right};
+    }
+    //00454890: fade the inner shoulders over the measured window; clamp
+    //overlapping shoulders to half the inter-road gap before scaling.
+    if (w.dual && w.countdown > 0) {
+        int32_t right = path_of(w.halves[0]).shoulder_right;
+        int32_t left = path_of(w.halves[1]).shoulder_left;
+        const int32_t threshold = windows_->at(w.window).threshold;
+        int32_t factor = std::max(0, (threshold - w.countdown) * 65536 / threshold);
+        if (right + left > w.x_sep) {
+            right = left = w.x_sep / 2;
+            factor = std::max(factor, 32768);
+        }
+        right = wrap32(int64_t(right) * factor) >> 16;
+        left = wrap32(int64_t(left) * factor) >> 16;
+        stored.edges[0][1] = w.halves[0].offset + path_of(w.halves[0]).right + right;
+        stored.edges[1][0] = w.halves[1].offset - path_of(w.halves[1]).left - left;
+    }
 }
 
-void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& sink) {
+void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& sink, bool discover_finish) {
     // 0x00454240: two 0x00451cb0 walks, then 0x004520d0.
     const auto& node = node_of(*course_, w.node);
     const auto& section = course_->sections.at(node.link);
     const uint32_t local = uint32_t(w.position >> 8);
-    const auto& path =
-        local == section.samples.size() ? section.backward_endpoint : section.samples.at(local);
+    if (discover_finish && !known_finish_) {
+        const int32_t finish = section_finish_sample(section, level_);
+        if (finish) known_finish_ = (ring_q8 & ~255) + (finish - int32_t(local)) * 256;
+    }
+    const auto& path = path_of(w);
     RingStatics statics;
     w.borr.slots(path, *random_, statics); // first walk: stale edges, positions overwritten
     if (slice_sink_ && w.terrain)          // 0x00451910 (draw-free)
@@ -505,6 +541,8 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
 }
 
 void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sink) {
+    known_finish_ = 0;
+    shoulders_ = {};
     windows_ = std::make_shared<WindowCache>();
     random_ = &random;
     std::vector<uint32_t> visited;

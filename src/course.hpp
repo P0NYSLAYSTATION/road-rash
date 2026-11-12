@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace rr {
@@ -56,11 +57,13 @@ struct CourseSection {
     uint32_t scenery_following_word = 0;
     // 0x00452cb0(...,0) exposes one slice at position length before rewinding.
     PathSample backward_endpoint{0, 0, 500, 500, 512, 512};
+    std::optional<PathSample> forward_start; // after00452e10's zero-distance iterator step
 };
 struct CourseNode {
     uint32_t offset, kind, next = 0, previous = 0, link = 0, length = 0;
     // Split/merge byte +0x19: the half 0x00453030 steps first (traversal [1]).
     int8_t primary = 0;
+    uint8_t preferred = 0; // node+18, default outgoing half used by00407410
 };
 struct Course {
     uint32_t root;
@@ -83,6 +86,11 @@ struct RouteSample {
     int32_t other_offset = 0;
     int32_t dx_sep = 0, x_sep = 0; // half 1 minus half 0: traversal [5], [6]
 };
+// Sub-slice+36 bits0/1: a common road admits both halves, a dual slice only its own.
+inline uint8_t roadway_mask(const RouteSample& s) { return s.dual ? uint8_t(1u << s.half) : uint8_t(3); }
+inline bool shared_roadway(const RouteSample& a, const RouteSample& b) {
+    return (roadway_mask(a) & roadway_mask(b)) != 0;
+}
 // Select one physical sub-slice while preserving the opposite half's metadata.
 RouteSample route_half(const RouteSample& sample, uint8_t half);
 Course read_course(const std::vector<uint8_t>& bytes);
@@ -102,6 +110,8 @@ std::vector<RouteSample> make_route(const Course& course, bool second_branch);
 // (level 1..5; level is 0-based DAT_004b8a12). -1 when no route sample
 // carries a qualifying event.
 int32_t finish_event_sample(const Course& course, const std::vector<RouteSample>& route, int level);
+int32_t section_finish_sample(const CourseSection&, int level); //004525c0; zero means no finish
+int32_t graph_finish_distance(const Course&, uint32_t node, int32_t local_q8, int level); //00407410
 // Plan 17 Task 1: original per-course/per-level start and finish. RaceBounds
 // is defined in race_setup.hpp (the race-setup owner's file, which includes
 // this header); forward-declared here so course code and tests can name the
