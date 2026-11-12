@@ -124,6 +124,13 @@ struct FieldReplay {
             }
             const auto& p = *native;
             const auto& b = p.body.bike;
+            for (int offset : {0x104, 0x108, 0x10c, 0x128}) {
+                char field[8];
+                std::snprintf(field, sizeof field, "%x", offset);
+                if (f.count(prefix + field)) check(f, prefix + field, b.i32(offset));
+            }
+            if (f.count(prefix + "1d4")) check(f, prefix + "1d4", p.anchor_lateral);
+            if (f.count(prefix + "1e4")) check(f, prefix + "1e4", p.type);
             for (const auto& [field, value] :
                  std::array<std::pair<const char*, int64_t>, 14>{{{"1c", b.i32(0x1c)},
                                                                   {"28", b.i32(0x28)},
@@ -146,7 +153,11 @@ struct FieldReplay {
                 const auto it = f.find(prefix + std::array{"1e0", "208", "21c"}[i]);
                 if (it == f.end()) continue;
                 used.insert(it->first);
-                if ((it->second != 0) != previous[i]) fail(it->first + " resource availability differs");
+                if ((it->second != 0) != previous[i])
+                    fail(it->first + " resource availability original " + std::to_string(it->second != 0) +
+                         " native " + std::to_string(previous[i]) + " (ped serial " + std::to_string(p.serial) +
+                         " selector " + std::to_string(p.selector) + " pos " + std::to_string(b.i32(0x1c)) +
+                         " lateral " + std::to_string(b.i32(0x28)) + ")");
             }
         }
     }
@@ -551,7 +562,8 @@ struct FieldReplay {
                             fail(p + field + " does not name the expected adjacent ring slot");
                     }
                     const auto probe = setup.instance.traffic->lane_probe(car, race().route_for(0),
-                                                                          setup.instance.ring->front_q8());
+                                                                          setup.instance.ring->front_q8(),
+                                                                          setup.instance.ring.get());
                     extra("sl2c", probe.right_q8);
                     extra("sl30", probe.left_q8);
                     extra("s28v", probe.slot_link);
@@ -601,6 +613,8 @@ struct FieldReplay {
             used.insert(base + "position");
         }
         const auto& riders = race().riders();
+        for (const auto& n : race().roadside_nodes())
+            if (n.active) have.push_back({0, n.position});
         for (size_t i = 1; i < riders.size(); ++i) {
             const Rider& r = riders[i];
             if (r.parked) have.push_back({0, r.bike.i32(0x1c)});
@@ -693,6 +707,7 @@ struct FieldReplay {
     bool frame(size_t i) {
         const auto& f = g.frames.at(i);
         diff.clear();
+        if (f.count("capture.finished")) check(f, "capture.finished", race().riders()[0].finished ? 1 : 0);
         if (counted_rng && f.count("rng_calls"))
             check(f, "rng_calls", int64_t(race().rng_draw_count() - previous_rng_draws));
         previous_rng_draws = race().rng_draw_count();
@@ -893,7 +908,7 @@ struct FieldReplay {
             if (used.count(key) || exact.count(key)) continue;
             // Original code addresses are diagnostic attribution, not portable
             // simulation state. Their counted draws and resulting RNG are checked.
-            if (key.rfind("randlog.", 0) == 0) continue;
+            if (key.rfind("randlog.", 0) == 0 || key == "capture.outcome") continue;
             const std::string suffix = key.substr(key.rfind('.') + 1);
             if (key.rfind("rider.", 0) == 0 &&
                 (suffix == "think" || suffix == "slice_ptr" || suffix == "bike_44"))

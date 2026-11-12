@@ -301,6 +301,12 @@ static void test_lane_validity_linked_slots() {
         const auto p = system.lane_probe(probe_car, probe_route, 137 * 256 + 10);
         if (p.next_right_q8 != 512 || p.next_left_q8 != 512)
             throw std::runtime_error("unbuilt forward link must retain previous-lap geometry");
+        probe_route[136].event = rr::RoadEvent::split;
+        if (system.lane_probe(probe_car, probe_route, 137 * 256).slot_link != 2)
+            throw std::runtime_error("slice-owner link must expose the split event byte");
+        probe_route[264].event = rr::RoadEvent::merge_window;
+        if (system.lane_probe(probe_car, probe_route, 265 * 256).slot_link != 6)
+            throw std::runtime_error("reused owner link must expose its replacement traversal event");
         // City tick 460: widening slice 159 changes slice 158's integral
         // left lane word 512 to 513 (0x0045484c), after it is built.
         probe_route[158].path.left_q8 = 512;
@@ -948,6 +954,47 @@ static std::vector<rr::RouteSample> intersection_route(int variant = 1) {
     route[100].path.zone_end = true;
     return route;
 }
+static void test_mixed_scan_ties() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> route(512);
+    for (size_t i = 0; i < route.size(); ++i) {
+        route[i].local = uint32_t(i);
+        route[i].path.left = route[i].path.right = 500;
+        route[i].path.left_q8 = route[i].path.right_q8 = 512;
+    }
+    rr::Race race(route, route, rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90, {});
+    race.set_live_schedule(true);
+    race.set_demo_hold(true);
+    race.set_traffic(&traffic);
+    auto& rider = race.riders()[0];
+    rider.sched_next = rider.half_sched_next = 10000;
+    rider.bike.i32(0x1c) = rider.half_mirror.position = 10000;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.serial = 1;
+    car.next_tick = 10000;
+    car.position = car.motion.i32(0x1c) = 9999;
+    auto first_type = [&] {
+        const auto snapshot = race.snapshot();
+        for (const auto& field : snapshot.fields)
+            if (field.name == "scan_order.0.type") return field.value;
+        throw std::runtime_error("missing scan order in simulation hash fields");
+    };
+    race.countdown_step();
+    car.position = car.motion.i32(0x1c) = 10000;
+    race.countdown_step();
+    if (first_type() != 0x10) throw std::runtime_error("car ahead on +0 must retain precedence at equality");
+    car.position = car.motion.i32(0x1c) = 10001;
+    race.countdown_step();
+    car.position = car.motion.i32(0x1c) = 10000;
+    race.countdown_step();
+    if (first_type() == 0x10)
+        throw std::runtime_error("crossing changes tie order; cars have no blanket priority");
+}
+
 static void test_initial_signal_clock() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem system(library, synthetic_exe());
@@ -963,6 +1010,27 @@ static void test_initial_signal_clock() {
     for (uint32_t tick = 2; tick <= 571; ++tick) system.countdown_step(route, front, [] { return 0u; }, tick);
     if (system.signals()[size_t(signal)].phase != 1 || system.signals()[size_t(signal)].accum != 1)
         throw std::runtime_error("initial signal must change phase at tick 571, not 601");
+}
+
+static void test_deferred_controller() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route();
+    const int32_t front = 130 * 256;
+    auto random = [] { return 0u; };
+    system.countdown_step(route, front, random, 1);
+    const int signal = system.controllers()[0].signals[2];
+    system.begin_schedule(route, front, random, 571, true);
+    if (system.signals()[size_t(signal)].phase != 0 || system.signals()[size_t(signal)].accum != 31)
+        throw std::runtime_error("prepass must not run a deferred controller ahead of riders");
+    system.run_controller(0, front - 0x8000, front, 571, route, random);
+    if (system.signals()[size_t(signal)].phase != 1 || system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("position-ordered dispatch must execute the due controller");
+    system.run_controller(0, front - 0x8000, front, 571, route, random);
+    if (system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("controller must not execute twice during one scheduler pass");
 }
 
 static void test_opposite_intersection() {
@@ -1264,7 +1332,9 @@ int main() {
         test_spawn_and_move();
         test_zone_events();
         test_intersections();
+        test_mixed_scan_ties();
         test_initial_signal_clock();
+        test_deferred_controller();
         test_opposite_intersection();
         test_signal_phase();
         test_intersections_all_courses();

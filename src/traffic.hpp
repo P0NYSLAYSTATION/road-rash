@@ -193,7 +193,10 @@ class TrafficSystem {
                   uint32_t tick, int32_t player_velocity = 0);
     // The live position-ordered walk dispatches each car between rider nodes.
     bool begin_schedule(const std::vector<RouteSample>& route, int32_t front_q8,
-                        const std::function<uint32_t()>& random, uint32_t tick);
+                        const std::function<uint32_t()>& random, uint32_t tick,
+                        bool defer_controllers = false);
+    void run_controller(size_t index, int32_t back_q8, int32_t front_q8, uint32_t tick,
+                        const std::vector<RouteSample>& route, const std::function<uint32_t()>& random);
     void run_car(size_t index, const std::vector<RouteSample>& route, int32_t camera_q8, int32_t front_q8,
                  int32_t player_q8, int32_t player_lateral, const std::function<uint32_t()>& random,
                  uint32_t tick, int32_t player_velocity);
@@ -247,7 +250,8 @@ class TrafficSystem {
     };
     // The same rolling-slot lane inputs used by plan_speed, exposed for
     // original-versus-port state comparisons (raw addresses are not portable).
-    LaneProbe lane_probe(const TrafficCar&, const std::vector<RouteSample>&, int32_t front_q8) const;
+    LaneProbe lane_probe(const TrafficCar&, const std::vector<RouteSample>&, int32_t front_q8,
+                           const TrackRing* ring = nullptr) const;
 
   private:
     void build_slices(const std::vector<RouteSample>& route, int32_t front_q8, int32_t distance_moved,

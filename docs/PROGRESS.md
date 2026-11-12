@@ -1,5 +1,37 @@
 # Port progress
 
+## November 12, 2026 — scheduler, resource and split parity
+
+The completed Hiway original recording now matches through tick6006 with one
+initial RNG anchor and no reseeding. The first remaining difference is tick6007:
+an opponent entering the other branch has finish-distance227708 versus232828.
+The original's graph-relative finish calculation before the finish section is
+discovered remains to be ported. This is not start-to-finish parity.
+
+Corrections include mixed controller dispatch and stable equal-position scan
+ordering; pre-green pedestrian contacts; player-half position queries; cached
+RRAN validity across smaller family-buffer replacements and section inheritance;
+the last scheduled move through a reused circular road slot; in-road scenery
+scheduler nodes; opposite-half pedestrian spawn centres; and interior split
+traversal event markers. Race snapshots retain the new simulation state and
+share the immutable traversal cache. The finish replay fixture now drives
+without wrecking and replays recorded controls across save/load.
+
+Napa moving1259 and City moving1251 remain independent first divergences.
+The established Napa2400/City600 fixtures are regression gates, not coverage of
+all tracks. Details and limits: [residency handoff](agent-handoffs/parity-residency-20261112.md).
+
+## November 12, 2026 — complete RNG caller history
+
+The original-game capture now writes each tick's RNG caller entries to the
+trace and flushes the file, then reuses its in-memory buffer. Caller numbering
+continues across ticks; previous entries remain in the saved trace. Buffer
+overflow explicitly invalidates the capture instead of silently truncating it.
+The completed `hiway-finish-streamed-rng-l1-s1` original run retains all 52,137
+entries through tick 14,084 and the finish outcome, including entries beyond
+the former 32,768-entry limit. This establishes complete caller logging for
+that run, not native simulation parity.
+
 The opening inventory below is historical. See [CURRENT_STATUS.md](CURRENT_STATUS.md)
 for the current evidence matrix and the dated continuation entries for updates.
 

@@ -1,4 +1,5 @@
 #include "traffic.hpp"
+#include "track_ring.hpp"
 #include <cstdlib>
 #include "actor_render.hpp"
 #include "exe_tables.hpp"
@@ -303,7 +304,7 @@ static int32_t ring_slot_sample(int32_t sample, int32_t front_q8, int32_t sample
 
 TrafficSystem::LaneProbe TrafficSystem::lane_probe(const TrafficCar& car,
                                                    const std::vector<RouteSample>& route,
-                                                   int32_t front_q8) const {
+                                                   int32_t front_q8, const TrackRing* ring) const {
     const int32_t size = int32_t(route.size());
     const int32_t sample = std::clamp(car.position, int32_t(0), int32_t((route.size() - 1) * 256)) >> 8;
     auto at = [&](int32_t index) {
@@ -328,7 +329,8 @@ TrafficSystem::LaneProbe TrafficSystem::lane_probe(const TrafficCar& car,
             next.left_q8,
             previous.right_q8,
             previous.left_q8,
-            0};
+            ring ? ring->slice_event(car.position)
+                 : int32_t(route[size_t(ring_slot_sample(sample, front_q8, size))].event)};
 }
 
 std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std::vector<RouteSample>& route,
@@ -809,55 +811,64 @@ int TrafficSystem::pedestrian_signal(uint8_t marking_flags, int32_t position_q8,
 void TrafficSystem::think_intersections(int32_t back_q8, int32_t front_q8, uint32_t tick,
                                         const std::vector<RouteSample>& route,
                                         const std::function<uint32_t()>& random) {
-    // Controllers in pool order (the original walks them in ring order).
-    for (size_t ci = 0; ci < controllers_.size(); ++ci) {
-        auto& c = controllers_[ci];
-        if (!c.active || c.next_tick > int32_t(tick)) continue;
-        const int32_t dt = int32_t(tick) - c.last_tick; // +0x18
-        c.last_tick = int32_t(tick);
-        c.next_tick = int32_t(tick) + 0x1e;
-        for (int slot = 0; slot < 4; ++slot) {
-            const int si = c.signals[slot];
-            if (si < 0) continue;
-            auto& s = signals_[size_t(si)];
-            s.accum += dt;
-            bool near = back_q8 + 0x100 <= s.position_q8 && s.position_q8 <= front_q8 - 0x200;
-            for (size_t k = 1; k < windows_.size(); ++k) // plan 34: any human's window
-                near = near || (windows_[k].front_q8 - 0x7f00 <= s.position_q8 &&
-                                s.position_q8 <= windows_[k].front_q8 - 0x200);
-            if (!(near && c.durations[s.phase] < s.accum)) continue;
-            do {
-                s.accum -= c.durations[s.phase];
-                if (++s.phase > 2) s.phase = 0;
-                if ((s.index & 1) && s.phase == 0 && (tick & 8)) {
-                    int lane = 0, kind, range;
-                    if (c.variant == 1) {
-                        range = int8_t(c.lanes) / 2;
-                        kind = s.index;
-                        if (s.index == 3) lane = range;
-                    } else {
-                        kind = c.variant == 2 ? 3 : 1;
-                        range = c.lanes;
-                    }
-                    if (range > 0) { // a zero range divides by zero in the original
-                        lane = int8_t(lane + int32_t(random() % uint32_t(range)));
-                        if (spawn_enabled_) place_crossing(c, si, kind, lane, route, random);
-                    }
+    std::vector<size_t> order;
+    for (size_t i = 0; i < controllers_.size(); ++i)
+        if (controllers_[i].active) order.push_back(i);
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return controllers_[a].position_q8 > controllers_[b].position_q8;
+    });
+    for (size_t i : order) run_controller(i, back_q8, front_q8, tick, route, random);
+}
+
+void TrafficSystem::run_controller(size_t ci, int32_t back_q8, int32_t front_q8, uint32_t tick,
+                                   const std::vector<RouteSample>& route,
+                                   const std::function<uint32_t()>& random) {
+    auto& c = controllers_[ci];
+    if (!c.active || c.next_tick > int32_t(tick)) return;
+    const int32_t dt = int32_t(tick) - c.last_tick; // +0x18
+    c.last_tick = int32_t(tick);
+    c.next_tick = int32_t(tick) + 0x1e;
+    for (int slot = 0; slot < 4; ++slot) {
+        const int si = c.signals[slot];
+        if (si < 0) continue;
+        auto& s = signals_[size_t(si)];
+        s.accum += dt;
+        bool near = back_q8 + 0x100 <= s.position_q8 && s.position_q8 <= front_q8 - 0x200;
+        for (size_t k = 1; k < windows_.size(); ++k) // plan 34: any human's window
+            near = near || (windows_[k].front_q8 - 0x7f00 <= s.position_q8 &&
+                            s.position_q8 <= windows_[k].front_q8 - 0x200);
+        if (!(near && c.durations[s.phase] < s.accum)) continue;
+        do {
+            s.accum -= c.durations[s.phase];
+            if (++s.phase > 2) s.phase = 0;
+            if ((s.index & 1) && s.phase == 0 && (tick & 8)) {
+                int lane = 0, kind, range;
+                if (c.variant == 1) {
+                    range = int8_t(c.lanes) / 2;
+                    kind = s.index;
+                    if (s.index == 3) lane = range;
+                } else {
+                    kind = c.variant == 2 ? 3 : 1;
+                    range = c.lanes;
                 }
-            } while (c.durations[s.phase] < s.accum);
-        }
-        // 0x00437e60 window test after the think: 0x0041f1f0 parks the
-        // signals and the controller outside [back, front].
-        bool outside = front_q8 - c.position_q8 < 0 || c.position_q8 - back_q8 < 0;
-        for (size_t k = 1; k < windows_.size(); ++k)
-            outside = outside && (windows_[k].front_q8 - c.position_q8 < 0 ||
-                                  c.position_q8 - (windows_[k].front_q8 - 0x8000) < 0);
-        // 0x0041f1f0 marks the controller and its four signals through
-        // 0x00437c10; the next prepass (0x00437df0) unlinks them, so they are
-        // still listed on the teardown tick (traffic-field box capture: the
-        // controller at 109824 thinks on 3861 and is gone on 3862).
-        if (outside) c.pending_remove = true;
+                if (range > 0) { // a zero range divides by zero in the original
+                    lane = int8_t(lane + int32_t(random() % uint32_t(range)));
+                    if (spawn_enabled_) place_crossing(c, si, kind, lane, route, random);
+                }
+            }
+        } while (c.durations[s.phase] < s.accum);
     }
+    // 0x00437e60 window test after the think: 0x0041f1f0 parks the
+    // signals and the controller outside [back, front].
+    bool outside = front_q8 - c.position_q8 < 0 || c.position_q8 - back_q8 < 0;
+    for (size_t k = 1; k < windows_.size(); ++k)
+        outside = outside && (windows_[k].front_q8 - c.position_q8 < 0 ||
+                              c.position_q8 - (windows_[k].front_q8 - 0x8000) < 0);
+    // 0x0041f1f0 marks the controller and its four signals through
+    // 0x00437c10; the next prepass (0x00437df0) unlinks them, so they are
+    // still listed on the teardown tick (traffic-field box capture: the
+    // controller at 109824 thinks on 3861 and is gone on 3862).
+    if (outside) c.pending_remove = true;
 }
 
 void TrafficSystem::place_crossing(const IntersectionController& c, int signal, int kind, int lane,
@@ -939,7 +950,8 @@ void TrafficSystem::countdown_step(const std::vector<RouteSample>& route, int32_
 }
 
 bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_t front_q8,
-                                   const std::function<uint32_t()>& random, uint32_t tick) {
+                                   const std::function<uint32_t()>& random, uint32_t tick,
+                                   bool defer_controllers) {
     if (scheduled_tick_ && *scheduled_tick_ == tick) return false;
     scheduled_tick_ = tick;
     tick_ = tick;
@@ -965,7 +977,7 @@ bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_
             c = IntersectionController{};
         }
     if (!filled_) build_slices(route, front_q8, 0, tick);
-    think_intersections(front_q8 - 0x8000, front_q8, tick, route, random);
+    if (!defer_controllers) think_intersections(front_q8 - 0x8000, front_q8, tick, route, random);
     return true;
 }
 

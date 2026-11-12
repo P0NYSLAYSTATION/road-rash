@@ -365,8 +365,19 @@ void Race::accumulate(Rider& r, uint32_t from, uint32_t to, size_t from_sample, 
     // each sample, and the heading word swept by the sub-slice curvature.
     const auto& route = route_of(r);
     Bike& b = r.bike;
-    const auto& before = route[from_sample].path;
-    const auto& after = route[to_sample].path;
+    auto retained = [&](size_t sample) {
+        // +13c/+140 retain physical pointers into the 128-slice ring.
+        // A slow scheduler node can run once after its slice is reused,
+        // before 00437e60 marks it for removal. Its last move reads the
+        // replacement slice, not the historical route at its position.
+        const TrackRing* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr;
+        if (!ring) return sample;
+        const int64_t back = ring->back_q8() >> 8;
+        const int64_t physical = back + ((int64_t(sample) - back) & 127);
+        return physical >= 0 && uint64_t(physical) < route.size() ? size_t(physical) : sample;
+    };
+    const auto& before = route[retained(from_sample)].path;
+    const auto& after = route[retained(to_sample)].path;
     accumulate_road_motion(b, tables_, from, to, before.bend, before.rise, after.bend, after.rise);
 }
 
@@ -1113,7 +1124,27 @@ void Race::ring_statics(int32_t sample, uint32_t section, uint32_t local, const 
     // single roads, so the slice belongs to every road whose sample is the
     // same section sample. Frames resolve the slice's family selectors as
     // 0x0044b630 does when the slice is first drawn (+0x64 bit 4).
-    if (!static_frames_ || sample < 0) return;
+    if (sample < 0) return;
+    // 0045461f..00454649 inserts only strict interior BORR laterals.
+    // Geometry collisions still use the slice boxes; these type1/flags4
+    // nodes participate in list scans without contact or draw callbacks.
+    if (live_schedule_)
+        for (int road = 0; road < 2; ++road) {
+            if (size_t(sample) >= routes_[road]->size()) continue;
+            const auto& s = (*routes_[road])[size_t(sample)];
+            if (s.section != section || s.local != local) continue;
+            for (size_t i = 0; i < in.borr_count; ++i) {
+                const int32_t x = s.offset + in.borr[i];
+                if (x <= s.offset - s.path.left || x >= s.offset + s.path.right) continue;
+                auto slot = std::find_if(roadside_nodes_.begin(), roadside_nodes_.end(),
+                                         [](const RoadsideNode& n) { return !n.active; });
+                if (slot == roadside_nodes_.end()) break;
+                *slot = {true, false, sample * 256 + 0x80, x * 256, ticks_, ticks_ - 20,
+                         road, ++roadside_order_};
+            }
+            break; // a single physical sub-slice can belong to both routes
+        }
+    if (!static_frames_) return;
     for (int road = 0; road < 2; ++road) {
         auto& table = statics_[road];
         if (size_t(sample) >= table.size()) continue;
@@ -2606,6 +2637,7 @@ void Race::build_scan_list() const {
     // Rider bikes then halves (0x00405990 creates bike then half), riders in
     // build order (player first, 0x00405600). Pedestrians carry their own
     // creation order: ring-setup spawns precede the riders.
+    scan_.swap(scan_previous_);
     scan_.clear();
     for (size_t i = 0; i < std::min(riders_.size(), built_riders_); ++i) {
         const Rider& r = riders_[i];
@@ -2687,6 +2719,19 @@ void Race::build_scan_list() const {
             scan_.push_back(o);
         }
     }
+    for (size_t i = 0; i < roadside_nodes_.size(); ++i) {
+        const auto& n = roadside_nodes_[i];
+        if (!n.active) continue;
+        const auto& road = *routes_[n.route];
+        ScanObject o;
+        o.position = n.position;
+        o.lateral = n.lateral;
+        o.type = 1;
+        o.order = 0x40000000u + n.order;
+        o.roadside = int(i);
+        o.sample = &road[std::min(size_t(n.position >> 8), road.size() - 1)];
+        scan_.push_back(o);
+    }
     // Live scheduler: rider nodes keep the list order of the last
     // 0x004383e0 sort (the scans walk links, which a pass does not reorder),
     // keyed by their position at that sort; other objects by position.
@@ -2706,13 +2751,27 @@ void Race::build_scan_list() const {
             for (auto& o : scan_)
                 if (o.rider == n.rider && o.type == n.type) {
                     o.key = n.sorted;
-                    o.rank = count - 1 - k;
                 }
         }
     }
+    // 004383e0 swaps only strictly reversed positions. Preserve the prior
+    // mixed list at equal positions, including car/rider and pedestrian ties.
+    // New nodes (00438aa0) are inserted after existing equal nodes on +0.
+    for (auto& o : scan_) {
+        const auto previous =
+            std::find_if(scan_previous_.begin(), scan_previous_.end(), [&](const ScanObject& p) {
+                return p.type == o.type && p.order == o.order && p.rider == o.rider && p.car == o.car &&
+                       p.pedestrian == o.pedestrian && p.roadside == o.roadside;
+            });
+        o.rank = previous == scan_previous_.end() ? -1 : int(previous - scan_previous_.begin());
+    }
     std::stable_sort(scan_.begin(), scan_.end(), [](const ScanObject& a, const ScanObject& b) {
         if (a.key != b.key) return a.key < b.key;
-        if (a.rank >= 0 && b.rank >= 0) return a.rank < b.rank;
+        if (a.rank >= 0 || b.rank >= 0) {
+            if (a.rank < 0) return false;
+            if (b.rank < 0) return true;
+            return a.rank < b.rank;
+        }
         return a.order < b.order;
     });
 }
@@ -3889,6 +3948,31 @@ RaceSnapshot Race::snapshot() const {
     // set (missing field = FAIL). No RNG, no allocation in the tick path
     // beyond the field vector the snapshot already builds.
     if (traffic_) traffic_->append_snapshot(out.fields);
+    if (live_schedule_) {
+        out.fields.push_back({"roadside.creation", roadside_order_});
+        for (size_t i = 0; i < roadside_nodes_.size(); ++i) {
+            const auto& n = roadside_nodes_[i];
+            const auto p = "roadside." + std::to_string(i) + ".";
+            out.fields.push_back({p + "active", n.active});
+            if (!n.active) continue;
+            out.fields.push_back({p + "pending_remove", n.pending_remove});
+            out.fields.push_back({p + "position", n.position});
+            out.fields.push_back({p + "lateral", n.lateral});
+            out.fields.push_back({p + "next_tick", n.next_tick});
+            out.fields.push_back({p + "last_tick", n.last_tick});
+            out.fields.push_back({p + "route", n.route});
+            out.fields.push_back({p + "order", n.order});
+        }
+    }
+    // Stable mixed-object order affects the next scan/contact at equal
+    // positions, so it is simulation state rather than a disposable cache.
+    if (live_schedule_)
+        for (size_t i = 0; i < scan_.size(); ++i) {
+            const auto p = "scan_order." + std::to_string(i) + ".";
+            out.fields.push_back({p + "type", scan_[i].type});
+            out.fields.push_back({p + "creation", scan_[i].order});
+            out.fields.push_back({p + "key", scan_[i].key});
+        }
     return out;
 }
 
@@ -4498,6 +4582,16 @@ void Race::countdown_step() {
     if (live_schedule_) {
         schedule_pass(0, true);
         sort_schedule();
+        // 004383b6 invokes the contact pass even on the initial ticks
+        // with zero controls. Hiway's grid overlaps a pedestrian here.
+        collide_riders();
+        collide_car_statics();
+        for (auto& rider : riders_) {
+            collide_traffic(rider);
+            collide_traffic_half(rider);
+        }
+        collide_pedestrians();
+        sort_schedule();
         parked_pace_band();
         prepare_static_boxes();
         update_traffic_windows(false);
@@ -4548,10 +4642,8 @@ void Race::collide_riders() {
     // Runtime flags are the template byte | 4: bikes and pedestrians (3)
     // take both roles; uncrashed halves (4) take neither, crashed halves
     // (7) take both. Free cars stay in
-    // collide_traffic (not in this walk: their list order is approximate);
-    // pedestrian pairs never contact: 0x004368f0 gates every pair on
-    // (cat_a & cat_b & 3) != 0, and pedestrians are type 0x20 (& 3 == 0),
-    // so two pedestrians pass through each other in the original too.
+    // collide_traffic. The shared-half test at 004369b7 reads slice+36,
+    // not object type: two pedestrians on the same roadway do contact.
     build_scan_list();
     auto bike_of = [&](const ScanObject& o) -> Bike& {
         if (o.rider >= 0) {
@@ -4684,6 +4776,12 @@ void Race::collide_riders() {
                 Pedestrian& p = pedestrians_->pool()[size_t(a.rider >= 0 ? b.pedestrian : a.pedestrian)];
                 if (!r.finished && r.bike.i32(0x2f4) == 0)
                     contact_rider_pedestrian(r, p, a.rider >= 0); // 0x004049c0 rejects crashed riders
+            } else {
+                auto& first = pedestrians_->pool()[size_t(a.pedestrian)];
+                auto& second = pedestrians_->pool()[size_t(b.pedestrian)];
+                separate(first.body, 0x20, second.body, 0x20);
+                hit_pedestrian(first, second.body.bike.i32(0xec), false, false);
+                hit_pedestrian(second, first.body.bike.i32(0xec), false, false);
             }
         }
     }
@@ -4869,6 +4967,15 @@ void Race::step(std::span<const uint32_t> words) {
         std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"));
     auto phase = [&](const char* label) {
         if (trace) std::fprintf(stderr, "phase %d %s rng %u\n", ticks_, label, seed_);
+        if (trace && std::getenv("RR_SIM_TRACE_RIDER")) {
+            const size_t i = size_t(std::atoi(std::getenv("RR_SIM_TRACE_RIDER")));
+            if (i < riders_.size()) {
+                const auto& r = riders_[i];
+                std::fprintf(stderr, "body %zu %s pos %d lat %d speed %d steer %d rate %d crash %d\n", i,
+                             label, r.bike.i32(0x1c), r.bike.i32(0x28), r.bike.i32(0xec), r.bike.i32(0x288),
+                             r.bike.i32(0xf0), r.bike.i32(0x2f4));
+            }
+        }
     };
     phase("start");
 

@@ -97,6 +97,24 @@ class Tooling(unittest.TestCase):
         self.assertEqual(info['control_branch'], 'human')
         self.assertLess(peak, 2 * 1024 * 1024)
 
+    def test_finish_evidence_distinguishes_wreck_and_frame_limit(self):
+        base = trace(0).replace('frame\t0\n', 'frame\t0\ncapture.until_finish\t1\n')
+        p = self.write('finish.tsv', base)
+        for outcome, finished in [(1, 0), (2, 1), (3, 1), (4, 0), (5, 0)]:
+            p.write_text(base.replace('end\n', f'capture.finished\t{finished}\ncapture.outcome\t{outcome}\nend\n'))
+            info = validate_trace(p, True)
+            self.assertTrue(info['whole_race_requested'])
+            self.assertEqual(info['race_finished'], outcome in (2, 3))
+        for ending in ['', 'capture.finished\t1\ncapture.outcome\t4\n']:
+            p.write_text(base.replace('end\n', ending + 'end\n'))
+            with self.assertRaises(ValueError):
+                validate_trace(p, True)
+
+    def test_rng_caller_overflow_rejects_capture(self):
+        p = self.write('overflow.tsv', trace(0).replace('end\n', '# RNG caller log overflow: capture rejected\nend\n'))
+        with self.assertRaisesRegex(ValueError, 'instrumentation failure'):
+            validate_trace(p, True)
+
     def test_resource_overlap_live_owner_and_explicit_release(self):
         claims = ResourceClaims()
         token = claims.acquire('first', [self.root / 'build'])

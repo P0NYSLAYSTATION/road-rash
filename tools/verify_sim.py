@@ -49,7 +49,7 @@ def classify(code, output, rule, digest):
     return 'unexpected-failure'
 
 
-def verify(binary, fixtures, assets, mode='acceptance', rules=None, timeout=120, driver='demo'):
+def verify(binary, fixtures, assets, mode='acceptance', rules=None, timeout=120, driver='demo', whole_race=False):
     outcomes = []
     for fixture in fixtures:
         row = {'fixture': str(fixture), 'mode': mode}
@@ -58,6 +58,8 @@ def verify(binary, fixtures, assets, mode='acceptance', rules=None, timeout=120,
             info = validate_trace(fixture, True)
             if info['exe_sha256'] not in {reference_hash(),COMPATIBLE_SHA}:raise ValueError('Unrecognized reference runtime executable')
             row.update(info)
+            if whole_race and (not info['race_finished'] or info['tick_start'] != 1):
+                raise ValueError('whole-race acceptance requires tick1 through an original finish outcome')
             if mode == 'acceptance':
                 receipt_path = Path(str(fixture) + '.receipt.json')
                 receipt = json.loads(receipt_path.read_text())
@@ -92,6 +94,7 @@ def verify(binary, fixtures, assets, mode='acceptance', rules=None, timeout=120,
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--mode', choices=['diagnostic', 'acceptance'], default='acceptance')
+    p.add_argument('--whole-race', action='store_true', help='require start-to-finish evidence, not a tick-limited prefix')
     p.add_argument('--driver', default=None,
                    help='driver axis for the replay binary (human|demo); default is '
                         'human for acceptance (which requires a human capture) and '
@@ -112,7 +115,8 @@ def main():
         fixtures = args.fixture or [directory / 'sched-human-cov2-20261017.tsv']
         driver = args.driver or 'human'
     rules = json.loads(args.rules.read_text())
-    report, code = verify(args.binary.resolve(), fixtures, args.assets.resolve(), args.mode, rules, driver=driver)
+    report, code = verify(args.binary.resolve(), fixtures, args.assets.resolve(), args.mode, rules,
+                          driver=driver, whole_race=args.whole_race)
     if args.report:
         atomic_json(args.report, report)
     print(json.dumps(report, indent=2))

@@ -20,13 +20,17 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
     count, tick0, last_tick, seed = 0, None, None, None
     branches = set()
     measured, last_count, max_count = True, -1, -1
+    until_finish, finished, outcome = False, None, None
 
     def finish_frame():
         nonlocal count, tick0, last_tick, seed, measured, last_count, max_count
+        nonlocal until_finish, finished, outcome
         if current is None:
             return
         if count == 0:
             tick0, seed = current.get('tick'), current.get('seed')
+            until_finish = current.get('capture.until_finish') == 1
+        finished, outcome = current.get('capture.finished'), current.get('capture.outcome')
         if simulation and not {'tick', 'rng', 'controls', 'rider.0.position', 'rider.0.speed'} <= current.keys():
             raise ValueError(f'simulation frame {count} lacks required fields')
         if tick0 is not None and current.get('tick') != tick0 + count:
@@ -45,7 +49,8 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
             line = raw.rstrip('\r\n')
             if not line or line.startswith('#'):
                 if any(x in line.lower() for x in ['patch verification failed', 'patch installation failed',
-                                                   'ordinal 2 not found', 'invalid rr_oracle', 'startup dialog:']):
+                                                   'ordinal 2 not found', 'invalid rr_oracle', 'startup dialog:',
+                                                   'rng caller log overflow']):
                     raise ValueError('oracle instrumentation failure: ' + line)
                 continue
             if ended:
@@ -82,6 +87,9 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
         raise ValueError('different reference executable')
     if expected_frames is not None and count != expected_frames:
         raise ValueError(f'frame count {count} != expected {expected_frames}')
+    if until_finish and (finished not in (0, 1) or outcome not in (1, 2, 3, 4, 5)
+                         or bool(finished) != (outcome in (2, 3))):
+        raise ValueError('missing/inconsistent whole-race termination evidence')
     branch = 'human' if branches == {0} else 'demo' if branches == {1} else 'unverified'
     if branch == 'human' and header['exe'] == 'b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563':
         if not measured or max_count <= 0:
@@ -89,7 +97,9 @@ def validate_trace(path, simulation=False, expected_exe=None, expected_frames=No
     return {'schema': 'rr-oracle 1', 'exe_sha256': header['exe'],
             'scenario': header['scenario'], 'frames': count, 'tick_start': tick0,
             'tick_end': last_tick, 'seed': seed,
-            'control_branch': branch, 'trace_sha256': sha256(path), 'complete': True}
+            'control_branch': branch, 'trace_sha256': sha256(path), 'complete': True,
+            'whole_race_requested': until_finish, 'race_finished': until_finish and finished == 1,
+            'race_outcome': outcome}
 
 
 def reference_hash():

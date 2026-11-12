@@ -1,5 +1,26 @@
 # Binary evidence and next work
 
+## November 12, 2026 — resource buffers and scheduler nodes
+
+Working-install disassembly confirms 00441445 tests a pedestrian's cached RRAN
+header, not selector/family identity. 004155e5 copies into a reusable slot buffer
+without clearing its unused tail. Hiway180->182 preserves the RRAN at146528
+because the new payload ends112744; the RRAN at112172 is overwritten. Untouched
+slots also persist across section boundaries. Exact replay corrections and
+resource-timeline limits are recorded in
+[the residency handoff](agent-handoffs/parity-residency-20261112.md).
+
+004394ee reads curvature through retained physical slice+140. A delayed actor
+can execute after its128-slot ring cell is reused, before its final window
+removal. Hiway643's old sample50 then reads physical sample178, accounting for
+heading4187616 rather than4194912.
+
+0045461f..00454649 inserts template00476cb8 nodes only for BORR laterals strictly
+inside the road edges. The20-slot pool has type1, flags4 after insertion, null
+callbacks and fixed interval20. It participates in AI scans, though the contact
+flag gates exclude it. 0045312f branches to0045363f/00453645 to emit5/6 on each
+interior split/merge-window slice in either traversal direction.
+
 ## Reference binary
 
 `cdrom/ROADRASH/ROADRASH.EXE` on the supplied 1997 rerelease disc:

@@ -26,6 +26,7 @@ namespace rr {
 struct RingActor {
     int32_t ring_sample = 0;
     uint32_t position_q8 = 0, word0 = 0, word1 = 0, section = 0, local = 0;
+    int32_t road_offset = 0; // the physical sub-slice +cc, including the opposite split half
 };
 // Value-only walker snapshots for optional original terrain diagnostics.
 // Collidable roadside objects of one ring slice (0x00454240): the BORR
@@ -89,6 +90,9 @@ class TrackRing {
     void advance(int32_t delta_q8, const Random&, const ActorSink&);
     int32_t front_q8() const { return front_; }
     int32_t back_q8() const { return back_; }
+    uint8_t slice_event(int32_t position_q8) const {
+        return slice_events_[size_t((uint32_t(position_q8) >> 8) & 127)];
+    }
     bool unsupported() const { return unsupported_; }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
@@ -162,7 +166,10 @@ class TrackRing {
     const Random* random_ = nullptr;                       // stream for the current call
     Random forward_;                                       // TerrainIterator's source
     Walker front_walker_, back_walker_;
-    std::map<uint32_t, Window> windows_;
+    // Built once during setup, then read-only during traversal. Snapshots
+    // share it; copying std::map reallocates every cached node under MSVC.
+    using WindowCache = std::map<uint32_t, Window>;
+    std::shared_ptr<WindowCache> windows_ = std::make_shared<WindowCache>();
     int32_t front_ = 0, back_ = 0;
     bool branch_committed_ = false;
     uint8_t chosen_half_ = 0;

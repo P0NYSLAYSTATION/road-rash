@@ -142,7 +142,10 @@ def capture(args):
                         if sha256(install/'AWEMAN32.DLL')!=dll_hash:raise ValueError('Capture DLL changed during execution')
                         if input_path and sha256(input_path)!=input_hash:raise ValueError('Controls changed during execution')
                         info=validate_trace(trace,env.get('RR_ORACLE_SIM','0')!='0',
-                            profile['runtime_exe_sha256'],int(env['RR_ORACLE_FRAMES']) if env.get('RR_ORACLE_FRAMES') else None)
+                            profile['runtime_exe_sha256'],int(env['RR_ORACLE_FRAMES'])
+                            if env.get('RR_ORACLE_FRAMES') and env.get('RR_ORACLE_UNTIL_FINISH','0')=='0' else None)
+                        if env.get('RR_ORACLE_FRAMES') and info['frames'] > int(env['RR_ORACLE_FRAMES']):
+                            raise ValueError('Capture exceeded requested tick limit')
                         if record and not controls.is_file():raise ValueError('Recorded controls missing')
                         if env.get('RR_ORACLE_HUMAN','0')!='0' and info['control_branch']!='human':
                             raise ValueError('Capture does not prove execution of the original human-control branch')

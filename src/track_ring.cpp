@@ -155,7 +155,7 @@ void TrackRing::probe_window(uint32_t offset, int32_t direction) {
         }
         measure(i);
     }
-    windows_[offset] = {std::move(half), uint8_t(active), dx_sep, x_sep, threshold};
+    (*windows_)[offset] = {std::move(half), uint8_t(active), dx_sep, x_sep, threshold};
 }
 
 void TrackRing::Borr::load(int32_t index) {
@@ -295,8 +295,8 @@ void TrackRing::step(Walker& w, int32_t delta) {
         const auto& road = node_of(*course_, old_node);
         const auto& window = node_of(*course_, delta > 0 ? road.next : road.previous);
         w.window = window.offset;
-        const auto cache = windows_.find(window.offset);
-        w.countdown = cache == windows_.end() ? 0 : cache->second.threshold;
+        const auto cache = windows_->find(window.offset);
+        w.countdown = cache == windows_->end() ? 0 : cache->second.threshold;
         if ((delta > 0 && window.kind == 1) || (delta < 0 && window.kind == 2)) {
             enter(w.halves[0], window.next, delta > 0);
             enter(w.halves[1], window.previous, delta > 0);
@@ -341,8 +341,9 @@ void TrackRing::step(Walker& w, int32_t delta) {
         if (crossing) {
             const auto& window = node_of(*course_, w.window);
             const auto& half = w.halves[w.active];
+            // 0045312f ->0045363f/00453645, for either direction.
+            w.event = window.kind == 1 ? 5 : 6;
             if (delta < 0) {
-                w.event = window.kind == 1 ? 5 : 6;
                 w.countdown += window.kind == 1 ? 1 : -1;
                 if (window.kind == 1 && (half.position & ~0xff) == 0) w.event = 2;
                 if (window.kind == 2 &&
@@ -371,7 +372,7 @@ void TrackRing::step(Walker& w, int32_t delta) {
             const bool reenter = delta > 0 ? window.kind == 2 && int32_t(road.length) - 81 == sample
                                            : window.kind == 1 && (half.position & ~0xff) == 0x5100;
             if (reenter) {
-                const auto& cache = windows_.at(window.offset);
+                const auto& cache = windows_->at(window.offset);
                 const uint8_t active = uint8_t(window.previous == half.node);
                 if (active) w.halves[1] = w.halves[0];
                 w.halves[active ^ 1] = cache.halves[active ^ 1];
@@ -493,7 +494,8 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
             continue;
         }
         const uint32_t jitter = (*random_)();
-        const RingActor actor{ring_q8 >> 8, local * 0x100u + (r[1] >> 24), r[0], r[1], node.link, local};
+        const RingActor actor{ring_q8 >> 8, local * 0x100u + (r[1] >> 24), r[0], r[1], node.link, local,
+                              w.offset};
         if (sink) sink(actor, jitter);
         auto& mine = events_mut(w.dzhr.node).records; // copy-on-write: a snapshot may share it
         mine[i][0] |= 0x3f00u;
@@ -503,6 +505,7 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
 }
 
 void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sink) {
+    windows_ = std::make_shared<WindowCache>();
     random_ = &random;
     std::vector<uint32_t> visited;
     jitter_events(course_->root, visited, random);

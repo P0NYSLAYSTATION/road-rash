@@ -128,6 +128,14 @@ void Race::sort_schedule() {
     std::stable_sort(schedule_.begin(), schedule_.end(),
                      [](const ScheduleNode& a, const ScheduleNode& b) { return a.position > b.position; });
     for (auto& n : schedule_) n.sorted = n.position;
+    car_scan_keys_.clear();
+    if (traffic_)
+        for (const auto& car : traffic_->cars()) car_scan_keys_.push_back(car.position);
+    ped_scan_keys_.clear();
+    if (pedestrians_)
+        for (const auto& p : pedestrians_->pool()) ped_scan_keys_.push_back(p.body.bike.i32(0x1c));
+    // Retain mixed-list tie order even on ticks where no AI scan runs.
+    build_scan_list();
 }
 
 int32_t live_interval(bool slice, int32_t position, int32_t ring_camera, int32_t speed, int32_t tick,
@@ -189,33 +197,41 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
     // param_3 = (+0x2c != 0) sampled before the call.
     std::vector<ScheduleNode> order = schedule_order();
     const int32_t camera = ring_ ? ring_->front_q8() - 0x5000 : int32_t(previous_camera_position_) + 0x100;
-    std::vector<std::pair<int32_t, size_t>> cars;
+    // 00438170 walks one list. In particular, controller rand() draws
+    // must occur between rider thinks at the controller's position.
+    struct ActorNode {
+        int32_t position;
+        uint32_t type;
+        size_t index;
+    };
+    std::vector<ActorNode> actors;
+    for (size_t i = 0; i < roadside_nodes_.size(); ++i) {
+        auto& n = roadside_nodes_[i];
+        if (n.pending_remove) n = {};
+        if (n.active && n.next_tick <= ticks_) actors.push_back({n.position, 1, i});
+    }
+    std::vector<uint32_t> seen_cars;
     car_scan_keys_.clear();
     update_traffic_windows(false);
-    if (traffic_ &&
-        traffic_->begin_schedule(
-            route_of(riders_[0]), camera + 0x5000, [this] { return random(); }, uint32_t(ticks_))) {
+    const bool traffic_pass = traffic_ && traffic_->begin_schedule(
+                                              route_of(riders_[0]), camera + 0x5000,
+                                              [this] { return random(); }, uint32_t(ticks_), true);
+    if (traffic_pass) {
         const auto& pool = traffic_->cars();
-        for (const auto& c : pool) car_scan_keys_.push_back(c.position);
-        for (size_t i = 0; i < pool.size(); ++i)
-            if (pool[i].active) cars.push_back({pool[i].position, i});
-        std::stable_sort(cars.begin(), cars.end(),
-                         [](const auto& a, const auto& b) { return a.first > b.first; });
-    }
-    size_t car = 0;
-    auto run_cars = [&](int32_t position) {
-        while (car < cars.size() && cars[car].first >= position) {
-            prepare_traffic_obstacles();
-            const auto& player = riders_[0];
-            traffic_->run_car(
-                cars[car++].second, route_of(player), camera, camera + 0x5000, player.bike.i32(0x1c),
-                player.bike.i32(0x28), [this] { return random(); }, uint32_t(ticks_), player.bike.i32(0x108));
+        seen_cars.resize(pool.size());
+        for (size_t i = 0; i < pool.size(); ++i) {
+            car_scan_keys_.push_back(pool[i].position);
+            if (pool[i].active) {
+                seen_cars[i] = pool[i].serial;
+                actors.push_back({pool[i].position, 0x10, i});
+            }
         }
-    };
-    // Pedestrian nodes (+0x20) sit in the same position-sorted ring: the walk
-    // meets them at their +0x1c among the bikes (0x00438170 walks one list).
-    // 0x00437df0 (the scheduler's prepass) removes last tick's marked nodes.
-    std::vector<std::pair<int32_t, size_t>> peds;
+        const auto& controllers = traffic_->controllers();
+        for (size_t i = 0; i < controllers.size(); ++i)
+            if (controllers[i].active && controllers[i].next_tick <= ticks_)
+                actors.push_back({controllers[i].position_q8, 0x400, i});
+    }
+    // 00437df0 unlinks last tick's marked pedestrians before dispatch.
     ped_scan_keys_.clear();
     if (pedestrians_) {
         for (auto& p : pedestrians_->pool())
@@ -223,23 +239,57 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
                 p.active = false;
                 p.pending_remove = false;
             }
-        for (const auto& p : pedestrians_->pool()) {
+        for (size_t i = 0; i < pedestrians_->pool().size(); ++i) {
+            const auto& p = pedestrians_->pool()[i];
             ped_scan_keys_.push_back(p.body.bike.i32(0x1c));
-            if (p.active && p.next_tick <= ticks_)
-                peds.push_back({p.body.bike.i32(0x1c), size_t(&p - pedestrians_->pool().data())});
+            if (p.active && p.next_tick <= ticks_) actors.push_back({p.body.bike.i32(0x1c), 0x20, i});
         }
     }
-    std::stable_sort(peds.begin(), peds.end(),
-                     [](const auto& a, const auto& b) { return a.first > b.first; });
-    size_t ped = 0;
-    auto run_peds = [&](int32_t position) {
-        while (ped < peds.size() && peds[ped].first >= position)
-            run_ped_node(pedestrians_->pool()[peds[ped++].second]);
+    auto sort_actors = [&] {
+        std::stable_sort(actors.begin(), actors.end(),
+                         [](const ActorNode& a, const ActorNode& b) { return a.position > b.position; });
+    };
+    sort_actors();
+    auto run_actors = [&](int32_t position) {
+        while (!actors.empty() && actors.front().position >= position) {
+            const ActorNode n = actors.front();
+            actors.erase(actors.begin());
+            if (n.type == 1) {
+                auto& solid = roadside_nodes_[n.index];
+                solid.last_tick = ticks_;
+                solid.next_tick = ticks_ + 20; // null move preserves template interval
+                if (outside_windows(solid.position, 0, 0)) {
+                    solid.pending_remove = true;
+                    solid.last_tick = solid.next_tick = ticks_ + 100;
+                }
+            } else if (n.type == 0x20) {
+                run_ped_node(pedestrians_->pool()[n.index]);
+            } else if (n.type == 0x400) {
+                traffic_->run_controller(n.index, camera - 0x3000, camera + 0x5000, uint32_t(ticks_),
+                                         route_of(riders_[0]), [this] { return random(); });
+                // 00438aa0 inserts newly spawned cars in the live list. Only
+                // those behind this cursor are visited during the same pass.
+                const auto& pool = traffic_->cars();
+                for (size_t i = 0; i < pool.size(); ++i)
+                    if (pool[i].active && seen_cars[i] != pool[i].serial) {
+                        seen_cars[i] = pool[i].serial;
+                        car_scan_keys_[i] = pool[i].position;
+                        if (pool[i].position < n.position) actors.push_back({pool[i].position, 0x10, i});
+                    }
+                sort_actors();
+            } else {
+                prepare_traffic_obstacles();
+                const auto& player = riders_[0];
+                traffic_->run_car(
+                    n.index, route_of(player), camera, camera + 0x5000, player.bike.i32(0x1c),
+                    player.bike.i32(0x28), [this] { return random(); }, uint32_t(ticks_),
+                    player.bike.i32(0x108));
+            }
+        }
     };
     for (size_t at = 0; at < order.size(); ++at) {
         const ScheduleNode n = order[at];
-        run_cars(n.position);
-        run_peds(n.position);
+        run_actors(n.position);
         Rider& r = riders_[size_t(n.rider)];
         if (n.type == 8) {
             if (r.half_sched_next <= ticks_) run_half_node(r, word(r), countdown);
@@ -259,8 +309,7 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
             if (!found && at > 0) --at; // the current node was unlinked: the next one shifts into its slot
         }
     }
-    run_cars(INT32_MIN);
-    run_peds(INT32_MIN);
+    run_actors(INT32_MIN);
     // 0x00438170, 0x00438385..0x004383a2: human play forces the
     // player's bike and half due next tick, retaining their LOD +0x14.
     // Plan 34 applies the same rule to each human seat.

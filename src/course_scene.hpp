@@ -18,6 +18,7 @@ class UpscaleCache;
 // (0x0040b6a0). Resources 2/3 are 'MROF' voices: big-endian word +8 is the
 // speech argument 0x00440730 byte-swaps for sound event 0x16 (-1 if absent).
 struct PedestrianLook {
+    uint32_t graphics_offset = 0; // RRAN address relative to the reusable family-slot buffer
     Animation graphics;
     ActorGraphicsGroups views;
     ActorAnimationBank bank;
@@ -76,6 +77,14 @@ class CourseScene {
     // sample; nullptr when resource 0 or 1 is missing (0x00440680 then
     // never loads or draws the pedestrian).
     const PedestrianLook* pedestrian_look(uint32_t section, uint32_t local, uint8_t selector) const;
+    // 00441445 tests the cached RRAN header, including bytes beyond a shorter
+    // replacement's end; changing the selector's current family is insufficient.
+    bool pedestrian_graphics_valid(uint32_t section, uint32_t local, uint8_t selector,
+                                     const PedestrianLook&) const;
+    const PedestrianLook* pedestrian_look(const std::vector<RouteSample>&, size_t sample,
+                                           uint8_t selector) const;
+    bool pedestrian_graphics_valid(const std::vector<RouteSample>&, size_t sample, uint8_t selector,
+                                     const PedestrianLook&) const;
     // Marking flag 0x40 on a mountain sample: drawn as a tunnel (type 3).
     bool tunnel(uint32_t section, uint32_t local) const;
     // 0x0041c200 rail height ((1<<+0x1b)<<+0x19)*4 of the sample's CESR
@@ -83,6 +92,7 @@ class CourseScene {
     int32_t rail_height(uint32_t section, uint32_t local) const;
 
   private:
+    const PedestrianLook* pedestrian_family_look(uint16_t family, uint8_t selector) const;
     const CelTexture* tunnel_material(uint32_t section, uint32_t local, uint8_t selector, uint32_t lit,
                                       uint8_t kind, int32_t width, int32_t height) const;
     int32_t sine(int32_t angle) const;
@@ -98,6 +108,11 @@ class CourseScene {
     std::vector<std::vector<TerrainSlice>> terrain_;
     std::map<std::pair<uint32_t, uint32_t>, TerrainSlice> base_saved_; // originals of ring-written samples
     std::vector<std::vector<std::array<uint16_t, 4>>> family_slots_;
+    struct FamilyTimeline {
+        std::vector<FamilyEvent> events;
+        int32_t forward_bias = 0;
+    };
+    std::vector<FamilyTimeline> family_timelines_;
     std::map<uint32_t, Family> families_;
     RoadMaterials roads_;
     Cel water_; // GLOBAL.RSC CEL 0x10, cliff-foot water (0x0040d030)

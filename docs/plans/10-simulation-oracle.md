@@ -1,5 +1,16 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## Windows continuation — November 12, 2026
+
+Strict replay of the completed Hiway human recording now matches ticks1..6006
+including RNG. First remaining gap6007 is graph-relative finish distance on an
+opponent's alternate branch; original227708/native232828. Complete all-track
+start-to-finish parity remains open. No reanchor or golden change was used.
+Resource/header lifetime, circular-slice, in-road scenery pool and split event
+findings are in [the current handoff](../agent-handoffs/parity-residency-20261112.md).
+Independent moving Napa1259 and City1251 divergences remain. Full original RNG
+caller logging now retains all52,137 calls in the completed14,084-tick capture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Read [00-INDEX.md](00-INDEX.md) first.
 
 **Goal:** Make the original game produce deterministic per-tick traces of every rider, bike and car from a fixed seed and a recorded control stream. Replay the same seed and controls through `rr::Race`, and find and fix every divergence in physics, AI racing, contact, combat and traffic.

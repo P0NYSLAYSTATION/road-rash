@@ -1,5 +1,43 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — scheduler/resource progress gate
+
+Current Release build: `powershell -ExecutionPolicy Bypass -File
+tools/build-local.ps1 -Configuration Release` exits0
+(`build/parity-progress-release-build.log`). Full normal-host native gate with
+`RR_ASSETS=E:/RR`, `ctest --test-dir build/release --output-on-failure`: 141
+registered,106 passed,35 explicit corpus/platform skips,0 failed
+(`build/parity-progress-release-tests.log`). The restricted run's file/network
+errors are not acceptance evidence; a non-live snapshot field-count regression
+found there was corrected before the successful host gate.
+
+Strict single-anchor regression: Napa expanded human2400 and City signal600
+both pass (`build/parity-progress-release-corpus.json`). Exact completed Hiway
+capture now matches ticks1..6006, first failure6007: native rider2 finish
+distance232828 versus original227708
+(`build/hiway-streamed-rng-inherited-families.json`). No reanchor or altered
+golden was used. This does not pass whole-race acceptance.
+
+Focused real-asset regressions cover retained RRAN tail bytes, cross-section
+slot inheritance, the final pedestrian move through a reused road slice,
+pre-green overlap and the20-node in-road scenery pool. Synthetic regressions
+cover controller ordering, equal-key scan order, circular owner-link markers
+and split-window events. The save/load finish test now follows the pavement
+and replays identical recorded controls, with its finish/hash assertions intact.
+
+## November 12, 2026 — streamed RNG caller log
+
+`build/streamed-rng-full-race-verification.json` records the completed original
+Hiway capture: 14,084 ticks, finish outcome 3, 52,137 caller entries numbered
+continuously from 0 to 52,136, no overflow, and working-install DLL restoration.
+The count reconciles to 8,848 pre-tick entries plus 43,289 in-race calls.
+Trace SHA-256: `0fe2e9d7dd984990c528ee4b05cf80015c37b2e7a84b2c442e0b524e27d5975d`.
+Per-tick flushing preserves these entries in the trace while resetting only
+the RAM buffer. The overflow rejection regression passes in
+`build/streamed-rng-tooling-tests.log` (24 tests, 2 explicit skips).
+These existing results verify capture completeness; they do not establish
+start-to-finish native parity.
+
 ## Windows fork — November 7, 2026
 
 `powershell -ExecutionPolicy Bypass -File tools/build-local.ps1 -Configuration Release`

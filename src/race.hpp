@@ -329,6 +329,14 @@ struct RaceSnapshot {
 // and the chase camera (0x00437c30) on rider 0, the player.
 class Race {
   public:
+    // 00476ce8: in-road BORR nodes, template00476cb8, no callbacks.
+    struct RoadsideNode {
+        bool active = false, pending_remove = false;
+        int32_t position = 0, lateral = 0, next_tick = 0, last_tick = 0;
+        int route = 0;
+        uint32_t order = 0;
+    };
+    const std::array<RoadsideNode, 20>& roadside_nodes() const { return roadside_nodes_; }
     // route_a/route_b: make_route(course,false/true). Identical up to the first split.
     // road_base_q8: absolute Q8 anchor of the route. The original sub-slice
     // +0xcc is absolute while RouteSample::offset accumulates from 0 at the
@@ -679,14 +687,21 @@ class Race {
         int32_t position = 0, lateral = 0, speed = 0; // +0x1c, +0x28, +0x108
         uint32_t type = 0, order = 0;
         int32_t key = 0; // list key: +0x1c, or for live-scheduled riders the position at the last sort
-        int rank = -1;   // live-scheduled riders: ascending list rank
-        int rider = -1, pedestrian = -1, car = -1;
+        int rank = -1;   // ascending mixed-node order at the last sort
+        int rider = -1, pedestrian = -1, car = -1, roadside = -1;
         const RouteSample* sample = nullptr; // the object's slice (+0x2c)
     };
     void build_scan_list() const;
     int scan_find(int rider, uint32_t type) const;
     int scan_next(int from, uint32_t mask, bool forward, int32_t window) const; // 0x00449ce0
     int32_t half_x(const Rider& r) const { return r.half_detached ? r.half_lateral : r.bike.i32(0x28); }
+    int32_t player_half_position() const {
+        const auto& p = riders_[0];
+        return p.crash_active    ? p.crash_actor.motion.i32(0x1c)
+               : live_schedule_  ? p.half_mirror.position
+               : p.half_detached ? p.half_position
+                                 : p.bike.i32(0x1c);
+    }
     void ai_state_follow(Rider&); // 0x00409ca0 (state 4; state 3 starts with it)
     void ai_state_shadow(Rider&); // 0x0040a560 (state 6)
     void ai_think(Rider&);
@@ -816,8 +831,9 @@ class Race {
     std::vector<int32_t> car_scan_keys_; // list positions retained across this scheduler pass
     std::vector<int32_t> ped_scan_keys_;
     mutable std::vector<ScanObject> scan_; // reused by build_scan_list (no tick allocation after warm-up)
-    uint32_t spawn_order_ = 0;             // creation counter for pedestrians
-    bool countdown_started_ = false;       // first countdown tick seen (player dt 2)
+    mutable std::vector<ScanObject> scan_previous_;
+    uint32_t spawn_order_ = 0;       // creation counter for pedestrians
+    bool countdown_started_ = false; // first countdown tick seen (player dt 2)
     TrackRing* ring_ = nullptr;
     std::array<TrackRing*, 8> rings_{};                    // seat -> ring window (rings_[0] == ring_)
     std::array<int32_t, 8> seat_back_{}, seat_previous_{}; // seats >= 1: camera pull-back, last ring camera
@@ -880,6 +896,8 @@ class Race {
     CowVector<StaticSlice> statics_[2]; // mutable (ring builds), copy-on-write for snapshots
     StaticFrames static_frames_;
     Rider static_actor_{}; // 0x004c3e90 static hazard object (rebuilt per hit)
+    std::array<RoadsideNode, 20> roadside_nodes_{};
+    uint32_t roadside_order_ = 0;
     std::vector<Rider> riders_;
     std::vector<int> human_riders_{0};   // seat -> rider index (plan 34)
     std::array<uint32_t, 8> controls_{}; // this tick's word per seat

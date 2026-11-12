@@ -343,7 +343,12 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                 [scene](const RouteSample& s, uint8_t selector) {
                     return scene->pedestrian_look(s.section, s.local, selector);
                 },
-                exe);
+                exe, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector,
+                               const PedestrianLook& look) {
+                    return scene->pedestrian_graphics_valid(route, s, selector, look);
+                }, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector) {
+                    return scene->pedestrian_look(route, s, selector);
+                });
         } else {
             out.pedestrians = std::make_unique<PedestrianSystem>(
                 [scene](const RouteSample& s) -> const std::vector<DzhrActor>& {
@@ -352,7 +357,12 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                 [scene](const RouteSample& s, uint8_t selector) {
                     return scene->pedestrian_look(s.section, s.local, selector);
                 },
-                exe);
+                exe, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector,
+                               const PedestrianLook& look) {
+                    return scene->pedestrian_graphics_valid(route, s, selector, look);
+                }, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector) {
+                    return scene->pedestrian_look(route, s, selector);
+                });
         }
         race->set_pedestrians(out.pedestrians.get());
         if (config.solo) race->set_freeze_actors(true);

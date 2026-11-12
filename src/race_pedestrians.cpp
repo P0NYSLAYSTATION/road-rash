@@ -126,7 +126,11 @@ void Race::ring_actor(const RingActor& a, uint32_t jitter) {
     if (!pedestrians_) return;
     const auto& road = route_of(riders_[0]);
     if (a.ring_sample < 0 || size_t(a.ring_sample) >= road.size()) return;
-    spawn_pedestrian(road[size_t(a.ring_sample)], size_t(a.ring_sample),
+    auto sample = road[size_t(a.ring_sample)];
+    if (sample.dual && sample.other_section == a.section && sample.other_local == a.local)
+        sample = route_half(sample, sample.half ^ 1);
+    sample.offset = a.road_offset;
+    spawn_pedestrian(sample, size_t(a.ring_sample),
                      DzhrActor{uint32_t(a.ring_sample), a.word0, a.word1}, jitter);
 }
 
@@ -154,7 +158,8 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
         }
         return;
     }
-    const int32_t player = ring_setup_ ? 0 : riders_[0].bike.i32(0x1c); // local_8
+    // 004409f7 reads *(player + 2fc), the rider half (also while crashed).
+    const int32_t player = ring_setup_ ? 0 : player_half_position(); // local_8
     Pedestrian* slot = nullptr;
     for (auto& p : system.pool())
         if (!p.active) {
@@ -178,8 +183,15 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
     b.i32(0x134) = position;
     b.i32(0x138) = position;
     p.body.route = riders_[0].route;
+    for (int road = 0; road < 2; ++road)
+        if (s < routes_[road]->size() && (*routes_[road])[s].section == sample.section &&
+            (*routes_[road])[s].local == sample.local) {
+            p.body.route = road;
+            break;
+        }
     p.body.sample = p.body.previous_sample = s;
     p.anchor = position; // +0x1c8..+0x1d8 copy of +0x1c..+0x2c
+    p.anchor_lateral = lateral;
     p.selector = uint8_t(w0 >> 8);
     p.type = type;
     p.side = lateral < 1 ? 1 : 3;
@@ -229,7 +241,7 @@ void Race::load_pedestrian_looks() {
         // subtract that bias to query the actual front cursor once.
         const size_t front =
             ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
-        const auto* current = pedestrians_->look(road[std::min(front, road.size() - 1)], p.selector);
+        const auto* current = pedestrians_->look(road, std::min(front, road.size() - 1), p.selector);
         if (!current) continue;
         p.look = current;
         p.graphics_evicted = false;
@@ -376,7 +388,7 @@ void Race::pedestrian_voice(Pedestrian& p, int which) {
 void Race::think_pedestrian(Pedestrian& p) {
     // 0x00440dd0.
     Bike& b = p.body.bike;
-    const int32_t player = riders_[0].bike.i32(0x1c);
+    const int32_t player = player_half_position(); // 00440deb: *(player + 2fc) + 1c
     const uint32_t tick = uint32_t(ticks_);
     auto set = [&](int8_t code) {
         if (p.look) set_animation(p.animation, p.look->bank, code, tick);
@@ -542,8 +554,7 @@ void Race::think_pedestrian(Pedestrian& p) {
         const auto& road = route_of(p.body);
         const size_t front =
             ring_ ? size_t(std::max(0, (ring_->front_q8() >> 8) - view_slices)) : p.body.sample;
-        const auto* current = pedestrians_->look(road[std::min(front, road.size() - 1)], p.selector);
-        if (current != p.look) {
+        if (!pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look)) {
             // 0x0044143b..0x00441474: replaced graphics lose their RRAN
             // header. Clear the loaded flag and descriptor; the old bank
             // availability words remain for the subsequent think.

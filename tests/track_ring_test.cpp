@@ -238,10 +238,16 @@ int main() {
             built.push_back(section);
         });
         split.advance(256, random, {});
+        check(split.slice_event(300 * 256) == 2, "first split slice stores its boundary event");
         state = split.diagnostic_state();
         check(built == std::vector<uint32_t>{2, 1} && state.front.position == 256 &&
                   state.front_other.position == 256,
               "dual slice builds selected half first and steps both iterators");
+        // The next forward dual slice carries event5, not0. Rewind again
+        // so the existing reverse-boundary test keeps the same start.
+        split.advance(256, random, {});
+        check(split.slice_event(301 * 256) == 5, "interior split slice stores its window event");
+        split.advance(-256, random, {});
         split.advance(-256, random, {});
         split.advance(-256, random, {});
         state = split.diagnostic_state();

@@ -54,6 +54,7 @@ static uint32_t g_player_human_calls;
 static int32_t g_initial_traffic_tick = -1;
 static int32_t g_initial_pedestrian_tick = -1;
 static int g_quit_after = -1;
+static int g_until_finish;
 static int32_t g_first_tick = -1;
 static int g_solo;
 static int g_human;
@@ -234,18 +235,30 @@ static int32_t g_randtrace_tick = -1;
 static uint32_t g_randtrace_callers[64];
 static int g_randtrace_count;
 static int g_randlog_all;
-static uint32_t g_randlog_tick[32768];
-static uint32_t g_randlog_caller[32768];
+#define RR_RANDLOG_CAPACITY 1048576
+static uint32_t g_randlog_tick[RR_RANDLOG_CAPACITY];
+static uint32_t g_randlog_caller[RR_RANDLOG_CAPACITY];
 static int g_randlog_count;
 static int g_randlog_flushed;
+static int g_randlog_overflow;
+static uint64_t g_randlog_written;
 static void dump_randlog(void) {
     char key[64];
+    if (g_randlog_overflow) {
+        fputs("# RNG caller log overflow: capture rejected\n", g_out);
+        fflush(g_out);
+        ExitProcess(86);
+    }
     while (g_randlog_flushed < g_randlog_count) {
-        snprintf(key, sizeof key, "randlog.%d", g_randlog_flushed);
+        snprintf(key, sizeof key, "randlog.%llu", (unsigned long long)g_randlog_written);
         rr_log(key, (long long)g_randlog_tick[g_randlog_flushed] * 4294967296ll +
                         g_randlog_caller[g_randlog_flushed]);
         ++g_randlog_flushed;
+        ++g_randlog_written;
     }
+    // Entries above are now in the trace, whose FILE is flushed at this
+    // tick's end. Reuse RAM; keep numbering continuous across the race.
+    g_randlog_count = g_randlog_flushed = 0;
 }
 static uint32_t sim_rand_step(void) {
     uint32_t* st = sim_rand_state();
@@ -260,10 +273,14 @@ static uint32_t __cdecl hook_rand_count(void) {
     if (g_first_tick < 0 && !g_tick1_caller) g_tick1_caller = (uint32_t)(uintptr_t)caller;
     if (g_randtrace_tick >= 0 && RD32(0x004b7ecc) == g_randtrace_tick && g_randtrace_count < 64)
         g_randtrace_callers[g_randtrace_count++] = (uint32_t)(uintptr_t)caller;
-    if (g_randlog_all && g_race_started && g_randlog_count < 32768) {
-        g_randlog_tick[g_randlog_count] = (uint32_t)RD32(0x004b7ecc);
-        g_randlog_caller[g_randlog_count] = (uint32_t)(uintptr_t)caller;
-        ++g_randlog_count;
+    if (g_randlog_all && g_race_started) {
+        if (g_randlog_count < RR_RANDLOG_CAPACITY) {
+            g_randlog_tick[g_randlog_count] = (uint32_t)RD32(0x004b7ecc);
+            g_randlog_caller[g_randlog_count] = (uint32_t)(uintptr_t)caller;
+            ++g_randlog_count;
+        } else {
+            g_randlog_overflow = 1;
+        }
     }
     return sim_rand_step();
 }
@@ -360,6 +377,7 @@ static void dump_sim_tick(void) {
         rr_log("input.joystick", RD8(0x00476c98));
         rr_log("input.steer_axis", (int32_t)RD32(0x004b7e7c));
         rr_log("input.keyboard_axes", g_drive || g_input ? 1 : 0);
+        if (g_until_finish) rr_log("capture.until_finish", 1);
         if (g_initial_traffic_tick >= 0) rr_log("traffic.setup_tick", g_initial_traffic_tick);
         if (g_initial_pedestrian_tick >= 0) rr_log("pedestrian.setup_tick", g_initial_pedestrian_tick);
         if (g_terrain_trace) rr_log("ring.terrain.schema", 1);
@@ -729,7 +747,8 @@ static void dump_sim_tick(void) {
             } else {
                 if (sim_field_value(node, 0xc4, 4, 0) == 0x20) {
                     static const uint32_t offsets[] = {0x1c, 0x28, 0x18, 0xc, 0x10, 0x14,
-                        0x1c4, 0x1c8, 0x1dc, 0x1e0, 0x1e8, 0x1ec, 0x1f4, 0x1f8, 0x1fc, 0x208, 0x21c};
+                        0x104, 0x108, 0x10c, 0x128, 0x1c4, 0x1c8, 0x1d4, 0x1dc, 0x1e0,
+                        0x1e4, 0x1e8, 0x1ec, 0x1f4, 0x1f8, 0x1fc, 0x208, 0x21c};
                     for (unsigned i = 0; i < sizeof offsets / sizeof offsets[0]; ++i) {
                         snprintf(key, sizeof key, "ped.%x.%x", node, offsets[i]);
                         rr_log(key, sim_field_value(node, offsets[i], offsets[i] == 0x1c4 ? 2 :
@@ -857,8 +876,14 @@ static void dump_sim_tick(void) {
     ++g_sim_frames;
     if (g_randlog_all) dump_randlog();
     fflush(g_out);
-    if ((g_quit_after > 0 && g_sim_frames >= (uint32_t)g_quit_after) ||
+    const int outcome = (int32_t)RD32(0x004c5d7c);
+    if ((g_until_finish && outcome >= 2 && outcome <= 5) ||
+        (g_quit_after > 0 && g_sim_frames >= (uint32_t)g_quit_after) ||
         (g_input_exhausted_tick >= 0 && tick >= g_input_exhausted_tick + 0xb4)) {
+        if (g_until_finish) {
+            rr_log("capture.finished", outcome == 2 || outcome == 3);
+            rr_log("capture.outcome", outcome);
+        }
         fputs("end\n", g_out);
         fclose(g_out);
         g_out = NULL;
@@ -4442,6 +4467,7 @@ static int rr_install_hooks(void) {
     char buf[32], path[MAX_PATH];
     if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND", buf, sizeof buf)) g_frontend_probe = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_FRAMES", buf, sizeof buf)) g_quit_after = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_UNTIL_FINISH", buf, sizeof buf)) g_until_finish = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_PIXELS", buf, sizeof buf)) g_pixels = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_DRIVE", buf, sizeof buf)) {

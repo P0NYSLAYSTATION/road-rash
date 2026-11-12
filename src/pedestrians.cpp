@@ -4,8 +4,10 @@
 #include <stdexcept>
 
 namespace rr {
-PedestrianSystem::PedestrianSystem(ActorSource actors, LookSource looks, std::vector<uint8_t> exe)
-    : actors_(std::move(actors)), looks_(std::move(looks)), pool_(pool_size) {
+PedestrianSystem::PedestrianSystem(ActorSource actors, LookSource looks, std::vector<uint8_t> exe,
+                                     GraphicsValid valid, RouteLookSource route_looks)
+    : actors_(std::move(actors)), looks_(std::move(looks)), graphics_valid_(std::move(valid)),
+      route_looks_(std::move(route_looks)), pool_(pool_size) {
     const auto bytes = read_exe_data(exe, 0x0046dde0, 100);
     for (size_t i = 0; i < template_.size(); ++i)
         template_[i] = int32_t(uint32_t(bytes[i * 4]) | uint32_t(bytes[i * 4 + 1]) << 8 |
