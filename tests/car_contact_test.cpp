@@ -160,6 +160,38 @@ int main() {
             if (contained) check(b.i32(0xec) == -1000, "negative contact speed must clamp to -1000");
             check(b.i32(0x288) == 123, "knock-off must skip the rate-change steering kick");
         }
+        //00404a5f jumps directly to the crashed tail, before sounds and
+        //class2/3 speed decisions. Test an impact large enough to have
+        //consumed two sound draws if that gate were missing.
+        uint64_t baseline_draws = 0;
+        for (bool colliding : {false, true}) {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& r = race.riders()[0];
+            auto& b = r.bike;
+            r.frozen = true;
+            b.i32(0x2f4) = 1;
+            b.i32(0x18) = 1;
+            b.i32(0x174) = 7680;
+            b.i32(0x178) = 64;
+            b.i32(0x17c) = 8960;
+            b.i32(0x30) = b.i32(0x1c) - 1000;
+            b.i32(0x108) = b.i32(0xec) = 8000;
+            b.i32(0x180) = 256;
+            auto& car = traffic.cars_mut()[0];
+            car.active = colliding;
+            car.position = b.i32(0x1c);
+            car.lateral = b.i32(0x28);
+            const auto draws = race.rng_draw_count();
+            race.step(0);
+            const auto consumed = race.rng_draw_count() - draws;
+            if (!colliding) baseline_draws = consumed;
+            check(consumed == baseline_draws, "crashed car contact must not consume sound RNG");
+            check(b.i32(0xec) == 8000, "crashed car contact must skip class2 speed transfer");
+            check(b.i32(0xf4) == (colliding ? 0x150 : 0), "crashed car contact retains its vertical bump");
+        }
         // Ascending contact walk: a car behind the bike must itself be
         // due; a due bike behind a sleeping car remains eligible.
         for (int scenario = 0; scenario < 3; ++scenario) {

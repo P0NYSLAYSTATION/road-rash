@@ -9,6 +9,13 @@ Continue the authorized work within the active turn; do not stop after status.
 
 ## Published checkpoint
 
+Release1.1.8 is published from clean5c36f18a36533bf93313608dd7e4d48403528237:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.8
+SHA2566461bb020d6fd5ff159c4084f4c68e2e63b70f6032aceeead42ef9603915f53e.
+Public download verified (`build/v118-publish.log`). Isolated1.1.7->1.1.8
+upgrade preserved600 files and passed SDL menu smoke
+(`build/parity-v118-upgrade-validation.json`). Police checkpoint committed/pushed.
+
 Release1.1.7 is published from clean c2af6815ddc422fcf024a63624d382f283a79527:
 https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.7
 SHA2566ed384433e1665bc106e445157f1a2290c8f62937525471c760aed4a235af2a9.
@@ -209,3 +216,30 @@ Next checkpoint: commit/push and release1.1.8 with isolated1.1.7 upgrade check.
 Read-only native trace at8350 is running in exec9891,
 `build/hiway-rng-8350-native.log`, RR_FIELD_ALL1, no reseeding. No original
 capture active. Continue RNG tracing after release; do not stop after status.
+
+## Crashed-car contact continuation
+
+8350 original407ba9 AI draw then44efc6 horn, two calls. Native consumed four
+because contact_car ran the human sound branch on an already crashed bike.
+00404a5f jumps directly to00404f3f in that case, skipping sounds and normal
+class2/3 speed/damage decisions. Native now follows that gate and uses the car's
+actual halfwidth instead of hardcoded16384 for the nudge. Corrected full replay
+`build/hiway-crashed-car-sound-gate.json` matches through9335 including RNG.
+First gap9336 ring.3370138.motion_12c original72/native99, kind2 car's first
+backward move from338176 to338167,11-tick dt, speed242. Original physical slice
+changes4877368->4876608. Test next whether traffic must read ring.retained_motion
+instead of canonical route paths, as Race::accumulate already does.
+
+`build/crashed-contact-checkpoint-full-build.log` succeeds. Initial new synthetic
+test assumed no other tick RNG and failed; paired identical scene without a
+car establishes the startup baseline. Corrected test checks no extra sound
+draws, no class2 speed transfer and retained vertical bump. Clean SDL gate
+104 passed,35 skips,zero failures, two Direct3D tests excluded
+(`build/crashed-contact-checkpoint-native-retry-tests.log`). Strict Napa2400/
+City600 pass (`build/crashed-contact-checkpoint-regressions.json`).
+
+One link attempt failed LNK1104 because the previous owned replay still held
+oracle-sim-test.exe (`build/crashed-car-sound-gate-build.log`). Waited for owned
+exec62710 completion; retry succeeded. No approval rejection occurred.
+Next: commit/push, release1.1.9 isolated1.1.8 update, then9336 motion investigation.
+No original capture active. No need for another full original race yet.

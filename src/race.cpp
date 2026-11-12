@@ -1719,8 +1719,8 @@ void Race::contact_car(Rider& self, TrafficCar& car) {
     // Player sounds (shared with the bike-bike head): silent below both
     // thresholds (0x004049c0 jumps to LAB_00404c2d with iVar9 = 6, which the
     // geometry block below then recomputes). Silence only skips the sounds;
-    // routing stays geometric.
-    if (human(self)) {
+    // routing stays geometric.00404a5f skips these sounds for a crashed bike.
+    if (human(self) && s.i32(0x2f4) == 0) {
         if (hit < 0x1771) {
             if (hit >= 0x7d1 || std::abs(raw188) >= 0x3e9) {
                 sound(SoundEvent((random() & 1) + 3), s);
@@ -1749,7 +1749,7 @@ void Race::contact_car(Rider& self, TrafficCar& car) {
     // +shit/256 bump is applied; the +0x150 bump above is the only +0xf4
     // change. Mirrors bike-bike contact()'s crashed path.
     const bool crashed = s.i32(0x2f4) != 0;
-    if (!contained) {
+    if (!crashed && !contained) {
         // Class 3: glance off the car's side, with the 0x004052c0 decision.
         // 0x004049c0: other lateral < self lateral shoves +f0 (away from the
         // car), else -f0; speed loses |184|/4 either way. The car caller has
@@ -1774,14 +1774,14 @@ void Race::contact_car(Rider& self, TrafficCar& car) {
                 s.i32(0xec) = std::max(0, s.i32(0xec) - div_pow2(shit, 2));
             }
         }
-    } else if ((down = crashed ? false : knock_off(self, magnitude, magnitude, 2))) {
+    } else if (!crashed && (down = knock_off(self, magnitude, magnitude, 2))) {
         // Class 2 and the rider went down in the decision: the impulse still
         // transfers to speed (0x004049c0).
         s.i32(0xec) += s.i32(0x184);
-    } else if (s.i32(0xec) - car.speed < 0x1771) {
+    } else if (!crashed && s.i32(0xec) - car.speed < 0x1771) {
         // Class 2, small speed gap: rear-end pushes speed over.
         s.i32(0xec) += s.i32(0x184);
-    } else {
+    } else if (!crashed) {
         // Class 2, big speed gap: knocked off with reason 2 (animation 29),
         // then the nudge and tail below. local_21 remains false here, as
         // in the original: it records the earlier knock-off decision.
@@ -1794,7 +1794,7 @@ void Race::contact_car(Rider& self, TrafficCar& car) {
     // Cars never take this path in the golden (iVar9 is 2/3: the
     // else-if/else ladder above), so it is documented, not executed.
     // Nudge apart sideways (0x00404f4d).
-    const int32_t push = div_pow2(s.i32(0x174) + 16384, 4) * s.i32(0x18);
+    const int32_t push = div_pow2(s.i32(0x174) + TrafficSystem::car_half_width(car), 4) * s.i32(0x18);
     s.i32(0x28) += car.lateral < s.i32(0x28) ? push : -push;
     // Tail (0x00404feb): impulses and flags clear; speed/velocity clamps.
     s.i32(0x184) = 0;

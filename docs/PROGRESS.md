@@ -1,5 +1,14 @@
 # Port progress
 
+## November 12, 2026 — crashed-bike car contacts
+
+Hiway now matches through9335 including RNG. The original skips sound draws
+and uncrashed class2/3 decisions when a crashed bike contacts a car; the port
+now follows that branch and uses the car's actual width for the tail nudge.
+First remaining gap9336 is a traffic car's road-rise sum72/native99.
+SDL native gate104 passed,35 skips, two Direct3D checks excluded; strict
+Napa2400/City600 pass. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — repeated police personality lifetime
 
 The completed Hiway trace now matches through8349 including RNG. Police

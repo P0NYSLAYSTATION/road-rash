@@ -2,6 +2,10 @@
 
 ## Windows continuation — November 12, 2026
 
+Current crashed-contact continuation matches through9335 including RNG.
+First gap9336 is a traffic car's accumulated rise72/native99. Complete
+start-to-finish all-track parity remains open; older first-gap notes follow.
+
 Latest police-lifetime continuation matches through8349 including RNG on the
 completed Hiway trace. First gap8350 is RNG, original2 calls/native4. All-track
 full-race acceptance remains open. This supersedes older gap statements below.

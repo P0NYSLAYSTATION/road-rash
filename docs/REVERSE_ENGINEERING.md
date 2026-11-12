@@ -1,5 +1,14 @@
 # Binary evidence and next work
 
+## November 12, 2026 — crashed car-contact jump
+
+00404a5f jumps to00404f3f when bike+2f4 is nonzero, before sound RNG and
+uncrashed collision-class decisions.00404f3f adds150 to vertical velocity;
+00404f4d nudges using both object widths, then00404f93 applies the steering
+tail and00404feb clears impulses/clamps. Hiway8350 original callers407ba9 and
+44efc6 omit native's two contact-sound draws. The corrected branch resolves
+the RNG gap and matches through9335 without reseeding.
+
 ## November 12, 2026 — police personality survives despawn
 
 Original first and second cop appearances both reference personality5012836

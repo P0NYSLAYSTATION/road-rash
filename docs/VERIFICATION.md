@@ -1,5 +1,16 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — crashed contact gate
+
+`build/hiway-crashed-car-sound-gate.json`: unchanged completed Hiway trace
+matches through9335 including RNG. First difference9336 car motion+12c
+original72/native99; exit1 remains failed whole-race acceptance. Strict
+Napa2400/City600 pass (`build/crashed-contact-checkpoint-regressions.json`).
+Build succeeds; fresh SDL gate104 passed,35 skips,zero failures, two Direct3D
+tests excluded (`build/crashed-contact-checkpoint-native-retry-tests.log`).
+The initial test's assertion omitted unrelated startup RNG; its corrected
+paired baseline passes and checks preserved speed and vertical bump.
+
 ## November 12, 2026 — repeated police lifetime gate
 
 `build/hiway-police-replan-lifetime.json` matches the unchanged completed
