@@ -1,5 +1,14 @@
 # Port progress
 
+## November 12, 2026 — physical force and mover references
+
+The unchanged completed Hiway trace matches through10072 including RNG.
+Contact force reads retained physical rises; wall response distinguishes the
+mover-start slice+40 from swept-motion slice+13c. Physical graph node/local
+identity controls finish-distance transitions. First gap10073 is rider13's
+half+1e8 word384/native131. Full-race/all-track parity remains open; multiplayer
+stays held. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — live family cursor and physical road lookups
 
 The unchanged completed Hiway trace now matches through9748 including RNG.

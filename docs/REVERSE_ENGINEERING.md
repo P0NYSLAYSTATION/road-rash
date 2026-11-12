@@ -1,5 +1,15 @@
 # Binary evidence and next work
 
+## November 12, 2026 — force, wall reference and graph location
+
+0043a380 computes contact force from physical slice rises. Capture ground is
+object+160, distinct from terrain height+24. Retained rises resolve Hiway9749.
+0043a9d2 reads previous wall slice through object+40, copied from+2c at each
+mover start. +13c is the older swept-motion reference. Separating these resolves
+the detached body false angled stop at9783. Physical graph node/local identity
+controls finish-distance recomputation and resolves9785. Exact prefix10072
+includes RNG;10073 half+1e8 remains open.
+
 ## November 12, 2026 — exact family cursor and physical lookahead
 
 00452310 uses the signed current-section cursor plus header bias; a following

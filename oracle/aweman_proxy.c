@@ -467,6 +467,22 @@ static void dump_sim_tick(void) {
         int addr_index = 0;
         for (int guard = 0; node && node != end && guard < 512; ++guard) {
             if (!readable(node, 0xe4)) break;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) &&
+                RD32(node + 0xc4) == 4 && g_slice_probe >= 0 &&
+                ((int32_t)RD32(node + 0x1c) >> 8) == g_slice_probe) {
+                uintptr_t sl = (uint32_t)RD32(node + 0x140);
+                fprintf(g_out, "# ground-actor tick=%d actor=%u pos=%d lateral=%d ground=%d\n", tick,
+                        (unsigned)node, RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x24));
+                for (int k = 0; k < 2 && sl && readable(sl, 0x14a); ++k) {
+                    fprintf(g_out, "# ground-slice side=%d slice=%u node=%u local=%d type=%u flags=%u centre=%d edges=%d/%d shoulders=%d/%d selectors=%u/%u points=",
+                            k, (unsigned)sl, RD32(sl), RD32(sl + 4), RD8(sl + 0x3c), RD8(sl + 0x37),
+                            RD32(sl + 0xcc), RD32(sl + 0xe0), RD32(sl + 0xe4), RD32(sl + 0xe8), RD32(sl + 0xec),
+                            RD8(sl + 0x148), RD8(sl + 0x149));
+                    for (int p = 0; p < 12; ++p) fprintf(g_out, "%s%d", p ? "," : "", RD32(sl + 0xf0 + p * 4));
+                    fputc('\n', g_out);
+                    sl = (uint32_t)RD32(sl + 0xc);
+                }
+            }
             if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) && RD32(node + 0xc4) == 0x20) {
                 fprintf(g_out, "# ped-motion tick=%d actor=%u pos=%d previous_pos=%d heading=%d",
                         tick, (unsigned)node, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x134), (int32_t)RD32(node + 0x128));
@@ -1055,6 +1071,16 @@ static void __fastcall rr_wall_probe(uintptr_t self) {
                 (int32_t)RD32(self + 0x28), (unsigned)sl, RD8(sl + 0x3c), RD8(sl + 0x38), RD8(sl + 0x37),
                 (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec), (int32_t)RD32(self + 0xf0),
                 RD8(sl + 0x148), RD8(sl + 0x149), (int32_t)RD32(self + 0x174));
+    if (probe && g_out) {
+        const unsigned references[2] = {0x13c, 0x40};
+        for (int i = 0; i < 2; ++i) {
+            const uintptr_t previous = (uint32_t)RD32(self + references[i]);
+            if (previous && readable(previous, 0x14a))
+                fprintf(g_out, "# wall-previous reference=%x actor=%u slice=%u flags=%u selectors=%u/%u speed=%d heading=%d contact=%d\n",
+                        references[i], (unsigned)self, (unsigned)previous, RD8(previous + 0x37), RD8(previous + 0x148),
+                        RD8(previous + 0x149), RD32(self + 0xec), RD32(self + 0x128), RD32(self + 0x160));
+        }
+    }
     ((void(__fastcall*)(uintptr_t))0x0043a610)(self);
     if (probe && g_out)
         fprintf(g_out, "# wall-exit actor=%u pos=%d lat=%d rate=%d\n", (unsigned)self,

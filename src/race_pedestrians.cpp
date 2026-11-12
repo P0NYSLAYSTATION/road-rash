@@ -580,6 +580,7 @@ void Race::move_pedestrian(Pedestrian& p) {
     // 0x00440990: 0x0043adc0 (independent actor motion), then stay within
     // 0x1ff of the spawn position.
     Bike& b = p.body.bike;
+    p.body.wall_previous_sample = p.body.sample;
     if (!b.i32(0x160)) {
         b.i32(0x114) = b.i32(0x118) = 0;
         b.u8(0x164) = 0;
@@ -741,6 +742,7 @@ void Race::attach_terrain_type() {
             actor.route = riders_[0].route;
             actor.sample = current;
             actor.previous_sample = previous;
+            actor.wall_previous_sample = previous;
             if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
                 const auto s = sub_slice(actor, current);
                 std::fprintf(stderr, "car-wall tick %d pos %d lat %d samples %zu/%zu type %u flags %u edges %d/%d shoulders %d/%d halfwidth %d\n",

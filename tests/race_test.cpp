@@ -1280,6 +1280,33 @@ int main() {
               "half object built from its table");
     }
 
+    {
+        //A prior sample crossing leaves +13c behind, but every mover copies
+        //its current slice to +40. A same-slice wall hit must not treat the
+        //older accumulator slice's absent facade as a new angled obstacle.
+        auto road = straight(1000);
+        for (size_t i = 0; i < road.size(); ++i) road[i].local = uint32_t(i);
+        rr::Race race(road, road, rr::PhysicsTables::synthetic(), test_spec(), 90);
+        std::array<rr::TerrainSlice, 2> terrain{};
+        for (auto& t : terrain) t.type = 0;
+        terrain[0].selectors = {255, 255};
+        terrain[1].selectors = {1, 1};
+        race.set_terrain_source([&](const rr::RouteSample& s) -> const rr::TerrainSlice& {
+            return terrain[s.local < 50 ? 0 : 1];
+        });
+        auto& r = race.riders()[0];
+        auto& b = r.bike;
+        r.sample = 50;
+        r.previous_sample = 49;
+        b.i32(0x1c) = 50 * 256 + 64;
+        b.i32(0x28) = -730 * 256;
+        b.i32(0xec) = 8000;
+        b.i32(0x160) = 74;
+        b.i32(0x18) = 1;
+        race.step(0);
+        check(b.i32(0xec) > 2500 && b.i32(0x2f4) == 0,
+              "wall response must use this mover's previous slice, not an older swept-motion slice");
+    }
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;
 }

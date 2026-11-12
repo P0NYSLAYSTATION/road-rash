@@ -198,6 +198,7 @@ struct Rider {
     int slot = 0;                           // grid slot 0..7 (0x00464218); 0 is the player
     int rider_idx = 0;                      // 0x00463c78 row / personality index (0x00405990 param_6)
     size_t sample = 0, previous_sample = 0; // bike +0x140 / +0x13c
+    std::optional<size_t> wall_previous_sample; // +0x40, copied from +0x2c at the start of this mover
     bool ai = false;
     bool cop = false;    // the police rider (DAT_004642dc, 0x00406b80); never in places or finish order
     bool frozen = false; // solo oracle: think/move nulled, scanned but never stepped

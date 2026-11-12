@@ -476,7 +476,14 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
     const bool player = human(r);
     const int32_t before = b.i32(0x1c);
     const auto& road = route_of(r);
-    const uint32_t node_before = road[std::min(r.sample, road.size() - 1)].node;
+    auto physical_node = [&](size_t sample) {
+        const auto& logical = road[std::min(sample, road.size() - 1)];
+        if (const auto* ring = nearest_ring(b.i32(0x1c)))
+            if (const auto physical = ring->slice_location(int32_t(sample * 256), logical.half))
+                return physical->first;
+        return logical.node;
+    };
+    const uint32_t node_before = physical_node(r.sample);
     // The countdown runs the same physics move: with no target speed the
     // bike stays put, but its ground contact word settles (+0x160 37 -> 74
     // at tick 1 on napa-field-l1-20261017).
@@ -522,7 +529,7 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
         // Half +0x1f8: moved along the same node, subtract the move;
         // otherwise 0x00407410 recomputes it (finish - position once the
         // finish is known). Contact pushes between moves are not folded in.
-        if (road[std::min(r.sample, road.size() - 1)].node == node_before)
+        if (physical_node(r.sample) == node_before)
             r.finish_distance += before - after;
         else if (finish_q8_ != 0)
             r.finish_distance = remaining_finish_distance(r, after);

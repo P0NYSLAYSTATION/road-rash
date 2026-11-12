@@ -1,5 +1,12 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## Latest Windows checkpoint — November 12, 2026
+
+Hiway matches through10072 including RNG on the unchanged completed recording.
+Physical contact force, mover-start wall references and graph node/local identity
+resolve9749,9783 and9785. First remaining gap10073 is half+1e8 marking state.
+Full-race/all-track acceptance remains open. See current handoff for evidence.
+
 ## Windows continuation — November 12, 2026
 
 Current exact-family/physical-road continuation matches through9748 including

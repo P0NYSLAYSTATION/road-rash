@@ -1,5 +1,15 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — physical force, wall and graph gate
+
+`build/hiway-physical-graph-finish.json`: unchanged completed14084-tick Hiway
+trace matches through10072 including RNG, first10073 half+1e8 original384/native131.
+Whole-race acceptance fails (exit1). Focused wall regression passes. MSVC Release
+build succeeds; SDL gate104 passed,35 explicit skips,zero failures, two unavailable
+Direct3D tests excluded (`build/v1112-full-build.log`, `build/v1112-native-tests.log`).
+Strict Napa2400/City600 pass (`build/v1112-release-regressions.json`). Capture ground
+means contact force+160, not terrain height+24. No golden changes or reanchor.
+
 ## November 12, 2026 — family cursor, physical lanes and curvature
 
 `build/hiway-physical-ai-curvature.json` matches the unchanged completed Hiway

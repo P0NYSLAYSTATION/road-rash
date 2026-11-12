@@ -1,5 +1,88 @@
 # Parking continuation and retained road pointers
 
+## Latest continuation — supersedes older WIP descriptions below
+
+Physical force, mover-start wall reference and physical graph finish-distance
+fixes match the immutable completed Hiway trace through10072 including RNG.
+`build/hiway-physical-graph-finish.json`: first10073 rider13 raw_1e8 original384,
+native131, exit1; full-race acceptance remains failed. Ground is force+160,
+not height+24. Focused regression passes. No original capture/DLL is held.
+MSVC Release build succeeds; SDL native gate104 passed,35 skips,zero failures,
+two unavailable Direct3D tests excluded. Strict Napa2400/City600 pass. Logs:
+`build/v1112-full-build.log`, `build/v1112-native-tests.log`,
+`build/v1112-release-regressions.json`. Next trace10073 marking selector via
+004049c0 byte writes. No golden change or reanchor. Multiplayer stays held.
+
+## Current state — read before historical notes
+
+HEAD2ff4f37b42a8352970043ad2002379cd8ac746af is pushed and released as1.1.11:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.11
+Installer5330d45d6c6f37d9833328193784c11094a8dc18e7bff19c979652fe243a2679.
+Public checksum verified (`build/v1111-publish.log`); isolated1.1.10->1.1.11
+preserved600 files and passed SDL menu smoke
+(`build/parity-v1111-upgrade-validation.json`). Release description's mistaken
+ground-height label was corrected remotely without changing assets/source:
+`build/v1111-release-note-correction.json`. The capture field named ground is
+contact force+160; actual terrain height is+24. Do not conflate them.
+
+Current WIP covers race.cpp/hpp, race_pedestrians.cpp, race_schedule.cpp and the
+oracle diagnostic. A broad full-profile
+cache attempt did not advance9749 and was removed entirely (track_ring files
+matchHEAD). Actual vertical force still compared canonical current/previous
+rise; reading retained physical rises resolves9749. The unchanged completed
+Hiway trace now matches through9782 including RNG:
+`build/hiway-physical-contact-force.json`. Strict Napa2400/City600 pass
+(`build/physical-contact-force-regressions.json`). Full native gate for this
+WIP still needs running. No original is currently active.
+
+First gap9783 player half finish-distance original131780/native131812 is
+downstream of the real mismatch: native crash-body motion stops (speed0 and
+no longitudinal step), original continues32 Q8 with speed8213. Native trace
+`build/hiway-crash-finish-delta-9783.log` shows crash entry body331548/fd131812,
+then unchanged body331548/fd131812. Original body331580/fd131780. First field
+is not the root cause; do not adjust finish math to hide it. Native body wall
+response appears angled (speed0/f0-1200), original looks like ordinary bounce
+(f0468). The completed probe confirms selector/flag/width agreement; the root
+cause is previous-reference identity.0043a9d2 reads object+40, copied from+2c
+at the start of that mover, while +13c remains the swept-motion previous slice.
+The port conflated them. Rider.wall_previous_sample now snapshots the start
+slice in bike, detached-body and pedestrian motion; car wall callbacks set it
+from their prior slot. Walls uses it, while vertical force keeps +13c semantics.
+`build/hiway-wall-previous-slice.json` matches through9784 including RNG.
+First gap9785 rider13 finish-distance127942/native128198 is one sample.
+Strict Napa2400/City600 still pass (`build/wall-previous-slice-regressions.json`).
+
+Original exec36408 exited early3489660927 before the target probe. Its partial
+capture was rejected and the exact working AWEMAN hash restored. Retry80760
+completed9800 validated controls and restored the DLL:
+`analysis/oracle/hiway-crash-wall-9800-retry.tsv`, SHA256
+394de772b168a87b1e7481586a10d83215b2dfd3af875a6a51d5a794f966c7a0.
+At9783 body entry331580/speed8213 exits331580/f0468, versus native rewind331548/
+speed0. The probe's old wall-previous label read+13c; corrected source now
+prints both references explicitly, helper rebuild succeeds. No second original
+needed for that assembly-proven distinction.
+
+Latest prototype addresses9785: move_bike_live checks physical ring graph nodes
+for transitions, and remaining_finish_distance reads physical node/local before
+graph traversal. Original rider13 moves112 but its distance drops368 when the
+physical node transitions one sample before the canonical route. Replay is
+running owned exec29757, `build/hiway-physical-graph-finish.log/json`. Wait for
+measurement; targeted build succeeds. No physical-graph fix claim yet. If it
+regresses earlier, inspect/revise the prototype rather than changing goldens.
+
+Previous original `hiway-ground-slices-9760` completed9760 validated controls,
+restored DLL, SHA2562b34c25de9a1212a2a00067238d2e7feb72b430309fde0fd69fd05486b40afee.
+It confirms terrain height0 at9749; that was an unnecessary height hypothesis
+because the failing field was force, and this was acknowledged to the user.
+Captured current/next geometry is retained as evidence, not a parity claim.
+
+Upstream heads rechecked: main remains20fb4c0, no new parity branch. Initial
+sandbox DNS attempt failed; normal-host read succeeded. No current approval
+rejection or user question. Goal API remains paused but authorized work must
+continue in this turn; do not stop after a partial status. Next release1.1.12
+should use outside-repo publish-v1111.py/verify-parity-v1111-upgrade.py templates.
+Multiplayer remains on hold; all-track start-to-finish parity is unfinished.
+
 Baseline be17861, branch codex/simulation-parity. Parking checkpoint1b3179d
 is committed, pushed and released; the traffic wall continuation is in progress.
 The ongoing user instruction is to continue autonomously until all tracks have

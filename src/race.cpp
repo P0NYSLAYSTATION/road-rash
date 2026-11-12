@@ -389,9 +389,16 @@ int32_t Race::remaining_finish_distance(const Rider& r, int32_t position) const 
     const size_t sample = slice ? std::min(size_t(std::max(position, 0) >> 8), route.size() - 1)
                                 : std::min(r.virtual_section, route.size() - 1);
     const auto& s = route[sample];
-    const int32_t whole = slice ? int32_t(s.local * 256) : r.virtual_local & ~255;
+    uint32_t node = s.node;
+    int32_t whole = slice ? int32_t(s.local * 256) : r.virtual_local & ~255;
+    if (slice)
+        if (const auto* ring = nearest_ring(position))
+            if (const auto physical = ring->slice_location(position, s.half)) {
+                node = physical->first;
+                whole = int32_t(physical->second * 256);
+            }
     const int32_t local = whole | (position & 255); //00407490 retains the actor's fraction
-    return graph_finish_distance(*finish_course_, s.node, local, level_);
+    return graph_finish_distance(*finish_course_, node, local, level_);
 }
 
 void Race::accumulate(Rider& r, uint32_t from, uint32_t to, size_t from_sample, size_t to_sample) {
@@ -1890,6 +1897,9 @@ void Race::crash_entry(Rider& r, int32_t reason, std::optional<std::array<int32_
         // a branch rider rejoining the trunk (e.g. L5d tick 2267) match.
         if (finish_q8_ != 0 && r.bike_slice_present)
             r.finish_distance = remaining_finish_distance(r, r.crash_actor.motion.i32(0x1c));
+        if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+            std::fprintf(stderr, "crash-entry slot %d bike-pos %d body-pos %d fd %d\n", r.slot,
+                         int32_t(r.bike.i32(0x1c)), int32_t(r.crash_actor.motion.i32(0x1c)), r.finish_distance);
         return;
     }
     // Stand-in (no crash library): the shared helper already computed the
@@ -2047,6 +2057,7 @@ void Race::contact(Rider& self, Rider& other) {
 void Race::move(Rider& r, bool player) {
     // 0x004395e0 (single player, no network ghost branch).
     Bike& b = r.bike;
+    r.wall_previous_sample = r.sample;
     if (b.i32(0x160) > 0) b.i32(0x104) = b.i32(0xf0);
     b.i32(0x108) = b.i32(0xec);
     b.i32(0x10c) = b.i32(0x104);
@@ -2164,14 +2175,20 @@ void Race::walls(Rider& r, const Bike* owner) {
     };
     const auto& route = route_of(r);
     const size_t next_sample = std::min(r.sample + 1, route.size() - 1);
-    const size_t previous_next = std::min(r.previous_sample + 1, route.size() - 1);
+    const size_t wall_previous = r.wall_previous_sample.value_or(r.previous_sample);
+    const size_t previous_next = std::min(wall_previous + 1, route.size() - 1);
     const SubSliceView cur = sub_slice(r, r.sample), nxt = sub_slice(r, next_sample);
-    const SubSliceView prev = sub_slice(r, r.previous_sample), prev_next = sub_slice(r, previous_next);
+    const SubSliceView prev = sub_slice(r, wall_previous), prev_next = sub_slice(r, previous_next);
     const int32_t hw = b.i32(0x174);
     int32_t hi = (b.i32(0x28) + hw) >> 8;
     const int32_t lo = (b.i32(0x28) - hw) >> 8;
     if (cur.e0 < lo && hi < cur.e4) return;
     const int32_t c4 = b.i32(0xc4);
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+        std::fprintf(stderr, "wall-input kind %d pos %d lat %d width %d speed %d current %zu previous %zu flags %u/%u selectors %u/%u -> %u/%u shoulders %d/%d\n",
+                     c4, int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)), hw, int32_t(b.i32(0xec)), r.sample,
+                     wall_previous, unsigned(prev.flags), unsigned(cur.flags), unsigned(prev.sel[0]),
+                     unsigned(prev.sel[1]), unsigned(cur.sel[0]), unsigned(cur.sel[1]), cur.e8, cur.ec);
     const bool player =
         human(r) || (owner && std::any_of(riders_.begin(), riders_.end(),
                                           [&](const Rider& h) { return human(h) && owner == &h.bike; }));
@@ -2353,6 +2370,20 @@ void Race::vertical(Rider& r) {
                                 slice_path(next, std::min(r.sample + 1, route.size() - 1)),
                                 b.i32(0x28) - current.offset * 256, uint8_t(b.i32(0x1c)),
                                 next.offset - current.offset, current.offset);
+        if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+            std::fprintf(stderr, "ground-actor slot %d pos %d lateral %d sample %zu route %d ground %d\n",
+                         r.slot, int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)), r.sample, r.route, ground);
+            for (int k = 0; k < 2; ++k) {
+                const auto& at = k ? next : current;
+                const auto path = slice_path(at, std::min(r.sample + size_t(k), route.size() - 1));
+                const auto& t = this->ground(at);
+                std::fprintf(stderr, "ground-slice side %d section %u local %u type %u flags %u centre %d widths %d/%d shoulders %d/%d sideheights %d/%d points=",
+                             k, at.section, at.local, unsigned(t.type), unsigned(path.marking_flags), at.offset,
+                             path.left, path.right, path.shoulder_left, path.shoulder_right, path.height_left, path.height_right);
+                for (const auto& point : t.points) std::fprintf(stderr, "%d,%d;", point[0], point[1]);
+                std::fputc('\n', stderr);
+            }
+        }
     }
     b.i32(0x24) = ground;
     // 0x0043a190 type-0x20 branch: pedestrians stay grounded, including
@@ -2371,7 +2402,13 @@ void Race::vertical(Rider& r) {
     const int32_t above_before = b.i32(0x34);
     b.i32(0xf4) = vy;
     const int32_t threshold = (dt * 4 - 3) * b.i32(0x16c);
-    const int32_t rise_now = s.rise, rise_before = route_of(r)[r.previous_sample].path.rise;
+    int32_t rise_now = s.rise, rise_before = route_of(r)[r.previous_sample].path.rise;
+    if (const auto* ring = nearest_ring(b.i32(0x1c))) {
+        if (const auto motion = ring->retained_motion(int32_t(r.sample * 256), route_of(r)[r.sample].half))
+            rise_now = motion->second;
+        if (const auto motion = ring->retained_motion(int32_t(r.previous_sample * 256), route_of(r)[r.previous_sample].half))
+            rise_before = motion->second;
+    }
     bool grounded = false;
     if (threshold < above) {
         b.u8(0x278) |= 0x20;
@@ -2525,6 +2562,7 @@ void Race::crash_body_motion(Rider& r, int32_t dt) {
     CrashActor& body = r.crash_actor;
     auto motion = [&](Rider& actor) {
         auto& b = actor.bike;
+        actor.wall_previous_sample = actor.sample;
         if (!b.i32(0x160)) {
             b.i32(0x114) = b.i32(0x118) = 0;
             b.u8(0x164) = 0;
@@ -2558,6 +2596,9 @@ void Race::crash_body_motion(Rider& r, int32_t dt) {
     // 0x00406890's crashed half callback runs with this motion: the body's
     // position delta feeds half +0x1f8, then the place refresh (0x004075f0).
     r.finish_distance += body_before - body.motion.i32(0x1c);
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+        std::fprintf(stderr, "crash-body slot %d before %d after %d fd %d\n", r.slot, body_before,
+                     int32_t(body.motion.i32(0x1c)), r.finish_distance);
     if (r.place_refresh <= r.half_sched_last) refresh_place(r);
 }
 // The crash recovery (0x00407f30's tail plus the walk-back think states):
@@ -5088,9 +5129,10 @@ void Race::step(std::span<const uint32_t> words) {
             const size_t i = size_t(std::atoi(std::getenv("RR_SIM_TRACE_RIDER")));
             if (i < riders_.size()) {
                 const auto& r = riders_[i];
-                std::fprintf(stderr, "body %zu %s pos %d lat %d speed %d steer %d rate %d crash %d\n", i,
+                std::fprintf(stderr, "body %zu %s pos %d lat %d speed %d steer %d rate %d crash %d fd %d half-pos %d crash-pos %d\n", i,
                              label, r.bike.i32(0x1c), r.bike.i32(0x28), r.bike.i32(0xec), r.bike.i32(0x288),
-                             r.bike.i32(0xf0), r.bike.i32(0x2f4));
+                             r.bike.i32(0xf0), r.bike.i32(0x2f4), r.finish_distance, r.half_mirror.position,
+                             int32_t(r.crash_actor.motion.i32(0x1c)));
                 const auto view = sub_slice(r, r.sample);
                 std::fprintf(stderr, "geometry %zu %s route %d sample %zu centre %d edges %d/%d shoulders %d/%d type %u flags %u event %u params %d/%u section %u local %u\n",
                              i, label, r.route, r.sample, route_of(r)[r.sample].offset,
