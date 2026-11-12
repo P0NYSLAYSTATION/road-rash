@@ -185,9 +185,14 @@ static uint32_t __cdecl hook_controls(void) {
     if (g_drive == 2) {
         const uintptr_t rider = *(uint32_t*)0x004642d8;
         if (readable(rider, 0x144)) {
-            const uintptr_t slice = *(uint32_t*)(rider + 0x140);
-            if (readable(slice, 0xd0)) {
-                const int32_t x = (*(int32_t*)(rider + 0x28) >> 8) - *(int32_t*)(slice + 0xcc);
+            uintptr_t slice = *(uint32_t*)(rider + 0x2c);
+            if (!readable(slice, 0xe8)) slice = *(uint32_t*)(rider + 0x140);
+            if (readable(slice, 0xe8)) {
+                // +cc is the roadway reference origin. Unequal lane widths
+                // put the pavement midpoint elsewhere; e0/e4 are its edges.
+                const int32_t centre = (int32_t)(((int64_t)(int32_t)RD32(slice + 0xe0) +
+                                                (int32_t)RD32(slice + 0xe4)) / 2);
+                const int32_t x = (*(int32_t*)(rider + 0x28) >> 8) - centre;
                 if (x < -60)
                     controls |= 0x200;
                 else if (x > 60)
@@ -196,6 +201,17 @@ static uint32_t __cdecl hook_controls(void) {
         }
     }
     return controls;
+}
+
+static void capture_keyboard_axes(uint32_t controls) {
+    // 44fa80 normally calls 44fa50 before returning each keyboard action.
+    // Raw mask injection bypassed this: with joystick mode enabled, right
+    // steering read a stale zero axis in 40ad78, producing no steering.
+    typedef void (__fastcall *key_axis_fn)(int);
+    const key_axis_fn key_axis = (key_axis_fn)0x0044fa50;
+    if (controls & 1) key_axis(0);
+    if (controls & 4) key_axis(2);
+    else if (controls & 0x200) key_axis(9);
 }
 
 /* Live CRT rand state (plan 10 task 1): 0x00455eb0 advances the MSVC seed at
@@ -341,6 +357,9 @@ static void dump_sim_tick(void) {
         rr_log("solo", g_solo);
         rr_log("ring.car_schema", 2); // byte offsets corrected from decompiler element indices
         rr_log("rng.counter_enabled", g_rand_counter_installed);
+        rr_log("input.joystick", RD8(0x00476c98));
+        rr_log("input.steer_axis", (int32_t)RD32(0x004b7e7c));
+        rr_log("input.keyboard_axes", g_drive || g_input ? 1 : 0);
         if (g_initial_traffic_tick >= 0) rr_log("traffic.setup_tick", g_initial_traffic_tick);
         if (g_initial_pedestrian_tick >= 0) rr_log("pedestrian.setup_tick", g_initial_pedestrian_tick);
         if (g_terrain_trace) rr_log("ring.terrain.schema", 1);
@@ -358,6 +377,20 @@ static void dump_sim_tick(void) {
             rr_log(key, (long long)g_randtrace_callers[i]);
         }
     rr_log("controls", (long long)(uint32_t)RD32(0x004b7ed0));
+    if (g_drive == 2 && getenv("RR_ORACLE_DRIVER_TRACE")) {
+        const uintptr_t bike = (uint32_t)RD32(0x004642d8);
+        if (readable(bike, 0x144)) {
+            const uintptr_t active = (uint32_t)RD32(bike + 0x2c);
+            const uintptr_t retained = (uint32_t)RD32(bike + 0x140);
+            const uintptr_t slice = readable(active, 0xe8) ? active : retained;
+            if (readable(slice, 0xe8))
+                fprintf(g_out, "# driver tick=%d control=%u joystick=%u axis=%d lateral=%d origin=%d left=%d right=%d bend=%d active=%u retained=%u\n",
+                    tick, RD32(0x004b7ed0), RD8(0x00476c98), (int32_t)RD32(0x004b7e7c),
+                    (int32_t)RD32(bike + 0x28), (int32_t)RD32(slice + 0xcc),
+                    (int32_t)RD32(slice + 0xe0), (int32_t)RD32(slice + 0xe4),
+                    (int32_t)RD32(slice + 0xb4), (uint32_t)active, (uint32_t)retained);
+        }
+    }
     /* Player-control branch proof (plan 10 Task 5 Step 2a): DAT_004753c8
      * sampled every tick. 0 = human (0x00434660 consumes the control word),
      * 1 = attract-demo AI branch. Read-only; the offline probe elsewhere
@@ -960,6 +993,8 @@ static void __cdecl hook_step(void) {
             if (g_input_exhausted_tick < 0) g_input_exhausted_tick = RD32(0x004b7ecc);
         }
     }
+    if (g_sim && g_race_started && (g_drive || g_input))
+        capture_keyboard_axes(RD32(0x004b7ed0));
     if (g_knock_tick && g_sim && g_race_started && RD32(0x004b7ecc) == g_knock_tick) {
         static int32_t rider_impulse[3] = {-256, 0, 1792}, bike_impulse[3] = {0, 0, 1024};
         const uintptr_t player = (uint32_t)RD32(0x004642d8);

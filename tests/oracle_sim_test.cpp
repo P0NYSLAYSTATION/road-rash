@@ -355,7 +355,7 @@ static int replay_main(int argc, char** argv) {
         std::cout << "SKIP missing " << file << '\n';
         return rr::golden::skip;
     }
-    const auto g = rr::golden::load(file);
+    const auto g = rr::golden::load_indexed(file);
     if (g.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" &&
         g.exe != "b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563")
         throw std::runtime_error("different executable");
@@ -694,6 +694,8 @@ static int replay_main(int argc, char** argv) {
         }
         if (green == 0 || green >= g.frames.size())
             throw std::runtime_error("no green frame: player state never moves");
+        g.frames.pin(green);
+        g.frames.pin(green - 1);
         const auto& fg = g.frames.at(green);
         const auto& fp = g.frames.at(green - 1);
         auto frg = fg.find("rng");

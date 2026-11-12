@@ -4355,3 +4355,23 @@ installed BUILD_INFO matches, binary updates and main menu renders correctly.
 Receipt: build/parity-upgrade-validation.json. Public installer download SHA256
 verified90a68c83730692bc9e1117b5538e0d0e946b076df6ec554ba0b46d3056a44c6a.
 See [release](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.2).
+
+## November12 — capture steering and full-race tooling
+
+Original E:/RR input-mode probe reports joystick1/axis0. Working executable
+43490d/434921 confirms masks4/200;40ad35/40ad66 selects the joystick-dependent
+amplitude. Original keyboard44fa80 calls44fa50 to set it. The corrected
+capture does the same for generated and recorded keyboard masks.
+
+Complete human hiway-keyboard-midpoint-3000: right460 ticks all axis32,
+left518 all axis0;3000/3000 positions inside pavement,2589 curved-slice ticks.
+Midpoint and reference origin coincide throughout this scenario; active and
+retained slice pointers also coincide. Further geometry cases remain open.
+build/hiway-driver-verification.json records the measurements. Original working
+AWEMAN32.DLL restored to ca7f2f65bf6d1550857556a27d65d4f44d7a6ca14c2be89b7c0f9affb6a47022.
+
+Full Release gate on current local tree passes141 registered,105 passed,
+36 explicit skips, zero failures (build/full-track-integration-tests-console.log).
+New indexed1000-frame replay validates anchor lifetimes, bounded residency,
+lookahead/backward reads and late malformed fields; streaming10000-frame
+Python validation verifies bounded memory. Complete race parity remains open.

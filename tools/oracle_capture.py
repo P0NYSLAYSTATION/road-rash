@@ -15,66 +15,80 @@ from agent_common import ROOT, ResourceClaims, atomic_json, sha256
 
 
 def validate_trace(path, simulation=False, expected_exe=None, expected_frames=None):
-    """Validate the complete format, sequence and (for simulation) required tick data."""
-    lines = Path(path).read_text().splitlines()
-    if not lines or lines[0] != '# rr-oracle 1':
-        raise ValueError('bad oracle magic')
-    header, frames, current, ended = {}, [], None, False
-    for line in lines[1:]:
-        if not line or line.startswith('#'):
-            if any(x in line.lower() for x in ['patch verification failed', 'patch installation failed',
-                                               'ordinal 2 not found', 'invalid rr_oracle', 'startup dialog:']):
-                raise ValueError('oracle instrumentation failure: ' + line)
-            continue
-        if ended:
-            raise ValueError('data after end marker')
-        if line == 'end':
-            ended = True
-            continue
-        if '\t' not in line:
-            raise ValueError('missing tab separator')
-        key, value = line.split('\t', 1)
-        if key in {'exe', 'scenario'}:
-            if current is not None or key in header or not value:
-                raise ValueError('invalid or duplicate header')
-            header[key] = value
-        elif key == 'frame':
-            if set(header) != {'exe', 'scenario'} or value != str(len(frames)):
-                raise ValueError('invalid frame sequence/header')
-            current = {}
-            frames.append(current)
-        else:
-            if current is None or not key or key in current or not re.fullmatch(r'-?\d+', value):
-                raise ValueError('invalid/duplicate integer field')
-            n = int(value)
-            if not -(2**63) <= n < 2**63:
-                raise ValueError('integer outside int64')
-            current[key] = n
-    if not ended or not frames:
+    """Validate every field while retaining only one frame, including full-race traces."""
+    header, current, ended = {}, None, False
+    count, tick0, last_tick, seed = 0, None, None, None
+    branches = set()
+    measured, last_count, max_count = True, -1, -1
+
+    def finish_frame():
+        nonlocal count, tick0, last_tick, seed, measured, last_count, max_count
+        if current is None:
+            return
+        if count == 0:
+            tick0, seed = current.get('tick'), current.get('seed')
+        if simulation and not {'tick', 'rng', 'controls', 'rider.0.position', 'rider.0.speed'} <= current.keys():
+            raise ValueError(f'simulation frame {count} lacks required fields')
+        if tick0 is not None and current.get('tick') != tick0 + count:
+            raise ValueError(f'tick not contiguous at frame {count}')
+        last_tick = current.get('tick')
+        branches.add(current.get('player.demo_hold'))
+        calls = current.get('player.think_count', -1)
+        measured = measured and current.get('player.think') == 0x00434660 and calls >= 0 and calls >= last_count
+        last_count, max_count = calls, max(max_count, calls)
+        count += 1
+
+    with Path(path).open(encoding='utf-8') as source:
+        if source.readline().rstrip('\r\n') != '# rr-oracle 1':
+            raise ValueError('bad oracle magic')
+        for raw in source:
+            line = raw.rstrip('\r\n')
+            if not line or line.startswith('#'):
+                if any(x in line.lower() for x in ['patch verification failed', 'patch installation failed',
+                                                   'ordinal 2 not found', 'invalid rr_oracle', 'startup dialog:']):
+                    raise ValueError('oracle instrumentation failure: ' + line)
+                continue
+            if ended:
+                raise ValueError('data after end marker')
+            if line == 'end':
+                finish_frame()
+                current = None
+                ended = True
+                continue
+            if '\t' not in line:
+                raise ValueError('missing tab separator')
+            key, value = line.split('\t', 1)
+            if key in {'exe', 'scenario'}:
+                if current is not None or count or key in header or not value:
+                    raise ValueError('invalid or duplicate header')
+                header[key] = value
+            elif key == 'frame':
+                finish_frame()
+                if set(header) != {'exe', 'scenario'} or value != str(count):
+                    raise ValueError('invalid frame sequence/header')
+                current = {}
+            else:
+                if current is None or not key or key in current or not re.fullmatch(r'-?\d+', value):
+                    raise ValueError('invalid/duplicate integer field')
+                n = int(value)
+                if not -(2**63) <= n < 2**63:
+                    raise ValueError('integer outside int64')
+                current[key] = n
+    if not ended or not count:
         raise ValueError('truncated/empty capture: require frames and end marker')
     if not re.fullmatch(r'[0-9a-f]{64}', header.get('exe', '')):
         raise ValueError('invalid executable hash')
     if expected_exe and header['exe'] != expected_exe:
         raise ValueError('different reference executable')
-    if expected_frames is not None and len(frames) != expected_frames:
-        raise ValueError(f'frame count {len(frames)} != expected {expected_frames}')
-    tick0 = frames[0].get('tick')
-    for i, frame in enumerate(frames):
-        if simulation and not {'tick', 'rng', 'controls', 'rider.0.position', 'rider.0.speed'} <= frame.keys():
-            raise ValueError(f'simulation frame {i} lacks required fields')
-        if tick0 is not None and frame.get('tick') != tick0 + i:
-            raise ValueError(f'tick not contiguous at frame {i}')
-    branches = {f.get('player.demo_hold') for f in frames}
-    # Evidence comes from instrumented values in the trace, never an env flag/name.
+    if expected_frames is not None and count != expected_frames:
+        raise ValueError(f'frame count {count} != expected {expected_frames}')
     branch = 'human' if branches == {0} else 'demo' if branches == {1} else 'unverified'
     if branch == 'human' and header['exe'] == 'b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563':
-        counts=[f.get('player.think_count',-1) for f in frames]
-        measured=all(f.get('player.think')==0x00434660 for f in frames)
-        if not measured or min(counts)<0 or max(counts)<=0 or counts!=sorted(counts):
-            branch='unverified'
+        if not measured or max_count <= 0:
+            branch = 'unverified'
     return {'schema': 'rr-oracle 1', 'exe_sha256': header['exe'],
-            'scenario': header['scenario'], 'frames': len(frames), 'tick_start': tick0,
-            'tick_end': frames[-1].get('tick'), 'seed': frames[0].get('seed'),
+            'scenario': header['scenario'], 'frames': count, 'tick_start': tick0,
+            'tick_end': last_tick, 'seed': seed,
             'control_branch': branch, 'trace_sha256': sha256(path), 'complete': True}
 
 

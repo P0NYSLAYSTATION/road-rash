@@ -3230,3 +3230,19 @@ Released [3do-1.1.2](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3
 from clean15b46a1. The isolated1.1.1 update preserved600 asset/save/settings/
 soundfont files, and the installed main menu rendered correctly. Public
 installer download checksum verified. Parity remains incomplete as above.
+
+## November12 — full-race tooling and capture input correction
+
+Original runtime measurement confirms joystick mode was enabled, making raw
+right-steer masks depend on a stale zero analog axis. Capture injection now
+reproduces the original keyboard converter's axis side effects for both live
+generated commands and recorded-mask playback. Verified right axis32 and
+left axis0 through the original steering branches. Corrected Hiway driving
+stays within pavement bounds for3000 ticks,2589 on curved slices; this is
+driver validation, not full-track simulation acceptance.
+
+Trace validation streams one frame; indexed native replay bounds decoded
+frame memory while preserving startup/green anchors and validating the
+entire file before replay. New malformed-input and memory/lifetime tests pass.
+Local simulation fixes advance City to1251 and Napa to1259; those differences
+remain open. See [continuation](agent-handoffs/full-track-parity-20261112.md).

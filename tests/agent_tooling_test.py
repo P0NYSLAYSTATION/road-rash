@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import tracemalloc
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
@@ -77,6 +78,24 @@ class Tooling(unittest.TestCase):
             validate_trace(p, True, 'b' * 64)
         with self.assertRaises(ValueError):
             validate_trace(p, True, expected_frames=3)
+
+    def test_full_race_validation_has_bounded_memory(self):
+        p = self.root / 'long.tsv'
+        with p.open('w') as out:
+            out.write('# rr-oracle 1\nexe\t' + EXE + '\nscenario\tlong\n')
+            for i in range(10000):
+                out.write(f'frame\t{i}\ntick\t{i+1}\nrng\t1\ncontrols\t1\n'
+                          'rider.0.position\t1\nrider.0.speed\t1\nplayer.demo_hold\t0\n')
+            out.write('end\n')
+        tracemalloc.start()
+        try:
+            info = validate_trace(p, True, EXE, 10000)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(info['tick_end'], 10000)
+        self.assertEqual(info['control_branch'], 'human')
+        self.assertLess(peak, 2 * 1024 * 1024)
 
     def test_resource_overlap_live_owner_and_explicit_release(self):
         claims = ResourceClaims()
