@@ -2,6 +2,10 @@
 
 ## Windows continuation — November 12, 2026
 
+Latest police-lifetime continuation matches through8349 including RNG on the
+completed Hiway trace. First gap8350 is RNG, original2 calls/native4. All-track
+full-race acceptance remains open. This supersedes older gap statements below.
+
 Latest traffic continuation matches the completed Hiway trace through8191,
 including RNG. First gap8192 is police brain+140 original12/native0. Traffic
 wall/dimension, undrawn selector and signal-lifetime evidence supersedes older

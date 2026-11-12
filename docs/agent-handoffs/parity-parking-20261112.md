@@ -9,6 +9,14 @@ Continue the authorized work within the active turn; do not stop after status.
 
 ## Published checkpoint
 
+Release1.1.7 is published from clean c2af6815ddc422fcf024a63624d382f283a79527:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.7
+SHA2566ed384433e1665bc106e445157f1a2290c8f62937525471c760aed4a235af2a9.
+Public download verified (`build/v117-publish.log`). Isolated1.1.6->1.1.7
+upgrade preserved600 files and passed SDL menu smoke
+(`build/parity-v117-upgrade-validation.json`). Traffic checkpoint is committed
+and pushed. Subsequent police-state changes are in progress below.
+
 Release1.1.6 is published from clean1b3179df89b123eb9656afb938d38fff5a6e8c2d:
 https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.6
 Installer SHA25680ebb793a9609052e0d0f5693f4401e86228f9b9dd7b0f57110b406bd14f0d7f.
@@ -180,3 +188,24 @@ Final full build and SDL suite succeeded, logs
 zero failures; two unavailable Direct3D tests explicitly excluded. No claim of whole-race
 parity. Next: finish validation/docs, commit/push, installer1.1.7 upgrade/release,
 then trace8192. Do not end the turn after a partial status.
+
+## Police personality continuation
+
+8192 was second-appearance personality lifetime. Both original cop appearances
+reference5012836 through the half's +1d8. Mutable state counters, ratings,
+rating targets, easing and replan accumulator survive removal. Native now saves
+those fields into PoliceSetup.config.personality before removing the cop, and
+initializes state_ticks/replan_ticks from that record on spawn. No hardcoded
+counter values. Initial state-counter fix passed140 then exposed188 (16/4).
+Combined fix measures exact through8349 in
+`build/hiway-police-replan-lifetime.json`. First gap8350 RNG original18043582,
+native3799689000:2 original calls versus4 native after shared3170814756.
+Original complete caller log at8350 records407ba9 and44efc6.
+
+`build/police-lifetime-checkpoint-full-build.log` succeeds; fresh SDL suite
+104 passed,35 skips,zero failures, two Direct3D tests explicitly excluded.
+Strict Napa2400/City600 pass (`build/police-lifetime-checkpoint-regressions.json`).
+Next checkpoint: commit/push and release1.1.8 with isolated1.1.7 upgrade check.
+Read-only native trace at8350 is running in exec9891,
+`build/hiway-rng-8350-native.log`, RR_FIELD_ALL1, no reseeding. No original
+capture active. Continue RNG tracing after release; do not stop after status.

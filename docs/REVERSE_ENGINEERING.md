@@ -1,5 +1,15 @@
 # Binary evidence and next work
 
+## November 12, 2026 — police personality survives despawn
+
+Original first and second cop appearances both reference personality5012836
+(half+1d8).00405c80 resets selected words without clearing all state counters
+or replan accumulation. The second appearance retains state2 counter12 and
+starts with replan16 after its4-tick spawn replan; native started0 and4.
+The port now saves those counters, ratings/targets and easing into the mutable
+police config on removal and reads them on respawn. Hiway8350's next RNG gap
+has complete original caller entries407ba9 and44efc6; native consumes two extra.
+
 ## November 12, 2026 — traffic walls, dimensions and retained signals
 
 0043adc0 calls0043a610 after car motion;0044e0c3/0044e3f5 copy six kind-specific

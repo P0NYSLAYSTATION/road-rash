@@ -3872,6 +3872,8 @@ bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
         ai.rating_tgt[i] = w[0x78 / 4 + size_t(i)];
     }
     for (int i = 0; i < 3; ++i) ai.ease[i] = w[0x12c / 4 + size_t(i)];
+    for (size_t i = 0; i < ai.state_ticks.size(); ++i) ai.state_ticks[i] = w[0x138 / 4 + i];
+    ai.replan_ticks = w[0x188 / 4];
     ai.overtake_index = byte_at(0x165);
     ai.kick_roll = int8_t(byte_at(0x1d0));
     ai.backhand_roll = int8_t(byte_at(0x1d1));
@@ -3969,6 +3971,20 @@ void Race::remove_cop() {
     // (always the newest rider; riders built later never exist).
     cop_removal_pending_ = false;
     const int index = int(riders_.size()) - 1;
+    //The police personality is a persistent record, not a fresh EXE copy
+    //on each appearance.00405c80 resets selected state words, but leaves
+    //other state counters and relationship easing data in that record.
+    if (police_) {
+        const auto& ai = riders_.back().brain;
+        auto& words = police_->config.personality;
+        for (size_t i = 0; i < 30; ++i) {
+            words[i] = ai.rating[i];
+            words[0x78 / 4 + i] = ai.rating_tgt[i];
+        }
+        for (size_t i = 0; i < 3; ++i) words[0x12c / 4 + i] = ai.ease[i];
+        for (size_t i = 0; i < ai.state_ticks.size(); ++i) words[0x138 / 4 + i] = ai.state_ticks[i];
+        words[0x188 / 4] = ai.replan_ticks;
+    }
     schedule_.erase(std::remove_if(schedule_.begin(), schedule_.end(),
                                    [&](const ScheduleNode& n) { return n.rider == index; }),
                     schedule_.end());

@@ -1,5 +1,15 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — repeated police lifetime gate
+
+`build/hiway-police-replan-lifetime.json` matches the unchanged completed
+Hiway trace through8349 including RNG. First difference8350: original
+18043582/native3799689000, original2 calls/native4; exit1 remains failed
+whole-race acceptance. Strict Napa2400/City600 pass
+(`build/police-lifetime-checkpoint-regressions.json`). Full build succeeds;
+SDL gate104 passed,35 skips,zero failures, two unavailable Direct3D tests
+excluded (`build/police-lifetime-checkpoint-native-tests.log`).
+
 ## November 12, 2026 — traffic wall and signal lifetime gate
 
 `build/hiway-signal-lifetime.json`: unchanged14084-tick completed original trace

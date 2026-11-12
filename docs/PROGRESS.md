@@ -1,5 +1,14 @@
 # Port progress
 
+## November 12, 2026 — repeated police personality lifetime
+
+The completed Hiway trace now matches through8349 including RNG. Police
+appearances reuse their mutable personality counters, relationship easing and
+replan accumulator instead of restarting from the EXE record. The8192 second
+spawn mismatch is resolved. First remaining gap8350 is RNG: original2 calls,
+native4. Full native SDL gate104 passed,35 skips, two Direct3D tests excluded;
+strict Napa2400/City600 still pass. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — traffic walls and signal pool lifetime
 
 The unchanged completed Hiway recording now matches through8191 including RNG.
