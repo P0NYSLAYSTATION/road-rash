@@ -639,10 +639,15 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
                 route[size_t(ring_slot_sample(from >> 8, front_q8, int32_t(route.size())))].path;
             const auto& after =
                 route[size_t(ring_slot_sample(to >> 8, front_q8, int32_t(route.size())))].path;
+            const auto before_motion = road_motion_ ? road_motion_(from) : std::nullopt;
+            const auto after_motion = road_motion_ ? road_motion_(to) : std::nullopt;
             body.i32(0x134) = from;
             body.i32(0x1c) = body.i32(0x138) = to;
-            accumulate_road_motion(body, physics_, uint32_t(from), uint32_t(to), before.bend, before.rise,
-                                   after.bend, after.rise);
+            accumulate_road_motion(body, physics_, uint32_t(from), uint32_t(to),
+                                   before_motion ? before_motion->first : before.bend,
+                                   before_motion ? before_motion->second : before.rise,
+                                   after_motion ? after_motion->first : after.bend,
+                                   after_motion ? after_motion->second : after.rise);
         };
         const int32_t crossings = ((initial + distance) >> 8) - (initial >> 8);
         if (std::abs(crossings) < 2) {

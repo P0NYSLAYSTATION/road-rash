@@ -9,6 +9,13 @@ Continue the authorized work within the active turn; do not stop after status.
 
 ## Published checkpoint
 
+Release1.1.9 is published from clean d9172a46eaa1d3685db75918606cfe9263f8b639:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.9
+SHA2568aea62f0fd323ee3c2dbca18f4eed8dabc0488a42566cad9f82af1b91788f24a.
+Public download verified (`build/v119-publish.log`). Isolated1.1.8->1.1.9
+upgrade preserved600 files and passed SDL menu smoke
+(`build/parity-v119-upgrade-validation.json`). Crashed-contact checkpoint pushed.
+
 Release1.1.8 is published from clean5c36f18a36533bf93313608dd7e4d48403528237:
 https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.8
 SHA2566461bb020d6fd5ff159c4084f4c68e2e63b70f6032aceeead42ef9603915f53e.
@@ -243,3 +250,29 @@ oracle-sim-test.exe (`build/crashed-car-sound-gate-build.log`). Waited for owned
 exec62710 completion; retry succeeded. No approval rejection occurred.
 Next: commit/push, release1.1.9 isolated1.1.8 update, then9336 motion investigation.
 No original capture active. No need for another full original race yet.
+
+## Physical traffic motion continuation
+
+Traffic still read canonical route bend/rise while Race::accumulate read the
+physical ring. A road_motion callback now resolves nearest ring retained_motion
+for both endpoints of car swept segments, with canonical fallback for synthetic
+fixtures without rings. This resolves9336 and matches the accepted Hiway trace
+through9406 including RNG (`build/hiway-traffic-physical-motion.json`). First
+gap9407 ped serial8 selector0 position314763 lateral-110745: resource+1e0 is
+available original1/native0. No whole-race pass.
+
+Build succeeds; strict Napa2400/City600 pass
+(`build/traffic-physical-motion-regressions.json`); fresh SDL suite104 passed,
+35 skips,zero failures, two Direct3D tests excluded
+(`build/traffic-physical-motion-native-tests.log`).
+
+An optional original ped-resource comment probe now prints graphics pointer,
+RRAN header, family ID and root for target tick-20..+1. First helper build failed
+because RD16 was undefined; replaced with uint16_t of existing RD32. Retry
+`build/ped-resource-diagnostic-proxy-retry-build.log` succeeds. No original
+capture is active yet. After checkpoint release1.1.10 (upgrade from1.1.9), run
+diagnostic9408 with AI_TARGET_TICK9407, accepted controls and measured extra-AI
+speeds, exact E:/RR, reversible working-DLL hooks. Compare native graphics_valid
+timeline overlay against original resource header before changing residency.
+Do not run full graphics/import gates while original capture is installed.
+Continue without prompting the user or stopping after partial status.

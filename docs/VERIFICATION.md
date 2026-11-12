@@ -1,5 +1,14 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — physical traffic motion gate
+
+`build/hiway-traffic-physical-motion.json`: unchanged completed Hiway trace
+matches through9406 including RNG. First gap9407 pedestrian resource
+availability original1/native0; exit1 remains failed whole-race acceptance.
+Strict Napa2400/City600 pass (`build/traffic-physical-motion-regressions.json`).
+Full build succeeds; SDL gate104 passed,35 skips,zero failures, two Direct3D
+tests excluded (`build/traffic-physical-motion-native-tests.log`).
+
 ## November 12, 2026 — crashed contact gate
 
 `build/hiway-crashed-car-sound-gate.json`: unchanged completed Hiway trace

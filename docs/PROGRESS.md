@@ -1,5 +1,13 @@
 # Port progress
 
+## November 12, 2026 — physical traffic road motion
+
+Traffic now reads retained physical ring bend/rise words for swept motion,
+as riders already do. The completed Hiway trace matches through9406 including
+RNG; first gap9407 is pedestrian serial8 resource availability. Strict
+Napa2400/City600 pass; SDL gate104 passed,35 skips, two Direct3D tests excluded.
+[Evidence and remaining work](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — crashed-bike car contacts
 
 Hiway now matches through9335 including RNG. The original skips sound draws

@@ -1,5 +1,12 @@
 # Binary evidence and next work
 
+## November 12, 2026 — traffic shares retained road motion
+
+Original cars follow physical slice links in00439270/004394c0, reading current
+bend/rise words. Native traffic still used canonical route data although riders
+already used retained physical words. Routing traffic through the same ring
+cache resolves Hiway9336 road-rise72/native99 and matches through9406.
+
 ## November 12, 2026 — crashed car-contact jump
 
 00404a5f jumps to00404f3f when bike+2f4 is nonzero, before sound RNG and

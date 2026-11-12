@@ -717,6 +717,13 @@ void Race::collide_pedestrians() {
 void Race::attach_terrain_type() {
     if (traffic_ && terrain_source_) {
         traffic_->set_terrain_type([this](const RouteSample& s) { return int(ground(s).type); });
+        traffic_->set_road_motion([this](int32_t position) -> std::optional<std::pair<int32_t, int32_t>> {
+            const auto* ring = nearest_ring(position);
+            if (!ring) return std::nullopt;
+            const auto& route = route_of(riders_[0]);
+            const size_t sample = size_t(std::clamp(position >> 8, 0, int32_t(route.size()) - 1));
+            return ring->retained_motion(position, route[sample].half);
+        });
         traffic_->set_wall_response([this](Bike& body, size_t current, size_t previous) {
             Rider actor;
             actor.bike = body;

@@ -803,6 +803,15 @@ static void dump_sim_tick(void) {
                         rr_log(key, sim_field_value(node, offsets[i], offsets[i] == 0x1c4 ? 2 :
                             offsets[i] == 0x1fc ? 1 : 4, 1));
                     }
+                    if (g_ai_probe_tick >= 0 && (int32_t)RD32(0x004b7ecc) >= g_ai_probe_tick - 20 &&
+                        (int32_t)RD32(0x004b7ecc) <= g_ai_probe_tick + 1) {
+                        const uintptr_t graphics = (uint32_t)RD32(node + 0x1e0);
+                        const unsigned family_slot = RD8(node + 0x1dc) >> 6;
+                        fprintf(g_out, "# ped-resource tick=%u serial=%u selector=%u graphics=%u header=%08x family=%u root=%u\n",
+                                RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD8(node + 0x1dc), (unsigned)graphics,
+                                graphics && readable(graphics, 4) ? RD32(graphics) : 0,
+                                RD32(0x004b7f10 + family_slot * 4), RD32(0x0049e550 + family_slot * 4));
+                    }
                 }
                 snprintf(key, sizeof key, "node.%d.think", node_index);
                 rr_log(key, sim_field_value(node, 0xdc, 4, 0));

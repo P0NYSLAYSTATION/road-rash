@@ -2,6 +2,10 @@
 
 ## Windows continuation — November 12, 2026
 
+Latest physical-traffic-motion continuation matches through9406 including RNG.
+First gap9407 is pedestrian serial8 resource availability original1/native0.
+All-track full-race acceptance remains open; historical gaps follow below.
+
 Current crashed-contact continuation matches through9335 including RNG.
 First gap9336 is a traffic car's accumulated rise72/native99. Complete
 start-to-finish all-track parity remains open; older first-gap notes follow.
