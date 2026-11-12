@@ -80,6 +80,9 @@ class CourseScene {
     // sample; nullptr when resource 0 or 1 is missing (0x00440680 then
     // never loads or draws the pedestrian).
     const PedestrianLook* pedestrian_look(uint32_t section, uint32_t local, uint8_t selector) const;
+    const PedestrianLook* pedestrian_family_look(uint16_t family, uint8_t selector) const;
+    bool pedestrian_family_graphics_valid(const std::vector<uint16_t>& history,
+                                          const PedestrianLook& look) const;
     // 00441445 tests the cached RRAN header, including bytes beyond a shorter
     // replacement's end; changing the selector's current family is insufficient.
     bool pedestrian_graphics_valid(uint32_t section, uint32_t local, uint8_t selector,
@@ -95,7 +98,6 @@ class CourseScene {
     int32_t rail_height(uint32_t section, uint32_t local) const;
 
   private:
-    const PedestrianLook* pedestrian_family_look(uint16_t family, uint8_t selector) const;
     const CelTexture* tunnel_material(uint32_t section, uint32_t local, uint8_t selector, uint32_t lit,
                                       uint8_t kind, int32_t width, int32_t height) const;
     int32_t sine(int32_t angle) const;

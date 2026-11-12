@@ -56,6 +56,19 @@ class PedestrianSystem {
     PedestrianSystem(ActorSource actors, LookSource looks, std::vector<uint8_t> exe, GraphicsValid valid = {},
                        RouteLookSource route_looks = {});
     void reset(); // new race: empty pool, every DZHR record armed again
+    using ResidentLookSource = std::function<const PedestrianLook*(uint16_t, uint8_t)>;
+    using ResidentGraphicsValid = std::function<bool(const std::vector<uint16_t>&, const PedestrianLook&)>;
+    void set_resident_sources(ResidentLookSource looks, ResidentGraphicsValid valid) {
+        resident_looks_ = std::move(looks);
+        resident_valid_ = std::move(valid);
+    }
+    bool has_resident_sources() const { return bool(resident_looks_); }
+    const PedestrianLook* resident_look(uint16_t family, uint8_t selector) const {
+        return family ? resident_looks_(family, selector) : nullptr;
+    }
+    bool resident_graphics_valid(const std::vector<uint16_t>& history, const PedestrianLook& look) const {
+        return resident_valid_(history, look);
+    }
     std::vector<Pedestrian>& pool() { return pool_; }
     const std::vector<Pedestrian>& pool() const { return pool_; }
     const std::vector<DzhrActor>& actors(const RouteSample& s) const { return actors_(s); }
@@ -89,6 +102,8 @@ class PedestrianSystem {
     LookSource looks_;
     GraphicsValid graphics_valid_;
     RouteLookSource route_looks_;
+    ResidentLookSource resident_looks_;
+    ResidentGraphicsValid resident_valid_;
     std::array<int32_t, 25> template_{};
     std::vector<Pedestrian> pool_;
     std::set<std::tuple<uint32_t, uint32_t, size_t>> consumed_;

@@ -3988,6 +3988,7 @@ void Race::spawn_brain(Rider& r, size_t built, bool retain_speeds) {
     r.bike.i32(0x310) = (((level_ * 5 + 0x2d) * 200) >> 8) * 600;
     r.bike.i32(0x314) = 0;
     r.place = 0;
+    r.place_refresh = ticks_; //00405e15: half's next scheduled tick at construction
     built_riders_ = built;
     ai_replan(r);
     built_riders_ = SIZE_MAX;
@@ -4004,6 +4005,7 @@ void Race::set_police(const PoliceConfig& config, std::vector<BikeSpec> specs,
 // it is replaced from the player's place and the level.
 bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
     if (!police_ || !police_->library || riders_.empty() || ring_setup_ || cop_index() >= 0) return false;
+    police_->cycle = uint8_t((police_->cycle + 1) & 7); //00406c21, eight messages
     if (riders_.size() == riders_.capacity())
         riders_.reserve(riders_.size() + 1); // keeps outstanding references valid only when the ctor reserved
     // Plan 34 C4: the spawn is placed from its anchor human and clamped to
@@ -4027,6 +4029,10 @@ bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
     in.position = int32_t(slice) * 256;
     in.lateral_q8 = in.lane_target_q8 = road[size_t(slice)].offset * 256 + road_base_;
     in.tick = uint32_t(ticks_);
+    if (police_->previous_objects) {
+        in.previous_bike = &(*police_->previous_objects)[0];
+        in.previous_rider = &(*police_->previous_objects)[1];
+    }
     PoliceActor a = make_police_actor(police_->config, tables_, police_->specs, *police_->library, in);
     Rider r;
     r.cop = true;
@@ -4102,6 +4108,28 @@ bool Race::spawn_cop(int32_t slice_offset, int anchor_rider) {
     return true;
 }
 
+// Read-only counterpart of the cop's16 linked sub-slice+b4 lookahead words.
+std::array<int32_t, 16> Race::police_bend_words() const {
+    std::array<int32_t, 16> words{};
+    const int index = cop_index();
+    if (index < 0) return words;
+    const auto& cop = riders_[size_t(index)];
+    const auto& road = route_of(cop);
+    std::optional<size_t> closed;
+    for (size_t k = 0; k < words.size(); ++k) {
+        const size_t sample = closed.value_or(std::min(cop.sample + k, road.size() - 1));
+        words[k] = curvature(cop, sample, 1);
+        if (ring_) {
+            int32_t physical = int32_t(sample), end = ring_->front_q8() >> 8;
+            while (physical + 128 < end) physical += 128;
+            while (physical >= end) physical -= 128;
+            physical = std::clamp(physical, 0, int32_t(road.size() - 1));
+            if (ring_->forward_closed(physical * 256, road[size_t(physical)].half)) closed = sample;
+        }
+    }
+    return words;
+}
+
 // 0x00407860: from the player's half, scan rider halves backward within
 // 0xa00 then forward within 0x500 for the cop's half; an uncrashed cop is
 // returned unless the player's bike is flagged 0x10.
@@ -4165,6 +4193,7 @@ void Race::remove_cop() {
     //on each appearance.00405c80 resets selected state words, but leaves
     //other state counters and relationship easing data in that record.
     if (police_) {
+        police_->previous_objects = std::array<Bike, 2>{riders_.back().bike, riders_.back().half_object};
         const auto& ai = riders_.back().brain;
         auto& words = police_->config.personality;
         for (size_t i = 0; i < 30; ++i) {
@@ -4869,6 +4898,7 @@ void Race::update_halves() {
 
 void Race::countdown_step() {
     ++ticks_;
+    if (ring_) ring_->service_family_queue();
     apply_static_boxes();
     controls_.fill(0); // countdown thinks see no input (schedule_pass(0, ...))
     // 0x00438930 stores the player bike's last run as creation tick - 1
@@ -5272,6 +5302,7 @@ void Race::step(std::span<const uint32_t> words) {
         std::all_of(riders_.begin(), riders_.end(), [](const Rider& r) { return r.cop || r.finished; }))
         return;
     ++ticks_;
+    if (ring_) ring_->service_family_queue();
     if (cop_removal_pending_) remove_cop(); // last tick's marked cop (0x00437df0 prepass)
     apply_static_boxes();
     const bool trace =

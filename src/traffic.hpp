@@ -101,6 +101,7 @@ struct TrafficObstacle {
 // no think). Field comments name the original offsets.
 struct IntersectionSignal {
     bool active = false;
+    uint64_t free_rank = 0;
     int index = 0;           // +0xf8: 0..3; odd indices spawn crossing cars; type 0x40 << index
     int side = 0;            // 0x0041ef60 param_2: 0 left shoulder, 1 right
     int32_t phase = 0;       // +0xf0: 0..2, starts (~index & 1) * 2
@@ -112,6 +113,7 @@ struct IntersectionSignal {
     bool quiet = false;      // 0x0041eca0 bVar13: clears +0xdc (0x0041f220) when true
 };
 struct IntersectionController {
+    uint64_t free_rank = 0;
     bool active = false;
     int32_t durations[3] = {600, 180,
                             780};     // +0xfc..+0x104; {75, 0, 240} on a dual type-4 slice with flag byte 0
@@ -293,6 +295,7 @@ class TrafficSystem {
     std::vector<SoundEventRecord> events_;
     uint32_t serial_ = 0; // DAT_004b7e98
     uint64_t free_rank_ = 0;
+    uint64_t controller_free_rank_ = 0, signal_free_rank_ = 0;
     size_t next_free(size_t first, size_t last) const;
     bool spawn_enabled_ = true; // false: nulled-pool solo (draw, never place)
     bool filled_ = false;       // initial ring fill replayed

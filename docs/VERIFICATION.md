@@ -1,5 +1,12 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — all five completed human recordings
+
+Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
+[Evidence](agent-handoffs/parity-resource-lookup-20261112.md).
+
+Strict commands and receipts: `python tools/verify_sim.py --mode acceptance --whole-race --binary build/release/oracle-sim-test.exe --assets E:/RR` with the five finished fixtures listed in `build/v1118-whole-race-acceptance.json`:5 pass,0 skips,0 known divergences,0 unexpected failures,143764 ticks. Prefix receipt `build/v1118-release-regressions.json`:4 pass. Build `tools/build-local.ps1 -Configuration Release`; native gate `ctest --test-dir build/release --exclude-regex '^(directx9-main-window|integer-framebuffer)$' --output-on-failure` with `RR_ASSETS=E:/RR`, `RR_RENDERER=sdl`; logs `build/v1118-source-build.log`, `build/v1118-native-tests.log`. Imported police/pedestrian and synthetic queue/traffic regressions pass. No C++ LSP was available; MSVC diagnostics and focused/full compilation supplied validation. Originals and accepted traces remain unchanged.
+
 ## November 12, 2026 — Canyn and pool return order
 
 Canyn original29620 ends with outcome3, trace SHA7ae419ba5784a62d7cb12b4b4abff9e7f6ae03e10bca5dd6fefe8c8cdef2eacc. Direct whole replay matches including RNG, alongside Hiway14084/Napa29055. New focused pedestrian test verifies linked return order determines retained crossing lane; marked crossing-car test verifies final motion. Medly seed2 original37186 finished; native exact20645, first20646 resource availability. City original33819 finished; native exact18307, first18308 resource availability. Strict receipts build/v1117-whole-race-acceptance.json and build/v1117-release-regressions.json pass all three complete races and four prefixes. Full Release build and native suite pass104 tests with35 explicit skips and2 unavailable Direct3D exclusions (build/canyn-checkpoint-native-tests.log).

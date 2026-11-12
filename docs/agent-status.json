@@ -18,9 +18,10 @@
     {
       "area": "Simulation parity",
       "implementation": "Original live rider/car scheduler, native countdown, scene construction, AI combat/relationships, car callbacks, marking lifetimes and single-anchor replay",
-      "verification": "Windows November12: completed Hiway L1/seed1 human14084, Napa L1/seed1 human29055 and Canyn L1/seed1 human29620 match including RNG from one seed anchor. Completed Medly L1/seed2 recording37186 matches20645 before resource availability; City completed33819 matches18307 before similar resource availability. Three strict full races and four prefix regressions pass; native104 pass,35 explicit skips,2 unavailable Direct3D exclusions.",
-      "remaining": "City18308 and Medly seed2 tick20646 pedestrian resource availability; other levels/branches and behavior outside measured recordings. Multiplayer held.",
+      "verification": "Windows November12: strict completed human replays match Hiway L1/seed1 14084, Napa L1/seed1 29055, Canyn L1/seed1 29620, City L1/seed1 33819, Medly L1/seed2 37186 including RNG with one anchor. All19 City police coverage fields compared. Strict5/5 whole races and4/4 prefixes pass; MSVC Release/SDL native104 pass,35 explicit skips,2 unavailable Direct3D exclusions.",
+      "remaining": "Other levels/branches and behavior outside these recordings remain unverified. Multiplayer held.",
       "evidence": [
+        "agent-handoffs/parity-resource-lookup-20261112.md",
         "agent-handoffs/parity-city-visibility-20261112.md",
         "agent-handoffs/parity-projected-velocity-20261112.md",
         "agent-handoffs/parity-mixed-contacts-20261112.md",
@@ -52,8 +53,9 @@
       "area": "Other courses",
       "implementation": "Course data supported; composed renderer work pending",
       "verification": "Hiway L1/seed1 human full race14084 exact including RNG; completed City33819 recording exact through18307 (Windows November12)",
-      "remaining": "City18308 pedestrian draw resources; finished Medly/Canyn recordings and strict whole-race parity; other levels and branches",
+      "remaining": "Five completed L1 human recordings pass strict whole-race acceptance; other levels/branches and unexercised behavior remain unverified.",
       "evidence": [
+        "agent-handoffs/parity-resource-lookup-20261112.md",
         "plans/17-all-courses-port.md",
         "agent-handoffs/parity-finish-pools-20261112.md"
       ],

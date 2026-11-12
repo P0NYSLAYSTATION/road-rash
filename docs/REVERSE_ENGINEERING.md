@@ -1,5 +1,14 @@
 # Binary evidence and next work
 
+## November 12, 2026 — resource activation and retained pools
+
+00452310 queues MSRR prefetch and activation separately;0044b0e0 services one request from the eight-slot circular queue before scheduling.0044af80 dispatches a worker holding the replacement slot;0044ae90 loads/relocates asynchronously. City18307 queues115/slot3 activation after service,18308 dispatches with guard1/current36,18309 has115/guard0. Native imported payloads are already resident; the discrete queue commits worker completion on the next scheduler pass. This matches the measured captures, not arbitrary host I/O timing. Pedestrian first loads and cached RRAN-header validation now use resident slot/replacement history, preserving untouched bytes after shorter replacements.
+
+0044ecc3 reads a traffic light's retained physical slice even after its ring slot is rebuilt.004414a0 likewise checks a pedestrian's arrival against its retained physical shoulder on the final out-of-window think; City26107 retains pace8 and enters integration at800, then565 after drag5.0044e58c invokes crossing-car validation during construction; a rejected newborn stays linked with both clocks tick+100 until next prepass. All object pools allocate at the free-list tail; controller/light reuse must preserve old car pointers to replaced slots.
+
+00405990/00405c80 reuse police object storage.00405a18 clears bike crash;00405b1a clears only half+1e9 (low+1e8 survives);00405b20 and00405ce1/ced clear half1ec/1cc/1d0.00405e15 initializes the standings-refresh clock from the half's next tick.00406c21..37 advances the eight-message cycle on spawn. Native replay now compares all19 police identity/cycle/16 linked bend words rather than treating their absence from coverage as success.
+[Evidence](agent-handoffs/parity-resource-lookup-20261112.md).
+
 ## November 12, 2026 — marked car motion and allocation order
 
 0044dc10 can mark a crossing car and suppress0044e710 think; the independent0043adc0 mover still runs. Medly3759 markedlast3859 but moves44549->44559 and slows1762->1520. 00437df0 walks ascending+0 links while returning marked actors, so simultaneous returns must preserve that order before LIFO allocation. Medly seed2 newborn36 retains lane-1 from previous slot occupant27; native storage order chose a different image. Rebuild the lookup before clearing sort keys, and only when a return is pending.

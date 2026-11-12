@@ -70,6 +70,39 @@ rr::Course window_course(uint32_t branch_length) {
     return c;
 }
 
+void family_requests() {
+    auto course = synthetic_course();
+    course.sections[0].family_events = {{0, 1, 0, 10}, {0, 1, 1, 20},
+                                        {150, 1, 0, 11}, {150, 1, 1, 21}};
+    rr::TrackRing ring(course, 0);
+    uint32_t draws = 0;
+    const rr::TrackRing::Random random = [&] { ++draws; return 0u; };
+    ring.setup(50 * 256, random, {});
+    check(ring.resident_family(0) == 10 && ring.resident_family(1) == 20,
+          "setup activates initial families synchronously");
+    for (int front = 131; front <= 150; ++front) {
+        ring.service_family_queue();
+        ring.advance(256, random, {});
+    }
+    check(ring.resident_family(0) == 10 && ring.resident_family(1) == 20,
+          "crossing an activation point queues work after this tick's service");
+    const auto snapshot = ring;
+    const auto before = draws;
+    ring.service_family_queue();
+    check(ring.resident_family(0) == 0 && ring.resident_family(1) == 20,
+          "active worker blocks only the slot being replaced");
+    ring.service_family_queue();
+    check(ring.resident_family(0) == 11 && ring.resident_family(1) == 20,
+          "completed activation precedes the next slot's prefetch");
+    ring.service_family_queue();
+    check(ring.resident_family(1) == 0, "prefetch occupies its queue entry before activation");
+    ring.service_family_queue();
+    check(ring.resident_family(1) == 21 && draws == before,
+          "queued resource work completes without consuming simulation RNG");
+    check(snapshot.resident_family(0) == 10 && snapshot.resident_family(1) == 20,
+          "a ring snapshot retains independent resource queue and residency");
+}
+
 void finish_discovery() {
     auto course = window_course(400);
     course.sections[3].events.push_back({100, 101, 6, {1, 0, 0}});
@@ -238,6 +271,7 @@ void window_walks() {
 } // namespace
 
 int main() {
+    family_requests();
     finish_discovery();
     split_shoulders();
     window_walks();

@@ -736,6 +736,14 @@ struct FieldReplay {
         for (size_t k = 0; k < native_slots.size() && (diff.empty() || all); ++k) {
             const std::string p = "rider." + std::to_string(k) + ".";
             const Rider& r = race().riders()[size_t(native_slots[k].first)];
+            if (f.count(p + "cop")) {
+                check(f, p + "cop", native_slots[k].second == 4 && r.cop ? 1 : 0);
+                check(f, "police.slot", int64_t(k));
+                check(f, "police.cycle", race().police_cycle());
+                const auto bends = race().police_bend_words();
+                for (size_t n = 0; n < bends.size(); ++n)
+                    check(f, "police.bend." + std::to_string(n), bends[n]);
+            }
             if (native_slots[k].second == 4)
                 bike_slot(f, p, r, native_slots[k].first == 0);
             else

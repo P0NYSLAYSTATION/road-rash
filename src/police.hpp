@@ -29,6 +29,8 @@ struct PoliceSpawnInput {
     int level = 0, player_place = 0, player_personality = 0, lane = 0;
     int32_t position = 0, lateral_q8 = 0, ground = 0, lane_target_q8 = 0;
     uint32_t tick = 0;
+    const Bike* previous_bike = nullptr;
+    const Bike* previous_rider = nullptr;
 };
 // Local numeric actor setup from 0x00405990/0x00405c80/0x00406b80.
 // Caller supplies original road target/ground and owns route/scheduler links.

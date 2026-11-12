@@ -246,7 +246,9 @@ void Race::load_pedestrian_looks() {
         //that section's actual terminal cursor.
         const size_t front =
             ring_ ? size_t(std::max(0, ring_->front_q8() >> 8)) : p.body.sample;
-        const auto* current = pedestrians_->look(road, std::min(front, road.size() - 1), p.selector);
+        const auto* current = ring_ && pedestrians_->has_resident_sources()
+            ? pedestrians_->resident_look(ring_->resident_family(p.selector >> 6), p.selector)
+            : pedestrians_->look(road, std::min(front, road.size() - 1), p.selector);
         if (!current) continue;
         p.look = current;
         p.graphics_evicted = false;
@@ -315,9 +317,19 @@ void Race::step_pedestrians() {
     }
 }
 
+size_t Race::pedestrian_sample(const Pedestrian& p) const {
+    const auto& road = route_of(p.body);
+    if (const auto* ring = live_schedule_ ? nearest_ring(p.body.bike.i32(0x1c)) : nullptr) {
+        const int64_t back = ring->back_q8() >> 8;
+        return size_t(std::clamp<int64_t>(back + ((int64_t(p.body.sample) - back) & 127),
+                                          0, int64_t(road.size() - 1)));
+    }
+    return p.body.sample;
+}
+
 int Race::pedestrian_lane(const Pedestrian& p) const {
     // 0x0044a020(obj, 0): lanes of 250 world units from the slice centre.
-    const auto& s = route_of(p.body)[p.body.sample];
+    const auto& s = route_of(p.body)[pedestrian_sample(p)];
     const int32_t d = int32_t(uint32_t(p.body.bike.i32(0x28)) - uint32_t(s.offset * 256));
     return int8_t(int32_t(int64_t(sar8(d)) / 250) - (d < 0 ? 1 : 0));
 }
@@ -374,7 +386,7 @@ bool Race::pedestrian_road_clear(const Pedestrian& p, int factor, int delta) con
 bool Race::pedestrian_arrived(const Pedestrian& p) const {
     // 0x004414a0: past the middle of the far shoulder (+0xe4/+0xec right,
     // +0xe0/+0xe8 left).
-    const SliceEdges e = edges(p.body, p.body.sample);
+    const SliceEdges e = edges(p.body, pedestrian_sample(p));
     const int32_t lateral = p.body.bike.i32(0x28);
     if (p.side == 1) return ((e.right + e.right_shoulder) / 2) * 256 < lateral;
     return lateral < ((e.left + e.left_shoulder) / 2) * 256;
@@ -416,7 +428,7 @@ void Race::think_pedestrian(Pedestrian& p) {
     // signal for this side of the road, or -1. Phase 2 walks without a road
     // check; other phases hold; no signal checks the road.
     const int signal = traffic_
-                           ? traffic_->pedestrian_signal(route_of(p.body)[p.body.sample].path.marking_flags,
+                           ? traffic_->pedestrian_signal(route_of(p.body)[pedestrian_sample(p)].path.marking_flags,
                                                          b.i32(0x1c), pedestrian_lane(p))
                            : -1;
     p.pace = 0;
@@ -567,7 +579,10 @@ void Race::think_pedestrian(Pedestrian& p) {
                          unsigned(p.serial), p.body.route, riders_[0].route, front, s.section, s.local,
                          state.front.node, state.front.position);
         }
-        if (!pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look)) {
+        const bool valid = ring_ && pedestrians_->has_resident_sources()
+            ? pedestrians_->resident_graphics_valid(ring_->family_history(p.selector >> 6), *p.look)
+            : pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look);
+        if (!valid) {
             // 0x0044143b..0x00441474: replaced graphics lose their RRAN
             // header. Clear the loaded flag and descriptor; the old bank
             // availability words remain for the subsequent think.
@@ -594,7 +609,15 @@ void Race::move_pedestrian(Pedestrian& p) {
         surface_sample = size_t(std::clamp<int64_t>(back + ((int64_t(surface_sample) - back) & 127),
                                                   0, int64_t(route_of(p.body).size() - 1)));
     }
-    integrate_speed(b, tables_, surface_class(edges(p.body, surface_sample), b.i32(0x28)));
+    const auto surface_edges = edges(p.body, surface_sample);
+    const int surface = surface_class(surface_edges, b.i32(0x28));
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+        std::fprintf(stderr, "ped-integrate serial %u dt %d pos %d lat %d speed %d heading %d surface %d type %u flags %u edges %d/%d shoulders %d/%d retained %zu\n",
+                     unsigned(p.serial), int32_t(b.i32(0x18)), int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)),
+                     int32_t(b.i32(0xec)), int32_t(b.i32(0x128)), surface, unsigned(surface_edges.type),
+                     unsigned(surface_edges.flags), surface_edges.left, surface_edges.right,
+                     surface_edges.left_shoulder, surface_edges.right_shoulder, surface_sample);
+    integrate_speed(b, tables_, surface);
     advance_actor_motion(b, tables_, [&](int32_t distance) { move_along(p.body, distance); });
     //0043adf1 runs the shared wall/shoulder response for pedestrians too,
     //before vertical settling. City6207 clamps the walker to the shoulder.

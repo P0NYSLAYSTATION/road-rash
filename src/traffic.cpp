@@ -556,9 +556,15 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
                 line = (car.lateral - edge * 256 - crossing_half_width) >> 12;
             }
             if (!(kind & 1) && line * 0x1000 < car.dt * target * 200) {
-                const size_t ss =
-                    size_t(std::clamp(s.position_q8, int32_t(0), int32_t((route.size() - 1) * 256)) >> 8);
-                if (traffic_lane_count(kind == 0 ? route[ss].path.right_q8 : route[ss].path.left_q8) < 1)
+                //0044ecc3 reads the signal's retained +2c pointer. A light
+                //behind the ring back can already expose a rebuilt slot.
+                const size_t ss = size_t(ring_slot_sample(s.position_q8 >> 8, front_q8, int32_t(route.size())));
+                int32_t lanes = kind == 0 ? route[ss].path.right_q8 : route[ss].path.left_q8;
+                if (ring_source_)
+                    if (const auto* ring = ring_source_(s.position_q8))
+                        if (const auto physical = ring->slice_lanes(s.position_q8, c.half))
+                            lanes = (*physical)[kind == 0 ? 0 : 1];
+                if (traffic_lane_count(lanes) < 1)
                     target = 0;
             }
             if (target > 0 && line <= gap) {
@@ -765,10 +771,8 @@ int TrafficSystem::place_signal(const std::vector<RouteSample>& route, int contr
     // always uses the next route sample).
     int si = -1;
     for (size_t i = 0; i < signals_.size(); ++i)
-        if (!signals_[i].active) {
+        if (!signals_[i].active && (si < 0 || signals_[i].free_rank > signals_[size_t(si)].free_rank))
             si = int(i);
-            break;
-        }
     if (si < 0) return -1;
     const size_t s = size_t(std::clamp(slice, int32_t(0), int32_t(route.size() - 1)));
     const size_t n = std::min(s + 1, route.size() - 1);
@@ -809,10 +813,8 @@ void TrafficSystem::place_intersection(const std::vector<RouteSample>& route, in
         int8_t(traffic_lane_count(first.path.right_q8) + traffic_lane_count(first.path.left_q8)); // cVar3
     int ci = -1;
     for (size_t i = 0; i < controllers_.size(); ++i)
-        if (!controllers_[i].active) {
+        if (!controllers_[i].active && (ci < 0 || controllers_[i].free_rank > controllers_[size_t(ci)].free_rank))
             ci = int(i);
-            break;
-        }
     if (ci < 0) return; // 0x00438930 returned null
     auto& c = controllers_[size_t(ci)];
     c = IntersectionController{};
@@ -985,6 +987,15 @@ void TrafficSystem::place_crossing(const IntersectionController& c, int signal, 
         car.zone_lanes = c.lanes;
         car.heading = kind == 1 ? 0x400000 : -0x400000;
         car.active = true;
+        //0044e58c validates the newly constructed crossing car immediately,
+        //before it has a scheduled think or movement. Invalid placements
+        //remain linked until the next prepass, with both clocks marked ahead.
+        if (car.position >= primary_front_ - 0x8000 && car.position < primary_front_ &&
+            ((at.path.marking_flags & 0x20) == 0 || !car.zone_end || !car.zone_lanes)) {
+            car.pending_remove = true;
+            car.last_tick = car.next_tick = int32_t(tick_) + 100;
+            car.motion.u8(0xc0) = uint8_t((car.motion.u8(0xc0) & ~4) | 8);
+        }
         return;
     }
 }
@@ -1029,6 +1040,7 @@ bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_
     if (scheduled_tick_ && *scheduled_tick_ == tick) return false;
     scheduled_tick_ = tick;
     tick_ = tick;
+    primary_front_ = front_q8;
     std::vector<size_t> returning;
     for (size_t i = 0; i < cars_.size(); ++i)
         if (cars_[i].pending_remove) returning.push_back(i);
@@ -1042,16 +1054,31 @@ bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_
         // 00438a80 pops that end again (a stack, not first inactive).
         car.free_rank = ++free_rank_;
     }
-    for (auto& c : controllers_)
-        if (c.active && c.pending_remove) {
+    std::vector<size_t> returning_controllers, returning_signals;
+    for (size_t i = 0; i < controllers_.size(); ++i)
+        if (controllers_[i].active && controllers_[i].pending_remove) {
+            returning_controllers.push_back(i);
+            const auto& c = controllers_[i];
             for (int k = 0; k < 4; ++k)
-                if (c.signals[k] >= 0) signals_[size_t(c.signals[k])].active = false;
+                if (c.signals[k] >= 0) returning_signals.push_back(size_t(c.signals[k]));
+        }
+    std::stable_sort(returning_controllers.begin(), returning_controllers.end(),
+                     [&](size_t a, size_t b) { return controllers_[a].position_q8 < controllers_[b].position_q8; });
+    std::stable_sort(returning_signals.begin(), returning_signals.end(),
+                     [&](size_t a, size_t b) { return signals_[a].position_q8 < signals_[b].position_q8; });
+    for (size_t i : returning_signals) {
+        signals_[i].active = false;
+        signals_[i].free_rank = ++signal_free_rank_;
+    }
+    for (size_t i : returning_controllers) {
+            auto& c = controllers_[i];
             //0041f1f0 marks these pool objects;00438c20 returns them without
             //clearing their data or pointers held by cars. A later allocation
             //overwrites the slot, so existing cars observe that new occupant.
             c.active = false;
             c.pending_remove = false;
-        }
+            c.free_rank = ++controller_free_rank_;
+    }
     if (!filled_) build_slices(route, front_q8, 0, tick);
     if (!defer_controllers) think_intersections(front_q8 - 0x8000, front_q8, tick, route, random);
     return true;

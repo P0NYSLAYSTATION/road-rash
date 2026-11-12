@@ -493,6 +493,25 @@ const PedestrianLook* CourseScene::pedestrian_family_look(uint16_t id, uint8_t s
     slot = std::move(look);
     return &*slot;
 }
+
+bool CourseScene::pedestrian_family_graphics_valid(const std::vector<uint16_t>& history,
+                                                   const PedestrianLook& look) const {
+    std::array<uint8_t, 4> header{0x4e, 0x41, 0x52, 0x52};
+    uint8_t found = 0;
+    for (auto it = history.rbegin(); it != history.rend() && found != 15; ++it) {
+        const auto family = families_.find(*it);
+        if (family == families_.end()) continue;
+        const auto& bytes = family->second.bytes;
+        for (size_t i = 0; i < header.size(); ++i) {
+            const uint64_t offset = uint64_t(look.graphics_offset) + i;
+            if (!(found & (1 << i)) && offset < bytes.size()) {
+                header[i] = bytes[size_t(offset)];
+                found |= uint8_t(1 << i);
+            }
+        }
+    }
+    return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
+}
 const CelTexture* CourseScene::material(uint32_t section, uint32_t local, uint8_t selector, uint8_t category,
                                         std::optional<uint32_t> frame, int32_t width, int32_t height) const {
     const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];

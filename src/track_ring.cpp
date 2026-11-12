@@ -253,6 +253,80 @@ void TrackRing::enter(SectionWalker& w, uint32_t offset, bool start) {
         w.terrain.emplace(section.terrain, w.position, forward_);
     w.dzhr = {size_t(node.link), start ? 0 : (int32_t(section.samples.size()) - 1) * 0x100,
               start ? 0 : int32_t(events_.at(node.link)->records.size()) - 1};
+    w.family_position = start ? 0 : (int32_t(section.samples.size()) - 1) * 256;
+    w.family_index = start ? 0 : int32_t(section.family_events.size()) - 1;
+}
+
+void TrackRing::activate_family(uint16_t family, uint8_t slot) {
+    resident_families_[slot] = family;
+    family_history_[slot].push_back(family);
+}
+
+void TrackRing::request_family(uint16_t family, uint8_t slot, uint8_t type) {
+    if (resident_families_[slot] == family) return; //0044b120/0044b060
+    if (family_synchronous_) {
+        if (type == 3) activate_family(family, slot);
+        return;
+    }
+    //0049e5d0 is an eight-entry circular queue, including prefetch requests.
+    family_queue_[family_write_] = {family, slot, type};
+    family_write_ = uint8_t((family_write_ + 1) & 7);
+}
+
+void TrackRing::service_family_queue() {
+    if (family_worker_) {
+        const auto done = *family_worker_;
+        if (done.type == 3) activate_family(done.family, done.slot);
+        family_busy_[done.slot] = false;
+        family_worker_.reset();
+    }
+    if (family_read_ == family_write_) return;
+    const auto request = family_queue_[family_read_];
+    family_read_ = uint8_t((family_read_ + 1) & 7);
+    if (resident_families_[request.slot] == request.family) return;
+    family_worker_ = request;
+    if (request.type == 3) family_busy_[request.slot] = true;
+}
+
+void TrackRing::step_families(SectionWalker& w, int32_t delta) {
+    const int32_t old = w.family_position >> 8;
+    w.family_position += delta;
+    const int32_t sample = w.family_position >> 8;
+    if (!family_enabled_ || old == sample) return; //00452580
+    const auto section = node_of(*course_, w.node).link;
+    const auto& events = course_->sections[section].family_events;
+    if (events.empty()) return;
+    auto& types = family_types_[section];
+    const int32_t cursor = family_front_ ? sample + course_->sections[section].family_forward_bias : sample + 40;
+    const int32_t reach = family_front_ ? cursor + 20 : cursor - 2; //00476cd8 =10
+    const int32_t last = int32_t(events.size()) - 1;
+    for (;;) {
+        const auto& event = events.at(size_t(w.family_index));
+        auto& type = types.at(size_t(w.family_index));
+        if (delta > 0) {
+            if (event.sample > (family_front_ ? reach : cursor)) return;
+            if (family_front_) {
+                if (type == 1) { request_family(event.family, event.slot, 1); type = 3; }
+                if (event.sample <= cursor && type == 3) {
+                    request_family(event.family, event.slot, 3);
+                    type = 1;
+                } else if (type == 3) return;
+            }
+            if (w.family_index == last) return;
+            ++w.family_index;
+        } else {
+            if (event.sample < (family_front_ ? cursor : reach)) return;
+            if (!family_front_) {
+                if (type == 2) { request_family(event.family, event.slot, 1); type = 4; }
+                if (event.sample >= cursor && type == 4) {
+                    request_family(event.family, event.slot, 3);
+                    type = 2;
+                } else if (type == 4) return;
+            }
+            if (!w.family_index) return;
+            --w.family_index;
+        }
+    }
 }
 
 void TrackRing::commit_branch(uint8_t half) {
@@ -277,6 +351,7 @@ void TrackRing::collapse(Walker& w) {
 
 void TrackRing::step(Walker& w, int32_t delta) {
     if (!delta || w.stopped) return;
+    family_front_ = w.front;
     const int32_t next = w.position + delta;
     const bool crossing = ((w.position ^ next) & ~0xff) != 0;
     if (crossing) w.event = 0;
@@ -434,6 +509,7 @@ int TrackRing::step_section(SectionWalker& w, int32_t delta) {
     w.position = next;
     w.stepped = true;
     w.borr.step(delta);                    // 0x00451e20
+    step_families(w, delta);               //00452580 ->00452310
     if (w.terrain) w.terrain->step(delta); // 0x004516e0
     // 0x00452230: skip records before the walker's sample.
     w.dzhr.position += delta;
@@ -556,6 +632,19 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
 }
 
 void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sink) {
+    family_enabled_ = false;
+    family_synchronous_ = true;
+    family_read_ = family_write_ = 0;
+    family_queue_ = {};
+    family_worker_.reset();
+    resident_families_ = {};
+    family_busy_ = {};
+    family_history_ = {};
+    family_types_.clear();
+    for (const auto& section : course_->sections) {
+        auto& types = family_types_.emplace_back();
+        for (const auto& event : section.family_events) types.push_back(event.type);
+    }
     known_finish_ = 0;
     shoulders_ = {};
     closed_ends_ = std::make_shared<ClosedEnds>();
@@ -563,6 +652,7 @@ void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sin
     random_ = &random;
     std::vector<uint32_t> visited;
     jitter_events(course_->root, visited, random);
+    family_enabled_ = true;
     front_walker_.front = true;
     enter(front_walker_.halves[0], course_->root); // 0x00452f50 front, then back
     enter(back_walker_.halves[0], course_->root);
@@ -584,6 +674,7 @@ void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sin
         step(front_walker_, 0x100);
     }
     random_ = nullptr;
+    family_synchronous_ = false;
 }
 
 void TrackRing::advance(int32_t delta, const Random& random, const ActorSink& sink) {

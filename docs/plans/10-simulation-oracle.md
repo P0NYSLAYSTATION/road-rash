@@ -1,5 +1,10 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## November 12, 2026 — all five completed human recordings
+
+Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
+[Evidence](../agent-handoffs/parity-resource-lookup-20261112.md).
+
 ## November 12, 2026 — Canyn checkpoint
 
 Completed Canyn L1/seed1 human recording29620 matches including RNG; Hiway14084 and Napa29055 remain exact. Finished Medly seed2 recording37186 matches20645 before resource availability; City33819 matches18307 before similar resource availability. All five finished reference recordings exist. All-level/branch acceptance remains open; multiplayer held. Final native/strict gates and1.1.17 packaging are in progress.

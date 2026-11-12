@@ -1063,13 +1063,69 @@ static void capture_police_spawn(void) {
 // human-control branch. The five copied entry bytes contain no relative operand.
 // Read-only world-strip dispatch probe: bounds are world laterals, not
 // projected pixels. Record retained actor-slice identity and queue membership.
+static uintptr_t __fastcall rr_ped_lookup_probe(uint32_t selector, int32_t type, int32_t part) {
+    const int tick = RD32(0x004b7ecc);
+    const int probe = g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4;
+    const unsigned slot = (selector & 0xc0) >> 6;
+    const uintptr_t root = (uint32_t)RD32(0x0049e550 + slot * 4);
+    const int guard = RD32(0x0049e630 + slot * 4);
+    // Invoke the stateful lookup exactly once; this wrapper only observes it.
+    const uintptr_t result = ((uintptr_t(__fastcall*)(uint32_t, int32_t, int32_t))0x0044acd0)(selector, type, part);
+    if (probe)
+        fprintf(g_out, "# ped-lookup tick=%d render=%u selector=%u type=%d part=%d slots=%d root=%u guard=%d/%d result=%u family=%d categories=%d\n",
+                tick, g_frame, selector, type, part, RD32(0x004755f8), (unsigned)root,
+                guard, RD32(0x0049e630 + slot * 4), (unsigned)result,
+                RD32(0x004b7f10 + slot * 4), readable(root, 4) ? RD32(root) : -1);
+    return result;
+}
+
+static void rr_family_queue_state(const char* phase) {
+    const int tick = RD32(0x004b7ecc);
+    if (!g_out || tick < g_ai_probe_tick - 20 || tick > g_ai_probe_tick + 4) return;
+    fprintf(g_out, "# family-queue tick=%d phase=%s read=%d write=%d worker=%d/%d/%d busy=%d slots=",
+            tick, phase, RD32(0x004755f4), RD32(0x004755f0), RD32(0x0049e578),
+            RD32(0x0049e57c), RD32(0x0049e580), RD32(0x0049e640));
+    for (int i = 0; i < 4; ++i)
+        fprintf(g_out, "%s%d:%d", i ? "," : "", RD32(0x004b7f10 + i * 4), RD32(0x0049e630 + i * 4));
+    fputs(" entries=", g_out);
+    for (int i = 0; i < 8; ++i)
+        fprintf(g_out, "%s%d/%d/%d", i ? "," : "", RD32(0x0049e5d0 + i * 12),
+                RD32(0x0049e5d4 + i * 12), RD32(0x0049e5d8 + i * 12));
+    fputc('\n', g_out);
+}
+
+static void __cdecl rr_family_queue_probe(void) {
+    rr_family_queue_state("before");
+    ((void(__cdecl*)(void))0x0044b0e0)();
+    rr_family_queue_state("after");
+}
+
+static void __fastcall rr_actor_speed_probe(uintptr_t self) {
+    const int tick = RD32(0x004b7ecc);
+    const int probe = g_out && tick == g_ai_probe_tick && RD32(self + 0xc4) == 0x20;
+    if (probe) {
+        const uintptr_t slice = (uint32_t)RD32(self + 0x2c);
+        fprintf(g_out, "# actor-speed-before tick=%d serial=%u pos=%d lat=%d dt=%d speed=%d heading=%d contact=%d slice=%u type=%u flags=%u edges=%d/%d shoulders=%d/%d\n",
+                tick, RD32(self + 0x1c4), RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x18),
+                RD32(self + 0xec), RD32(self + 0x128), RD32(self + 0x160), (unsigned)slice,
+                RD8(slice + 0x3c), RD8(slice + 0x37), RD32(slice + 0xe0), RD32(slice + 0xe4),
+                RD32(slice + 0xe8), RD32(slice + 0xec));
+    }
+    ((void(__fastcall*)(uintptr_t))0x004390c0)(self);
+    if (probe)
+        fprintf(g_out, "# actor-speed-after tick=%d serial=%u speed=%d drag=%d/%d accel=%d\n",
+                tick, RD32(self + 0x1c4), RD32(self + 0xec), RD32(self + 0x158), RD32(self + 0x15c), RD32(0x004c3cec));
+}
+
 static void __fastcall rr_draw_half_probe(uintptr_t strip, int32_t left, int32_t right) {
     const int tick = RD32(0x004b7ecc);
     if (g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4 && readable(strip, 0x104)) {
         const uintptr_t slice = (uint32_t)RD32(strip + 0xc);
         const int count = RD32(0x0046dcc4);
-        fprintf(g_out, "# draw-half tick=%d render=%u strip=%u slice=%u sample=%d bounds=%d/%d queue=%d camera=%d copied-camera=%d\n",
-                tick, g_frame, (unsigned)strip, (unsigned)slice, RD32(strip + 8), left, right, count, RD32(0x004b7ef4), RD32(0x004bc7e4));
+        const uintptr_t parent = (uint32_t)RD32(strip + 8);
+        fprintf(g_out, "# draw-half tick=%d render=%u strip=%u slice=%u cutoff=%d bounds=%d/%d queue=%d camera=%d copied-camera=%d\n",
+                tick, g_frame, (unsigned)strip, (unsigned)slice, readable(parent, 12) ? RD32(parent + 8) : -1,
+                left, right, count, RD32(0x004b7ef4), RD32(0x004bc7e4));
         for (int i = 0; i < count && i < 50; ++i) {
             const uintptr_t actor = (uint32_t)RD32(0x004c3d30 + i * 4);
             if (!readable(actor, 0x220) || RD32(actor + 0xc4) != 0x20) continue;
@@ -1081,6 +1137,14 @@ static void __fastcall rr_draw_half_probe(uintptr_t strip, int32_t left, int32_t
         }
     }
     ((void(__fastcall*)(uintptr_t, int32_t, int32_t))0x00438610)(strip, left, right);
+    if (g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4)
+        for (int i = 0; i < RD32(0x0046dcc4) && i < 50; ++i) {
+            const uintptr_t actor = (uint32_t)RD32(0x004c3d30 + i * 4);
+            if (readable(actor, 0x220) && RD32(actor + 0xc4) == 0x20 &&
+                (uint32_t)RD32(actor + 0x54) == (uint32_t)RD32(strip + 0xc))
+                fprintf(g_out, "# draw-ped-after tick=%d serial=%u loaded=%u\n",
+                        tick, (unsigned)RD32(actor + 0x1c4), RD8(actor + 0x1e0));
+        }
 }
 
 static void __fastcall rr_static_view_probe(uintptr_t self) {
@@ -4827,7 +4891,11 @@ static int rr_install_hooks(void) {
     }
     if(g_sim&&g_human&&!rr_install_player_probe())return 0;
     if (g_ai_probe_tick >= 0 &&
-        (!rr_patch_call((uint8_t*)0x00443b6d, 0x00438610, rr_draw_half_probe) ||
+        (!rr_patch_call((uint8_t*)0x0043ade3, 0x004390c0, rr_actor_speed_probe) ||
+         !rr_patch_call((uint8_t*)0x0044b3f7, 0x0044b0e0, rr_family_queue_probe) ||
+         !rr_patch_call((uint8_t*)0x00440694, 0x0044acd0, rr_ped_lookup_probe) ||
+         !rr_patch_call((uint8_t*)0x004406ac, 0x0044acd0, rr_ped_lookup_probe) ||
+         !rr_patch_call((uint8_t*)0x00443b6d, 0x00438610, rr_draw_half_probe) ||
          !rr_patch_call((uint8_t*)0x00443bc2, 0x00438610, rr_draw_half_probe) ||
          !rr_patch_call((uint8_t*)0x00443bf2, 0x00438610, rr_draw_half_probe) ||
          !rr_patch_call((uint8_t*)0x00443ca2, 0x00438610, rr_draw_half_probe))) {

@@ -443,6 +443,8 @@ class Race {
     // anchor: the human the spawn is placed from (plan 34 C4); -1 = seat 0.
     bool spawn_cop(int32_t slice_offset, int anchor_rider = -1);
     int cop_index() const { return !riders_.empty() && riders_.back().cop ? int(riders_.size()) - 1 : -1; }
+    int police_cycle() const { return police_ ? police_->cycle : 0; }
+    std::array<int32_t, 16> police_bend_words() const;
     // 0x00416010(4, 0xb4): the player was arrested (0x00407f30).
     bool busted() const { return busted_; }
     // Nitro setup 0x0040b0e0: copy six words from the player spec at +0x14c
@@ -768,6 +770,7 @@ class Race {
     void load_pedestrian_looks();                       // 0x00440680 first-draw resource load
     void think_pedestrian(Pedestrian&);                 // 0x00440dd0
     void move_pedestrian(Pedestrian&);                  // 0x00440990
+    size_t pedestrian_sample(const Pedestrian&) const;
     int pedestrian_lane(const Pedestrian&) const;       // 0x0044a020(obj, 0)
     bool pedestrian_road_clear(const Pedestrian&, int factor, int delta) const; // 0x00441500
     bool pedestrian_arrived(const Pedestrian&) const;                           // 0x004414a0
@@ -808,6 +811,8 @@ class Race {
         PoliceConfig config;
         std::vector<BikeSpec> specs;
         const ActorAnimationLibrary* library = nullptr;
+        std::optional<std::array<Bike, 2>> previous_objects;
+        uint8_t cycle = 0;
     };
     std::optional<PoliceSetup> police_;
     bool busted_ = false;

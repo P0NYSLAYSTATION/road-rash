@@ -61,6 +61,10 @@ PoliceActor make_police_actor(const PoliceConfig& config, const PhysicsTables& t
                               const PoliceSpawnInput& input) {
     if (input.lane < 0 || input.lane > 2) throw std::runtime_error("Invalid police lane");
     PoliceActor actor;
+    //00438a80 returns retained pool storage; initialization rewrites only
+    //the allocation/template/constructor fields below.
+    if (input.previous_bike) actor.bike = *input.previous_bike;
+    if (input.previous_rider) actor.rider = *input.previous_rider;
     actor.pursuit = police_pursuit(config, input.level, input.player_place, input.player_personality);
     actor.stats = config.stats;
     const size_t spec = config.bikes[size_t(input.level)];
@@ -71,6 +75,8 @@ PoliceActor make_police_actor(const PoliceConfig& config, const PhysicsTables& t
         PhysicsTables constants = tables;
         constants.bike_object = behavior;
         init_bike_object(body, constants);
+        for (int offset : {0x18, 0x20, 0x58, 0x5c, 0x60, 0xa8, 0xac, 0xb0, 0xb4, 0xbc})
+            body.i32(offset) = 0; //00438930 allocation/projection state
         for (int i = 0; i < 4; ++i) {
             body.i32(0xdc + i * 4) = behavior[size_t(i) + 3];
             body.i32(0x1a4 + i * 4) = behavior[size_t(i) + 22];
@@ -87,6 +93,7 @@ PoliceActor make_police_actor(const PoliceConfig& config, const PhysicsTables& t
     auto& bike = actor.bike;
     apply_spec(bike, specs[spec], config.stats[3] / 2);
     bike.i32(0x2f0) = bike.i32(0x2ec);
+    bike.i32(0x2f4) = 0; //00405a18
     bike.i32(0x324) = 2;
     bike.u8(0x328) = 15;
     bike.u8(0x300) = 1;
@@ -97,6 +104,9 @@ PoliceActor make_police_actor(const PoliceConfig& config, const PhysicsTables& t
     bike.i32(0x200) -= 4;
     bike.i32(0x28) = input.lane_target_q8;
     actor.rider.i32(0x1c8) = actor.rider.i32(0x1d4) = config.stats[size_t(6 + input.level)];
+    actor.rider.u8(0x1e9) = 0; //00405b1a; low+1e8 is retained
+    actor.rider.i32(0x1ec) = 0; //00405b20
+    actor.rider.i32(0x1cc) = actor.rider.i32(0x1d0) = 0; //00405ce1/00405ced
     actor.stats[14] = actor.stats[15] = actor.stats[13];
     actor.stats[1] = int32_t((uint32_t(actor.stats[1]) & 0xffff00ffu) | (uint32_t(spec) << 8));
     actor.stats[0] = actor.stats[4] = 0;

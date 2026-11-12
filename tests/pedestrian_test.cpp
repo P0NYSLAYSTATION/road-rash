@@ -110,6 +110,48 @@ void retained_road_slice() {
     check(p.pending_remove, "the last move still precedes deferred window removal");
 }
 
+void retained_arrival_slice(const Fixture& f) {
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(1800, rr::PathSample{0, 0, 250, 250, 256, 256});
+    for (auto& path : section.samples) path.shoulder_left = path.shoulder_right = 250;
+    section.samples[1475].right = 750;
+    section.samples[1475].right_q8 = 768;
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 1800});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    std::vector<rr::RouteSample> road;
+    for (size_t i = 0; i < section.samples.size(); ++i)
+        road.push_back({section.samples[i], 20, 0, uint32_t(i)});
+    rr::Race race(road, road, f.physics, f.specs[0], 90, {});
+    race.set_live_schedule(true);
+    race.riders()[0].sched_next = race.riders()[0].half_sched_next = 1000;
+    race.riders()[0].bike.i32(0x1c) = race.riders()[0].half_mirror.position = 1396 * 256;
+    race.riders()[0].sample = race.riders()[0].half_mirror.sample = 1396;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [](const rr::RouteSample&, uint8_t) -> const rr::PedestrianLook* { return nullptr; }, f.exe);
+    race.set_pedestrians(&system);
+    rr::TrackRing ring(course, 0);
+    race.set_track_ring(&ring);
+    auto& p = system.pool()[0];
+    system.apply_template(p.body.bike);
+    p.active = true;
+    p.type = 5;
+    p.state = p.side = 1;
+    p.lane = 2;
+    p.body.sample = p.body.previous_sample = 1347;
+    p.body.bike.i32(0x1c) = p.anchor = 1347 * 256;
+    p.body.bike.i32(0x28) = 697 * 256;
+    p.next_tick = 1;
+    p.last_tick = 0;
+    race.countdown_step();
+    check(p.state == 1 && p.pace == 4 && p.side == 1,
+          "last out-of-window crossing checks the rebuilt slot1475 shoulder, not historical slot1347");
+}
+
 void initial_pedestrian_overlap(const Fixture& f) {
     auto race = f.race(0);
     race->set_live_schedule(true);
@@ -583,6 +625,7 @@ int main(int argc, char** argv) {
         pedestrian_shoulders(city);
         roadside_pool(city);
         initial_pedestrian_overlap(city);
+        retained_arrival_slice(city);
         graphics_replacement(city);
         scheduler_camera(city);
         // DZHR actor records survive placement (0x00451fc0 gate, level 1).

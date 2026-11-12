@@ -365,6 +365,12 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                     return scene->pedestrian_look(route, s, selector);
                 });
         }
+        if (config.track_ring)
+            out.pedestrians->set_resident_sources(
+                [scene](uint16_t family, uint8_t selector) { return scene->pedestrian_family_look(family, selector); },
+                [scene](const std::vector<uint16_t>& history, const PedestrianLook& look) {
+                    return scene->pedestrian_family_graphics_valid(history, look);
+                });
         race->set_pedestrians(out.pedestrians.get());
         if (config.solo) race->set_freeze_actors(true);
     }

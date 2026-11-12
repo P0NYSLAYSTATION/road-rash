@@ -1,5 +1,10 @@
 # Port progress
 
+## November 12, 2026 — all five completed human recordings
+
+Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
+[Evidence](agent-handoffs/parity-resource-lookup-20261112.md).
+
 ## November 12, 2026 — Canyn whole-race parity
 
 Canyn L1/seed1 passes all29,620 ticks including RNG on its completed human recording. Hiway14,084 and Napa29,055 remain exact. A marked crossing car now receives its final physics move; pedestrian pool returns follow linked-list order. The completed Medly L1/seed2 recording matches20,645 ticks before a resource-availability gap; City matches18,307 before a similar gap. All five tracks now have finished original recordings. Strict whole-race and four prefix gates pass; the native suite passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions; multiplayer stays held.

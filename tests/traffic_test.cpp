@@ -481,6 +481,93 @@ static void test_marked_crossing_final_move() {
         throw std::runtime_error("marked crossing car must move once using its retained heading");
 }
 
+static void test_signal_rebuilt_lane_slot() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    road[80].path.left_q8 = 0;
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 2;
+    signal.controller = 0;
+    signal.position_q8 = 80 * 256;
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.start_q8 = 70 * 256;
+    controller.end_q8 = 98 * 256;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 2;
+    car.lane = -1;
+    car.position = 100 * 256;
+    car.lateral = -125 * 256;
+    car.phase = 256;
+    car.signal = 0;
+    traffic.run_car(0, road, 140 * 256, 220 * 256, 140 * 256, 0, [] { return 1u; }, 60, 0);
+    if (car.speed <= 0)
+        throw std::runtime_error("a retained light reads rebuilt lane slot208, not historical slot80");
+}
+
+static void test_invalid_crossing_spawn() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    auto random = [] { return 2u; };
+    traffic.begin_schedule(road, 200 * 256, random, 8, true);
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.active = true;
+    controller.variant = 3;
+    controller.start_q8 = controller.position_q8 = 95 * 256;
+    controller.end_q8 = 96 * 256;
+    controller.lanes = 3;
+    controller.last_tick = 7;
+    controller.next_tick = 8;
+    controller.signals[1] = 0;
+    controller.durations[0] = controller.durations[1] = 100;
+    controller.durations[2] = 0;
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 1;
+    signal.position_q8 = 100 * 256;
+    signal.phase = 2;
+    traffic.run_controller(0, 72 * 256, 200 * 256, 8, road, random);
+    const auto& car = traffic.cars()[0];
+    if (!car.active || !car.pending_remove || car.last_tick != 108 || car.next_tick != 108)
+        throw std::runtime_error("invalid crossing placement is marked during construction, before its first think");
+    traffic.begin_schedule(road, 200 * 256, random, 9, true);
+    if (car.active) throw std::runtime_error("marked new crossing car returns on the next prepass");
+}
+
+static void test_intersection_pool_reuse() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    auto random = [] { return 1u; };
+    traffic.begin_schedule(road, 130 * 256, random, 1, true);
+    for (int i = 0; i < 2; ++i) {
+        auto& c = const_cast<rr::IntersectionController&>(traffic.controllers()[size_t(i)]);
+        c.active = c.pending_remove = true;
+        c.position_q8 = (90 + i * 10) * 256;
+        c.signals[0] = i;
+        auto& s = const_cast<rr::IntersectionSignal&>(traffic.signals()[size_t(i)]);
+        s.active = true;
+        s.position_q8 = (80 + i * 10) * 256;
+    }
+    traffic.begin_schedule(road, 130 * 256, random, 2, true);
+    auto& path = road[140].path;
+    path.zone_end = true;
+    path.event_type = 1;
+    path.event_start = 130;
+    path.event_end = 140;
+    traffic.step(road, 61 * 256, 141 * 256, 11 * 256, 60 * 256, 0, random, 3);
+    const auto& replacement = traffic.controllers()[1];
+    if (!replacement.active || replacement.signals[0] != 1 ||
+        traffic.signals()[1].position_q8 != 139 * 256 + 0x50)
+        throw std::runtime_error("last returned intersection/light slots must be reused, updating retained light references");
+}
+
 static void test_deferred_car_teardown(bool lateral = false) {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
@@ -1455,6 +1542,9 @@ int main() {
         test_library_choose();
         test_recycled_pool_order();
         test_marked_crossing_final_move();
+        test_signal_rebuilt_lane_slot();
+        test_invalid_crossing_spawn();
+        test_intersection_pool_reuse();
         test_deferred_car_teardown();
         test_deferred_car_teardown(true);
         test_crossing_obstacle_reach();

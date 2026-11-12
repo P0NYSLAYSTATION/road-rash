@@ -93,6 +93,11 @@ class TrackRing {
     void advance(int32_t delta_q8, const Random&, const ActorSink&);
     int32_t front_q8() const { return front_; }
     int32_t back_q8() const { return back_; }
+    //0044b0e0 services one queued MSRR request before each scheduler pass.
+    //Completed work becomes visible at the next pass, after the preceding draw.
+    void service_family_queue();
+    uint16_t resident_family(uint8_t slot) const { return family_busy_[slot] ? 0 : resident_families_[slot]; }
+    const std::vector<uint16_t>& family_history(uint8_t slot) const { return family_history_[slot]; }
     int32_t known_finish_q8() const { return known_finish_; }
     uint8_t slice_event(int32_t position_q8) const {
         return slice_events_[size_t((uint32_t(position_q8) >> 8) & 127)];
@@ -161,6 +166,7 @@ class TrackRing {
         std::optional<TerrainIterator> terrain;
         Borr borr;
         Dzhr dzhr;
+        int32_t family_position = 0, family_index = 0;
     };
     struct Walker {
         std::array<SectionWalker, 2> halves;
@@ -188,6 +194,9 @@ class TrackRing {
     void probe_window(uint32_t node, int32_t direction);                              // 0x00453b60 draws
     void jitter_events(uint32_t node, std::vector<uint32_t>& visited, const Random&); // 0x00453e60
     void enter(SectionWalker&, uint32_t node, bool start = true);                     // 0x00452cb0
+    void step_families(SectionWalker&, int32_t delta);
+    void request_family(uint16_t family, uint8_t slot, uint8_t type);
+    void activate_family(uint16_t family, uint8_t slot);
     const PathSample& path_of(const SectionWalker&) const;
     int step_section(SectionWalker&, int32_t delta);                    // 0x00452e10 section result (0/1/2/3)
     void collapse(Walker&);                                             // 0x00452fd0
@@ -228,5 +237,14 @@ class TrackRing {
     bool unsupported_ = false;
     SliceSink slice_sink_;
     StaticSink static_sink_;
+    struct FamilyRequest { uint16_t family; uint8_t slot, type; };
+    std::array<FamilyRequest, 8> family_queue_{};
+    uint8_t family_read_ = 0, family_write_ = 0;
+    std::optional<FamilyRequest> family_worker_;
+    std::array<uint16_t, 4> resident_families_{};
+    std::array<bool, 4> family_busy_{};
+    std::array<std::vector<uint16_t>, 4> family_history_;
+    std::vector<std::vector<uint8_t>> family_types_;
+    bool family_enabled_ = false, family_synchronous_ = true, family_front_ = false;
 };
 } // namespace rr

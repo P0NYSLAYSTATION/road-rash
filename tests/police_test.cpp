@@ -87,7 +87,7 @@ int main() {
                     !rr::police_spawn_due(4096, 0, 0, true) && !rr::police_spawn_due(4096, 1, 0, false) &&
                     !rr::police_spawn_due(4096, 0, 0x10, false),
                 "Spawn boundaries");
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Police threshold tests passed; imported corpus absent\n";
             return 0;
@@ -106,6 +106,32 @@ int main() {
                                 pursuit.personality[2 + size_t(personality) * 3],
                             "Target/current pursuit relationship");
                 }
+        {
+            const auto exe = assets.read("ROADRASH.EXE");
+            const rr::ActorAnimationLibrary library(exe, assets.read("DATA/GLOBAL.RSC"));
+            const rr::PoliceSpawnInput input;
+            const auto actor = rr::make_police_actor(config, rr::read_physics_tables(exe),
+                rr::read_bike_specs(assets.read("DATA/BIKESPEC.RSC")), library, input);
+            auto previous = actor;
+            previous.bike.i32(0x108) = 135;
+            previous.bike.i32(0x10c) = -38;
+            previous.bike.i32(0xec) = 12345;
+            previous.bike.i32(0x2f4) = 2;
+            previous.rider.i32(0x10c) = -99;
+            previous.rider.i32(0x1e8) = 0xffc0;
+            previous.rider.i32(0x1ec) = 123;
+            auto recycled_input = input;
+            recycled_input.previous_bike = &previous.bike;
+            recycled_input.previous_rider = &previous.rider;
+            const auto recycled = rr::make_police_actor(config, rr::read_physics_tables(exe),
+                rr::read_bike_specs(assets.read("DATA/BIKESPEC.RSC")), library, recycled_input);
+            require(recycled.bike.i32(0x108) == 135 && recycled.bike.i32(0x10c) == -38 &&
+                      recycled.rider.i32(0x10c) == -99 && recycled.bike.i32(0xec) == 0,
+                  "recycled police objects retain projected velocity while resetting scalar speed");
+            require(recycled.bike.i32(0x2f4) == 0 && recycled.rider.i32(0x1e8) == 192 &&
+                        recycled.rider.i32(0x1ec) == 0,
+                    "police constructor clears crash and attack state without clearing the retained byte");
+        }
         std::ifstream file(RR_SOURCE_DIR "/analysis/oracle/napa-police-spawn.tsv");
         if (file) {
             std::map<std::string, int64_t> values;
