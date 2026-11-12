@@ -467,6 +467,16 @@ static void dump_sim_tick(void) {
         int addr_index = 0;
         for (int guard = 0; node && node != end && guard < 512; ++guard) {
             if (!readable(node, 0xe4)) break;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && g_slice_probe >= 0 &&
+                readable(node, 0x180) && (RD32(node + 0xc4) == 4 || RD32(node + 0xc4) == 0x10) &&
+                abs((int32_t)RD32(node + 0x1c) - g_slice_probe * 256) < 768) {
+                uintptr_t sl = (uint32_t)RD32(node + 0x2c);
+                fprintf(g_out, "# collision-state actor=%u type=%u flags=%u last=%d pos=%d lat=%d height=%d halfwidth=%d halflength=%d halfheight=%d slice=%u roadway=%u\n",
+                        (unsigned)node, RD32(node + 0xc4), RD8(node + 0xc0), RD32(node + 0x10),
+                        RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x20), RD32(node + 0x174),
+                        RD32(node + 0x178), RD32(node + 0x17c), (unsigned)sl,
+                        sl && readable(sl, 0x37) ? RD8(sl + 0x36) : 0);
+            }
             if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) &&
                 RD32(node + 0xc4) == 4 && g_slice_probe >= 0 &&
                 ((int32_t)RD32(node + 0x1c) >> 8) == g_slice_probe) {
@@ -1042,6 +1052,44 @@ static void __fastcall rr_static_view_probe(uintptr_t self) {
                         RD8(sl + 0x40), RD8(sl + 0x41), RD8(sl + 0x43));
         }
     ((void(__fastcall*)(uintptr_t))0x00443b40)(self);
+}
+static void __fastcall rr_collision_pair_probe(uintptr_t self, uintptr_t other) {
+    const int probe = g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick;
+    if (probe)
+        fprintf(g_out, "# collision-pair self=%u other=%u types=%u/%u pos=%d/%d lat=%d/%d height=%d/%d last=%d/%d\n",
+                (unsigned)self, (unsigned)other, RD32(self + 0xc4), RD32(other + 0xc4),
+                RD32(self + 0x1c), RD32(other + 0x1c), RD32(self + 0x28), RD32(other + 0x28),
+                RD32(self + 0x20), RD32(other + 0x20), RD32(self + 0x10), RD32(other + 0x10));
+    ((void(__fastcall*)(uintptr_t, uintptr_t))0x00436a40)(self, other);
+    if (probe)
+        fprintf(g_out, "# collision-pair-result self=%u other=%u pos=%d/%d lat=%d/%d height=%d/%d\n",
+                (unsigned)self, (unsigned)other, RD32(self + 0x1c), RD32(other + 0x1c),
+                RD32(self + 0x28), RD32(other + 0x28), RD32(self + 0x20), RD32(other + 0x20));
+}
+static int __fastcall rr_collision_walk_probe(uintptr_t self) {
+    if (g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick && g_slice_probe >= 0) {
+        uintptr_t node = (uint32_t)RD32(RD32(self));
+        for (int i = 0; node && readable(node, 0x180) && RD32(node) && i < 512; ++i) {
+            if (abs((int32_t)RD32(node + 0x1c) - g_slice_probe * 256) < 768)
+                fprintf(g_out, "# collision-walk actor=%u next=%u type=%u flags=%u last=%d pos=%d lat=%d height=%d halflength=%d ignore=%u\n",
+                        (unsigned)node, RD32(node), RD32(node + 0xc4), RD8(node + 0xc0), RD32(node + 0x10),
+                        RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x20), RD32(node + 0x178), RD32(node + 0x144));
+            node = (uint32_t)RD32(node);
+        }
+    }
+    return ((int(__fastcall*)(uintptr_t))0x004368f0)(self);
+}
+static void __fastcall rr_static_sweep_probe(uintptr_t self) {
+    const int probe = g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick && RD32(self + 0xc4) == 0x20;
+    uintptr_t sl = probe ? (uint32_t)RD32(self + 0x2c) : 0;
+    if (probe && sl && readable(sl, 0x65))
+        fprintf(g_out, "# ped-static-before actor=%u pos=%d lateral=%d state=%d type=%d borr=%u billboards=%u selector=%u bbtype=%u boxes=%u\n",
+                (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8), RD32(self + 0x1e4),
+                RD8(sl + 0x60), RD8(sl + 0x3d), RD8(sl + 0x40), RD8(sl + 0x42), RD8(sl + 0x43));
+    ((void(__fastcall*)(uintptr_t))0x004373f0)(self);
+    if (probe)
+        fprintf(g_out, "# ped-static-after actor=%u pos=%d lateral=%d state=%d\n",
+                (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8));
 }
 static void __fastcall rr_billboard_draw_probe(uintptr_t self, int32_t mask, int32_t left, int32_t right) {
     uintptr_t sl = (uint32_t)RD32(self + 0xc);
@@ -4731,7 +4779,10 @@ static int rr_install_hooks(void) {
         return 0;
     }
     if(g_ai_probe_tick >= 0 &&
-       (!rr_patch_call((uint8_t*)0x00443b1b,0x00443b40,rr_static_view_probe) ||
+       (!rr_patch_call((uint8_t*)0x00436952,0x004373f0,rr_static_sweep_probe) ||
+        !rr_patch_call((uint8_t*)0x004383b6,0x004368f0,rr_collision_walk_probe) ||
+        !rr_patch_call((uint8_t*)0x004369f6,0x00436a40,rr_collision_pair_probe) ||
+        !rr_patch_call((uint8_t*)0x00443b1b,0x00443b40,rr_static_view_probe) ||
         !rr_patch_call((uint8_t*)0x00443b2a,0x00443b40,rr_static_view_probe) ||
         !rr_patch_call((uint8_t*)0x0043864c,0x0044b980,rr_billboard_draw_probe) ||
         !rr_patch_call((uint8_t*)0x004386d5,0x0044b980,rr_billboard_draw_probe) ||

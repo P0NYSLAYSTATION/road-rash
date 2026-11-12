@@ -1,5 +1,11 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## Mixed-contact checkpoint — November 12, 2026
+
+Complete Hiway14084 and moving Napa2400 now match including RNG. Moving City
+first gap is1559 car position34152/native34150. Other full races/levels remain
+open; see [evidence](../agent-handoffs/parity-mixed-contacts-20261112.md).
+
 ## Completed Hiway checkpoint — November 12, 2026
 
 Strict whole-race human replay passes all14084 ticks including RNG on the

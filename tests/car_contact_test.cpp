@@ -115,6 +115,20 @@ static std::vector<rr::RouteSample> route() {
 static void check(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
 }
+static void car_body(rr::TrafficCar& car) {
+    auto& b = car.motion;
+    b.u8(0xc0) = 7;
+    b.i32(0xc4) = 16;
+    b.i32(0x1c) = car.position;
+    b.i32(0x28) = car.lateral;
+    b.i32(0xec) = b.i32(0x108) = car.speed;
+    b.i32(0x174) = car.kind & 1 ? 40960 : 16384;
+    b.i32(0x178) = 64;
+    b.i32(0x17c) = 8960;
+    b.i32(0x194) = 1800;
+    b.i32(0x180) = 256;
+    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
+}
 int main() {
     try {
         const auto library = vehicles();
@@ -218,8 +232,7 @@ int main() {
             car.last_tick = 0;
             car.next_tick = scenario == 2 ? 1 : 100;
             if (scenario == 1) car.kind = 1; // sleeping crossing car, callback still runs
-            car.motion.u8(0xc0) = 7;
-            car.motion.i32(0xc4) = 16;
+            car_body(car);
             const int32_t before = b.i32(0x28);
             race.step(0);
             check((b.i32(0x28) != before) == (scenario != 0),
@@ -228,6 +241,46 @@ int main() {
                   "car response marks only eligible contacts");
             if (scenario == 1)
                 check(car.motion.i32(0x1f8) == 240, "crossing car contact with bike starts240 tick pause");
+        }
+        for (bool blocker : {false, true}) {
+            rr::Opponent opponent{rr::BikeSpec{}, 90, 0, 0, 0, 1};
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90, {opponent});
+            race.set_live_schedule(true);
+            auto& r = race.riders()[0];
+            const int32_t position = r.bike.i32(0x1c);
+            for (auto& actor : race.riders()) {
+                actor.sched_next = actor.half_sched_next = 100;
+                actor.sched_last = actor.half_sched_last = 0;
+            }
+            r.sched_last = 1;
+            r.bike.u8(0xc0) = 7;
+            r.bike.i32(0x28) = 0;
+            r.bike.i32(0x174) = 7680;
+            r.bike.i32(0x178) = 64;
+            r.bike.i32(0x17c) = 8960;
+            r.bike.i32(0x194) = 256;
+            auto& owner = race.riders()[1];
+            owner.bike.u8(0xc0) = 4;
+            owner.bike.i32(0x1c) = position + 10000;
+            owner.crash_active = true;
+            auto& body = owner.crash_actor.motion;
+            body.u8(0xc0) = blocker ? 7 : 4;
+            body.i32(0xc4) = 8;
+            body.i32(0x1c) = position + 102;
+            body.i32(0x28) = 100000;
+            body.i32(0x178) = 16;
+            owner.crash_actor.sample = size_t(body.i32(0x1c) >> 8);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& car = traffic.cars_mut()[0];
+            car.active = true;
+            car.position = position + 104;
+            car.next_tick = 100;
+            car_body(car);
+            race.step(0);
+            check((car.motion.u8(0x1f4) != 0) == !blocker,
+                  "short eligible body ends the inner walk before a later longer car, regardless of lateral gap");
         }
         std::cout << "car contact crash tails pass\n";
     } catch (const std::exception& e) {

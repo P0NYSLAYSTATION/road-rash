@@ -1034,7 +1034,13 @@ void TrafficSystem::run_car(size_t index, const std::vector<RouteSample>& route,
     car.next_tick = int32_t(tick) + car.interval;
     if (car.pending_remove) {
         car.motion.u8(0xc0) = uint8_t((car.motion.u8(0xc0) & ~4) | 8);
-        car.last_tick = car.next_tick = int32_t(tick) + 100;
+        car.last_tick = int32_t(tick) + 100;
+        //004380ec marks a lateral exit before00438113 overwrites+0xc
+        //with the normal interval. A longitudinal window exit is marked
+        //after that store, so only that path retains next=tick+100.
+        const bool outside = windows_.size() < 2 ? (car.position >= front_q8 || car.position < front_q8 - 0x8000)
+                                                 : !inside_any_window(car.position, front_q8);
+        if (outside) car.next_tick = int32_t(tick) + 100;
     }
 }
 

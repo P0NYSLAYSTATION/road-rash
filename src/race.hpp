@@ -700,6 +700,7 @@ class Race {
         const RouteSample* sample = nullptr; // the object's slice (+0x2c)
     };
     void build_scan_list() const;
+    void contact_car_nodes(const ScanObject&, const ScanObject&);
     int scan_find(int rider, uint32_t type) const;
     int scan_next(int from, uint32_t mask, bool forward, int32_t window) const; // 0x00449ce0
     int32_t half_x(const Rider& r) const { return r.half_detached ? r.half_lateral : r.bike.i32(0x28); }
@@ -781,8 +782,9 @@ class Race {
     bool box_draw_pending_ = false;
     int32_t box_draw_camera_ = 0;
     bool sweep_statics(Rider&, Rider* half_owner = nullptr); // 0x004373f0 against the live ring slice
-    void collide_car_statics();                              // 0x004368f0 runs 0x004373f0 for due cars too
+    void collide_car_statics(size_t only = size_t(-1));                              // 0x004368f0 runs 0x004373f0 for due cars too
     TrafficCar* static_car_ = nullptr; // the car whose sweep is running (0x0044efa0 callback)
+    Pedestrian* static_pedestrian_ = nullptr; //00440760 receives static/marking contacts too
     void hit_static(Rider&, int32_t lateral_units, const std::array<int32_t, 4>& box,
                     Rider* half_owner = nullptr);                      // 0x00437660
     void contact_half_static(Rider& body, Rider& owner, Rider& other); // 0x004046b0 crashed-half contact

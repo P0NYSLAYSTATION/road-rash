@@ -1,5 +1,17 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — mixed contacts and removal gates
+
+`build/mixed-contact-final-hiway.json`: strict whole-race Hiway14084 exact including
+RNG, acceptance=true. `build/mixed-contact-final-regressions.json`: moving Napa2400,
+expanded Napa2400 and City signal600 pass. Moving City remains failed at1559 car
+position34152/native34150 (`build/city-car-removal-store-order.json`). MSVC Release
+build and SDL gate pass:104 passed,35 explicit skips,zero failures, two unavailable
+Direct3D tests excluded (`build/mixed-contact-final-full-build.log`,
+`build/mixed-contact-final-native-tests.log`). Focused synthetic tests cover inner
+scan termination, pedestrian BORR/marking callbacks, and distinct car-removal
+store order. [Receipts and rejected prototype](agent-handoffs/parity-mixed-contacts-20261112.md).
+
 ## November 12, 2026 — strict completed Hiway acceptance
 
 `build/hiway-finish-place-animation.json`: acceptance_met=true, all14084 ticks

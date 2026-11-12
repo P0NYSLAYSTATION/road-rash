@@ -1,5 +1,17 @@
 # Port progress
 
+## November 12, 2026 — one ordered contact walk
+
+Moving Napa now matches all2400 captured ticks including RNG. Live cars, riders,
+crashed halves and pedestrians share the original ordered contact walk; short
+eligible bodies can stop the inner scan before a later longer car. Pedestrian
+scenery callbacks and original car-removal store order advance moving City to1558
+(first1559 car position34152/native34150). Complete Hiway14084 remains exact;
+Napa expanded2400 and City signal600 remain exact. Full MSVC Release and SDL
+gate pass104 tests,35 explicit skips,zero failures; two unavailable Direct3D
+checks excluded. Whole-race acceptance for remaining tracks is still open.
+[Evidence](agent-handoffs/parity-mixed-contacts-20261112.md).
+
 ## November 12, 2026 — complete Hiway human replay
 
 The unchanged completed Hiway recording now passes strict whole-race acceptance:

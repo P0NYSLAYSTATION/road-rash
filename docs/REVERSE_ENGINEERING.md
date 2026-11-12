@@ -1,5 +1,20 @@
 # Binary evidence and next work
 
+## November 12, 2026 — original mixed contacts and removal stores
+
+00436994 terminates the entire inner collision scan at the first eligible object
+beyond the summed half-lengths, before its lateral test. Napa1259's crashed half
+at43273 (length16) stops rider4 at43171 (length64) before a car at43275 (length64).
+Separate rider/car passes bypassed that stop; rescanning after earlier contacts
+also fails because moved earlier nodes are already behind the original cursor.
+One mixed live walk matches original1259 and1293, and all2400 moving Napa ticks.
+00436952 invokes4373f0 for pedestrians too. City1251 type4 pedestrian state0->3
+occurs inside its BORR sweep; both scenery and marking contacts dispatch00440760.
+004380ec marks lateral car removal before00438113 stores normal next=tick+interval;
+last remains tick+100. A later longitudinal-window removal keeps both+100.
+City1349 raw next1357,last1449 proves the distinction. City now matches through1558.
+Full Hiway14084 including RNG remains exact. Detailed probes are in the mixed-contact handoff.
+
 ## November 12, 2026 — parking, allocation and finish scheduling
 
 00439390 copies physical node/local into parked bookkeeping. Original Hiway11159

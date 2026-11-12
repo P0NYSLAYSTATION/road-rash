@@ -185,6 +185,54 @@ void recycled_pedestrian(const Fixture& f) {
           "allocation reuses the most recently returned slot and its retained motion");
 }
 
+void pedestrian_statics(const Fixture& f) {
+    for (bool marking : {false, true})
+        for (bool overlaps : {false, true}) {
+            auto race = f.race(0);
+            race->set_live_schedule(true);
+            race->riders()[0].sched_next = race->riders()[0].half_sched_next = 1000;
+            rr::PedestrianLook look;
+            look.bank.resize(6);
+            rr::ActorAnimationFrame held;
+            held.duration = 127;
+            held.control = 1;
+            look.bank[1] = look.bank[2] = rr::ActorSequence{held};
+            static const std::vector<rr::DzhrActor> empty;
+            rr::PedestrianSystem system(
+                [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+                [&](const rr::RouteSample&, uint8_t) { return &look; }, f.exe);
+            race->set_pedestrians(&system);
+            auto& p = system.pool()[0];
+            system.apply_template(p.body.bike);
+            p.active = true;
+            p.look = &look;
+            p.type = 4;
+            p.next_tick = 1000;
+            p.body.sample = p.body.previous_sample = 55;
+            p.body.bike.i32(0x1c) = p.anchor = 55 * 256 + 128;
+            p.body.bike.i32(0x28) = p.anchor_lateral = overlaps ? 0 : 100000;
+            rr::AnimationFrame frame;
+            frame.boxes = {{-30000, -10000, 30000, 10000}};
+            race->set_static_frames([&](uint32_t, uint32_t, uint8_t, bool) { return &frame; });
+            rr::RingStatics slice;
+            if (marking) {
+                slice.billboards = 1;
+                slice.billboard[0] = {10, 128, 0};
+            } else {
+                slice.borr_count = 1;
+                slice.borr_selector = 1;
+            }
+            const auto& s = race->route()[55];
+            race->ring_statics(55, s.section, s.local, slice);
+            race->countdown_step(); // prepare collision boxes for the next step
+            p.last_tick = 1;
+            p.next_tick = 2;
+            race->countdown_step();
+            check(p.state == (overlaps ? 3 : 0),
+                  "pedestrian callback must receive overlapping scenery and marking contacts only");
+        }
+}
+
 void roadside_pool(const Fixture& f) {
     auto race = f.race(0);
     race->set_live_schedule(true);
@@ -478,6 +526,7 @@ int main(int argc, char** argv) {
         retained_road_slice();
         Fixture city("CITY");
         recycled_pedestrian(city);
+        pedestrian_statics(city);
         roadside_pool(city);
         initial_pedestrian_overlap(city);
         graphics_replacement(city);

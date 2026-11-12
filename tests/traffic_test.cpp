@@ -417,7 +417,7 @@ static void test_crossing_obstacle_reach() {
         throw std::runtime_error("crossing obstacle strict longitudinal reach");
 }
 
-static void test_deferred_car_teardown() {
+static void test_deferred_car_teardown(bool lateral = false) {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
     traffic.set_spawn_enabled(false);
@@ -434,14 +434,15 @@ static void test_deferred_car_teardown() {
     car.active = true;
     car.kind = 2;
     car.phase = 0x100;
-    car.position = back - 1;
-    car.lateral = -32000;
+    car.position = lateral ? camera : back - 1;
+    car.lateral = lateral ? 0xc8000 + 0x1000 : -32000;
     car.speed = 1000;
     car.motion.u8(0xc0) = 7;
     car.last_tick = 0;
     car.next_tick = 1;
     traffic.run_car(0, road, camera, front, camera, 0, random, 1, 8000);
-    if (!car.active || !car.pending_remove || car.last_tick != 101 || car.next_tick != 101 ||
+    const int32_t next = lateral ? 1 + car.interval : 101;
+    if (!car.active || !car.pending_remove || car.last_tick != 101 || car.next_tick != next ||
         (car.motion.u8(0xc0) & 12) != 8)
         throw std::runtime_error("car retirement must mark the live node until next prepass");
     if (traffic.begin_schedule(road, front, random, 1) || !car.active)
@@ -1373,6 +1374,7 @@ int main() {
         test_library_choose();
         test_recycled_pool_order();
         test_deferred_car_teardown();
+        test_deferred_car_teardown(true);
         test_crossing_obstacle_reach();
         test_countdown_timers();
         test_countdown_initial_fill();

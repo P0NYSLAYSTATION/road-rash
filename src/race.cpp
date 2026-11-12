@@ -566,6 +566,10 @@ void Race::separate(Rider& r1, uint32_t t1, Rider& r2, uint32_t t2) {
     // t1/t2 are their object types (+0xc4). 0x00439270 moves along the road.
     Bike& p1 = r1.bike;
     Bike& p2 = r2.bike;
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+        std::fprintf(stderr, "collision-pair types %u/%u pos %d/%d lat %d/%d height %d/%d\n",
+                     t1, t2, int32_t(p1.i32(0x1c)), int32_t(p2.i32(0x1c)), int32_t(p1.i32(0x28)),
+                     int32_t(p2.i32(0x28)), int32_t(p1.i32(0x20)), int32_t(p2.i32(0x20)));
     const int32_t m1 = p1.i32(0x194), m2 = p2.i32(0x194);
     p2.i32(400) = m1;
     p1.i32(400) = m2;
@@ -813,6 +817,23 @@ void Race::collide_traffic(Rider& r) {
         const int32_t car_height = live_schedule_ ? car.motion.i32(0x20) : 0;
         const int32_t dz = (height - car_height) - car_half_height + half_height;
         if (std::abs(dz) > half_height + car_half_height) continue;
+        if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+            const auto rider_key = std::find_if(scan_.begin(), scan_.end(), [&](const ScanObject& o) {
+                return o.rider == int(&r - riders_.data()) && o.type == 4;
+            });
+            const auto car_key = std::find_if(scan_.begin(), scan_.end(), [&](const ScanObject& o) {
+                return o.car == int(&car - traffic_->cars().data());
+            });
+            std::fprintf(stderr, "car-contact rider %d car %u pos %d/%d keys %d/%d last %d/%d flags %u/%u\n",
+                         r.slot, unsigned(car.serial), position, car.position,
+                         rider_key == scan_.end() ? position : rider_key->key,
+                         car_key == scan_.end() ? car.position : car_key->key,
+                         r.sched_last, car.last_tick, unsigned(s.u8(0xc0)), unsigned(car.motion.u8(0xc0)));
+            for (const auto& o : scan_)
+                if (o.key >= position && o.key <= car.position)
+                    std::fprintf(stderr, "car-between type %u pos %d key %d rider %d car %d ped %d\n",
+                                 o.type, o.position, o.key, o.rider, o.car, o.pedestrian);
+        }
         if (live_schedule_) {
             // Cars now retain the original mover image, so use both objects'
             // previous positions/velocities and the common 0x00436a40 law.
@@ -919,11 +940,12 @@ void Race::collide_traffic(Rider& r) {
 // 3834: crossing car 13e2038 takes the static's separation, +3 position,
 // speed 1461 -> 1392). Runs before the rider-car pairs; both follow the
 // ascending walk only approximately (cars are not in the native scan list).
-void Race::collide_car_statics() {
+void Race::collide_car_statics(size_t only) {
     if (!traffic_ || !live_schedule_) return;
     constexpr int32_t car_half_length = 64;   // 0x00475698 +0x48
     constexpr int32_t car_half_height = 8960; // 0x00475698 +0x4c
     for (auto& car : traffic_->cars_mut()) {
+        if (only != size_t(-1) && size_t(&car - traffic_->cars().data()) != only) continue;
         if (!car.active || !car.collides) continue;
         if (car.last_tick != ticks_ || (car.motion.u8(0xc0) & 6) != 6) continue;
         if (std::abs(int32_t(uint32_t(car.position) & 0xff) - 0x80) >= car_half_length) continue;
@@ -1356,6 +1378,10 @@ bool Race::sweep_statics(Rider& r, Rider* half_owner) {
                 hit_static(r, bb.lateral, b, half_owner);
             } else {
                 if (half_owner) return true; // 0x004046b0 ignores type-2 markings
+                if (static_pedestrian_) {
+                    hit_pedestrian(*static_pedestrian_, 0, false, false);
+                    return true;
+                }
                 // 0x00437750 -> 0x004049c0 type2: decal/terrain marking.
                 Bike& bike = r.bike;
                 if (bike.i32(0x2f4) == 0 && int32_t(r.sample) != r.half_object.i32(0x1ec)) {
@@ -1418,6 +1444,11 @@ void Race::hit_static(Rider& r, int32_t lateral_units, const std::array<int32_t,
         separate(r, 0x10, o, 1);
         r.bike.u8(0x1f4) = 1;
         if ((static_car_->kind & 1) && r.bike.i32(0x1f8) == 0) r.bike.i32(0x1f8) = 0x3c;
+        return;
+    }
+    if (static_pedestrian_) {
+        separate(r, 0x20, o, 1);
+        hit_pedestrian(*static_pedestrian_, 0, false, false);
         return;
     }
     separate(r, half_owner ? 8 : 4, o, 1);
@@ -2931,6 +2962,78 @@ int Race::scan_find(int rider, uint32_t type) const {
     for (size_t k = 0; k < scan_.size(); ++k)
         if (scan_[k].rider == rider && scan_[k].type == type) return int(k);
     return -1;
+}
+
+
+void Race::contact_car_nodes(const ScanObject& a, const ScanObject& b) {
+    Rider da, db;
+    auto actor = [&](const ScanObject& o, Rider& detached) -> Rider& {
+        if (o.car >= 0) {
+            const auto& car = traffic_->cars()[size_t(o.car)];
+            detached.bike = car.motion;
+            detached.route = riders_[0].route;
+            detached.sample = detached.previous_sample = size_t(car.position >> 8);
+            return detached;
+        }
+        if (o.pedestrian >= 0) return pedestrians_->pool()[size_t(o.pedestrian)].body;
+        Rider& owner = riders_[size_t(o.rider)];
+        if (o.type != 8) return owner;
+        detached.bike = owner.crash_actor.motion;
+        detached.route = owner.crash_actor.route;
+        detached.sample = owner.crash_actor.sample;
+        detached.previous_sample = owner.crash_actor.previous_sample;
+        return detached;
+    };
+    Rider& ar = actor(a, da);
+    Rider& br = actor(b, db);
+    const int32_t speed_a = ar.bike.i32(0xec), speed_b = br.bike.i32(0xec);
+    separate(ar, a.type, br, b.type);
+    auto save_car = [&](const ScanObject& o, const Rider& object) {
+        if (o.car < 0) return;
+        auto& car = traffic_->cars_mut()[size_t(o.car)];
+        car.motion = object.bike;
+        car.position = object.bike.i32(0x1c);
+        car.lateral = object.bike.i32(0x28);
+        car.speed = object.bike.i32(0xec);
+    };
+    save_car(a, ar);
+    save_car(b, br);
+    auto respond = [&](const ScanObject& self, Rider& object, const ScanObject& other,
+                       Rider& partner, int32_t partner_speed) {
+        if (self.car >= 0) {
+            auto& car = traffic_->cars_mut()[size_t(self.car)];
+            if (other.type == 4 && other.rider >= 0 && human(riders_[size_t(other.rider)]) &&
+                random() % 10 == 1 && car.kind != 0)
+                sound(SoundEvent::horn, car.motion);
+            car.motion.u8(0x1f4) = 1;
+            if ((car.kind & 1) && car.motion.i32(0x1f8) == 0 && (other.type & 0xc))
+                car.motion.i32(0x1f8) = 0xf0;
+        } else if (self.pedestrian >= 0) {
+            const auto& car = traffic_->cars()[size_t(other.car)];
+            hit_pedestrian(pedestrians_->pool()[size_t(self.pedestrian)],
+                           car.kind == 2 ? -partner_speed : partner_speed, false, false);
+        } else if (self.type == 8) {
+            contact_half_static(object, riders_[size_t(self.rider)], partner);
+        } else {
+            contact_car(object, traffic_->cars_mut()[size_t(other.car)]);
+        }
+    };
+    respond(a, ar, b, br, speed_b);
+    respond(b, br, a, ar, speed_a);
+    auto save_half = [&](const ScanObject& o, const Rider& object) {
+        if (o.rider < 0 || o.type != 8) return;
+        auto& owner = riders_[size_t(o.rider)];
+        owner.crash_actor.motion = object.bike;
+        owner.crash_actor.route = object.route;
+        owner.crash_actor.sample = object.sample;
+        owner.crash_actor.previous_sample = object.previous_sample;
+        for (int off = 0x180; off <= 0x1a0; off += 4) owner.half_object.i32(off) = object.bike.i32(off);
+        owner.ride_animation = owner.crash_actor.animation;
+        sync_half_mirror(owner);
+        if (finish_q8_) owner.finish_distance = remaining_finish_distance(owner, object.bike.i32(0x1c));
+    };
+    save_half(a, ar);
+    save_half(b, br);
 }
 
 int Race::scan_next(int from, uint32_t mask, bool forward, int32_t window) const {
@@ -4762,12 +4865,6 @@ void Race::countdown_step() {
         // 004383b6 invokes the contact pass even on the initial ticks
         // with zero controls. Hiway's grid overlaps a pedestrian here.
         collide_riders();
-        collide_car_statics();
-        for (auto& rider : riders_) {
-            collide_traffic(rider);
-            collide_traffic_half(rider);
-        }
-        collide_pedestrians();
         sort_schedule();
         parked_pace_band();
         prepare_static_boxes();
@@ -4818,11 +4915,12 @@ void Race::collide_riders() {
     // on a shared road half, and within the height test on +0x17c.
     // Runtime flags are the template byte | 4: bikes and pedestrians (3)
     // take both roles; uncrashed halves (4) take neither, crashed halves
-    // (7) take both. Free cars stay in
-    // collide_traffic. The shared-half test at 004369b7 reads slice+36,
+    // (7) take both. Live cars share this walk, so previous contacts are
+    //not revisited after they move their nodes.004369b7 reads slice+36,
     // not object type: two pedestrians on the same roadway do contact.
     build_scan_list();
     auto bike_of = [&](const ScanObject& o) -> Bike& {
+        if (o.car >= 0) return traffic_->cars_mut()[size_t(o.car)].motion;
         if (o.rider >= 0) {
             Rider& r = riders_[size_t(o.rider)];
             return o.type == 8 ? r.crash_actor.motion : r.bike;
@@ -4831,7 +4929,7 @@ void Race::collide_riders() {
     };
     auto rider_or_ped = [&](const ScanObject& o) {
         return (o.rider >= 0 && (o.type == 4 || (o.type == 8 && riders_[size_t(o.rider)].crash_active))) ||
-               o.pedestrian >= 0;
+               o.pedestrian >= 0 || (live_schedule_ && o.car >= 0);
     };
     auto half_pair = [&](const ScanObject& a, const ScanObject& b) {
         Rider da, db;
@@ -4916,11 +5014,22 @@ void Race::collide_riders() {
             // is 7, the overlapping frozen is 4 and must not contact).
             if ((r.bike.u8(0xc0) & 6) != 6) continue;
             if (live_schedule_ && r.sched_last != ticks_) continue;
+        } else if (a.car >= 0) {
+            const auto& car = traffic_->cars()[size_t(a.car)];
+            if (!car.collides || car.last_tick != ticks_ || (car.motion.u8(0xc0) & 6) != 6) continue;
+            collide_car_statics(size_t(a.car));
         } else if (a.pedestrian >= 0) {
             const auto& p = pedestrians_->pool()[size_t(a.pedestrian)];
             if (freeze_actors_ || p.last_tick != ticks_ || (p.body.bike.u8(0xc0) & 6) != 6) continue;
         }
         Bike& ab = bike_of(a);
+        if (a.pedestrian >= 0 &&
+            std::abs(int32_t(uint32_t(ab.i32(0x1c)) & 0xff) - 0x80) < ab.i32(0x178)) {
+            auto& pedestrian = pedestrians_->pool()[size_t(a.pedestrian)];
+            static_pedestrian_ = &pedestrian;
+            sweep_statics(pedestrian.body);
+            static_pedestrian_ = nullptr;
+        }
         if (a.rider >= 0 && a.type == 4 &&
             std::abs(int32_t(uint32_t(ab.i32(0x1c)) & 0xff) - 0x80) < ab.i32(0x178))
             collide_hazards(riders_[size_t(a.rider)]);
@@ -4928,22 +5037,26 @@ void Race::collide_riders() {
             const ScanObject b = scan_[j];
             if (!rider_or_ped(b)) continue;
             Bike& bb = bike_of(b);
+            if (b.car >= 0 && !traffic_->cars()[size_t(b.car)].collides) continue;
             // 0x004368f0 inner: flags & 5 == 5, unconditionally (solo and
             // live). The solo path previously skipped this, contacting
             // frozen c0=4 nodes the original ignores (split-left 845).
             if ((bb.u8(0xc0) & 5) != 5) continue;
             if (ab.i32(0x178) + bb.i32(0x178) < std::abs(ab.i32(0x1c) - bb.i32(0x1c))) break;
             if (std::abs(ab.i32(0x28) - bb.i32(0x28)) > ab.i32(0x174) + bb.i32(0x174)) continue;
-            const Rider& ar =
-                a.rider >= 0 ? riders_[size_t(a.rider)] : pedestrians_->pool()[size_t(a.pedestrian)].body;
-            const Rider& br =
-                b.rider >= 0 ? riders_[size_t(b.rider)] : pedestrians_->pool()[size_t(b.pedestrian)].body;
-            const int a_route = a.type == 8 ? ar.crash_actor.route : ar.route;
-            const int b_route = b.type == 8 ? br.crash_actor.route : br.route;
+            auto roadway = [&](const ScanObject& o) {
+                if (o.car >= 0) return riders_[0].route;
+                if (o.pedestrian >= 0) return pedestrians_->pool()[size_t(o.pedestrian)].body.route;
+                const auto& owner = riders_[size_t(o.rider)];
+                return o.type == 8 ? owner.crash_actor.route : owner.route;
+            };
+            const int a_route = roadway(a), b_route = roadway(b);
             if (a.sample && a.sample->dual && a_route != b_route) continue;
             const int32_t dz = (ab.i32(0x20) - bb.i32(0x20)) - bb.i32(0x17c) + ab.i32(0x17c);
             if (std::abs(dz) > ab.i32(0x17c) + bb.i32(0x17c)) continue;
-            if (a.rider >= 0 && b.rider >= 0) {
+            if (a.car >= 0 || b.car >= 0) {
+                contact_car_nodes(a, b);
+            } else if (a.rider >= 0 && b.rider >= 0) {
                 if (a.type == 8 || b.type == 8)
                     half_pair(a, b);
                 else
@@ -5189,12 +5302,14 @@ void Race::step(std::span<const uint32_t> words) {
     if (!live_schedule_) update_halves();    // rider halves mirror their bikes before contacts
     phase("pedestrians");
     collide_riders();
-    collide_car_statics();
-    for (size_t i = 0; i < riders_.size(); ++i) {
-        collide_traffic(riders_[i]);
-        collide_traffic_half(riders_[i]);
+    if (!live_schedule_) {
+        collide_car_statics();
+        for (size_t i = 0; i < riders_.size(); ++i) {
+            collide_traffic(riders_[i]);
+            collide_traffic_half(riders_[i]);
+        }
+        collide_pedestrians();
     }
-    collide_pedestrians(); // pedestrians against cars
     if (live_schedule_) {
         sort_schedule();    // 0x004383e0 again after the 0x004368f0 contacts
         parked_pace_band(); // 0x00407610 closes 0x00438170
