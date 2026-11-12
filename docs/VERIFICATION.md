@@ -1,5 +1,10 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — Canyn and pool return order
+
+Canyn original29620 ends with outcome3, trace SHA7ae419ba5784a62d7cb12b4b4abff9e7f6ae03e10bca5dd6fefe8c8cdef2eacc. Direct whole replay matches including RNG, alongside Hiway14084/Napa29055. New focused pedestrian test verifies linked return order determines retained crossing lane; marked crossing-car test verifies final motion. Medly seed2 original37186 finished; native exact20645, first20646 resource availability. City original33819 finished; native exact18307, first18308 resource availability. Strict receipts build/v1117-whole-race-acceptance.json and build/v1117-release-regressions.json pass all three complete races and four prefixes. Full Release build and native suite pass104 tests with35 explicit skips and2 unavailable Direct3D exclusions (build/canyn-checkpoint-native-tests.log).
+[Evidence](agent-handoffs/parity-city-visibility-20261112.md).
+
 ## November 12, 2026 — complete Napa acceptance
 
 `build/napa-result-delay.json`: acceptance_met=true, all29055 ticks identical including RNG, strict whole-race single-anchor human replay. Original trace SHA88182a0ca77be490a2ef1789211debaa76aa001e492e245f7f113caa2f56350c; receipt confirms outcome3 and working DLL restored. City moving2400 passes (`build/city-projected-velocity.json`). Full original City33819 finishes but replay matches18,307 ticks; first fails18,308 pedestrian resource availability. `build/v1116-hiway-acceptance.json` passes both full races; `build/v1116-release-regressions.json` passes four prefixes. Full MSVC Release and SDL gate:104 passed,35 explicit skips,zero failures, two unavailable Direct3D checks excluded (`build/projected-final-full-build.log`, `build/projected-final-native-tests.log`).

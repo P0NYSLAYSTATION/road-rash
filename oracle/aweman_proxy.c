@@ -423,18 +423,18 @@ static void dump_sim_tick(void) {
         fprintf(g_record, "%x\n", (uint32_t)RD32(0x004b7ed0));
         fflush(g_record); // the replay reader consumes one hexadecimal word per tick
     }
-    if ((g_drive == 2 || g_drive == 4) && getenv("RR_ORACLE_DRIVER_TRACE")) {
+    if ((g_drive == 2 || g_drive == 4 || g_input) && getenv("RR_ORACLE_DRIVER_TRACE")) {
         const uintptr_t bike = (uint32_t)RD32(0x004642d8);
         if (readable(bike, 0x144)) {
             const uintptr_t active = (uint32_t)RD32(bike + 0x2c);
             const uintptr_t retained = (uint32_t)RD32(bike + 0x140);
             const uintptr_t slice = readable(active, 0xe8) ? active : retained;
             if (readable(slice, 0xe8))
-                fprintf(g_out, "# driver tick=%d control=%u joystick=%u axis=%d lateral=%d origin=%d left=%d right=%d bend=%d active=%u retained=%u\n",
+                fprintf(g_out, "# driver tick=%d control=%u joystick=%u axis=%d lateral=%d origin=%d left=%d right=%d bend=%d active=%u retained=%u render=%u\n",
                     tick, RD32(0x004b7ed0), RD8(0x00476c98), (int32_t)RD32(0x004b7e7c),
                     (int32_t)RD32(bike + 0x28), (int32_t)RD32(slice + 0xcc),
                     (int32_t)RD32(slice + 0xe0), (int32_t)RD32(slice + 0xe4),
-                    (int32_t)RD32(slice + 0xb4), (uint32_t)active, (uint32_t)retained);
+                    (int32_t)RD32(slice + 0xb4), (uint32_t)active, (uint32_t)retained, g_frame);
         }
     }
     /* Player-control branch proof (plan 10 Task 5 Step 2a): DAT_004753c8
@@ -1061,6 +1061,28 @@ static void capture_police_spawn(void) {
 
 // Preserve the original player-think entry and count actual visits to its
 // human-control branch. The five copied entry bytes contain no relative operand.
+// Read-only world-strip dispatch probe: bounds are world laterals, not
+// projected pixels. Record retained actor-slice identity and queue membership.
+static void __fastcall rr_draw_half_probe(uintptr_t strip, int32_t left, int32_t right) {
+    const int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4 && readable(strip, 0x104)) {
+        const uintptr_t slice = (uint32_t)RD32(strip + 0xc);
+        const int count = RD32(0x0046dcc4);
+        fprintf(g_out, "# draw-half tick=%d render=%u strip=%u slice=%u sample=%d bounds=%d/%d queue=%d camera=%d copied-camera=%d\n",
+                tick, g_frame, (unsigned)strip, (unsigned)slice, RD32(strip + 8), left, right, count, RD32(0x004b7ef4), RD32(0x004bc7e4));
+        for (int i = 0; i < count && i < 50; ++i) {
+            const uintptr_t actor = (uint32_t)RD32(0x004c3d30 + i * 4);
+            if (!readable(actor, 0x220) || RD32(actor + 0xc4) != 0x20) continue;
+            const uintptr_t actor_slice = (uint32_t)RD32(actor + 0x54);
+            if (actor_slice != slice && (g_slice_probe < 0 || (RD32(actor + 0x44) >> 8) != g_slice_probe)) continue;
+            fprintf(g_out, "# draw-ped tick=%d serial=%u actor=%u pos=%d lateral=%d loaded=%u slice=%u actor-slice=%u matches=%d\n",
+                    tick, (unsigned)RD32(actor + 0x1c4), (unsigned)actor, RD32(actor + 0x44),
+                    RD32(actor + 0x50), RD8(actor + 0x1e0), (unsigned)slice, (unsigned)actor_slice, actor_slice == slice);
+        }
+    }
+    ((void(__fastcall*)(uintptr_t, int32_t, int32_t))0x00438610)(strip, left, right);
+}
+
 static void __fastcall rr_static_view_probe(uintptr_t self) {
     int tick = RD32(0x004b7ecc);
     if (g_out && tick >= g_ai_probe_tick - 80 && tick <= g_ai_probe_tick)
@@ -1108,6 +1130,16 @@ static void __fastcall rr_static_sweep_probe(uintptr_t self) {
         fprintf(g_out, "# ped-static-before actor=%u pos=%d lateral=%d state=%d type=%d borr=%u billboards=%u selector=%u bbtype=%u boxes=%u\n",
                 (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8), RD32(self + 0x1e4),
                 RD8(sl + 0x60), RD8(sl + 0x3d), RD8(sl + 0x40), RD8(sl + 0x42), RD8(sl + 0x43));
+    if (probe && sl && readable(sl, 0xb0)) {
+        const uintptr_t boxes = (uint32_t)RD32(sl + 0x68);
+        fprintf(g_out, "# ped-static-bounds actor=%u width=%d height=%d boxcount=%u boxptr=%u flags=%u\n",
+                (unsigned)self, RD32(self + 0x174), RD32(self + 0x17c), RD8(sl + 0x61), (unsigned)boxes, (unsigned)RD32(sl + 0xac));
+        for (int i = 0; i < RD8(sl + 0x60) && i < 15; ++i)
+            fprintf(g_out, "# ped-static-slot actor=%u i=%d lateral=%d\n", (unsigned)self, i, RD32(sl + 0x6c + i * 4));
+        for (int i = 0; i < RD8(sl + 0x61) && i < 15 && readable(boxes + i * 16, 16); ++i)
+            fprintf(g_out, "# ped-static-box actor=%u i=%d bounds=%d/%d/%d/%d\n", (unsigned)self, i,
+                    RD32(boxes + i * 16), RD32(boxes + i * 16 + 4), RD32(boxes + i * 16 + 8), RD32(boxes + i * 16 + 12));
+    }
     ((void(__fastcall*)(uintptr_t))0x004373f0)(self);
     if (probe)
         fprintf(g_out, "# ped-static-after actor=%u pos=%d lateral=%d state=%d\n",
@@ -4794,6 +4826,14 @@ static int rr_install_hooks(void) {
         }
     }
     if(g_sim&&g_human&&!rr_install_player_probe())return 0;
+    if (g_ai_probe_tick >= 0 &&
+        (!rr_patch_call((uint8_t*)0x00443b6d, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443bc2, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443bf2, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443ca2, 0x00438610, rr_draw_half_probe))) {
+        if (g_out) fputs("# patch installation failed at world-strip draw probe\n", g_out);
+        return 0;
+    }
     if(g_ai_probe_tick >= 0 &&
        (!rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
         !rr_patch_call((uint8_t*)0x00409e29,0x004090a0,rr_ai_curve_probe))) {

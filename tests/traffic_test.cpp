@@ -460,6 +460,27 @@ static void test_follow_projected_velocity() {
         throw std::runtime_error("equal-position lane obstacle must remain in the scan");
 }
 
+static void test_marked_crossing_final_move() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(800, lane_sample(512, 512));
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 1;
+    car.position = 0x12000;
+    car.speed = 1000;
+    car.motion.i32(0x128) = 0x400000;
+    car.motion.i32(0x160) = 74;
+    car.next_tick = 1;
+    // No intersection flag or zone:44dc10 marks and skips the think,
+    // but00437e60 still invokes its separately installed physics mover.
+    traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+    if (!car.pending_remove || car.last_tick != 101 || car.lateral <= 0 ||
+        car.motion.i32(0x128) != 0x400000)
+        throw std::runtime_error("marked crossing car must move once using its retained heading");
+}
+
 static void test_deferred_car_teardown(bool lateral = false) {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
@@ -1433,6 +1454,7 @@ int main() {
         test_lane_count();
         test_library_choose();
         test_recycled_pool_order();
+        test_marked_crossing_final_move();
         test_deferred_car_teardown();
         test_deferred_car_teardown(true);
         test_crossing_obstacle_reach();

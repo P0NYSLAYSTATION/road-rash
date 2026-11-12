@@ -1,5 +1,10 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## November 12, 2026 — Canyn checkpoint
+
+Completed Canyn L1/seed1 human recording29620 matches including RNG; Hiway14084 and Napa29055 remain exact. Finished Medly seed2 recording37186 matches20645 before resource availability; City33819 matches18307 before similar resource availability. All five finished reference recordings exist. All-level/branch acceptance remains open; multiplayer held. Final native/strict gates and1.1.17 packaging are in progress.
+[Evidence](../agent-handoffs/parity-city-visibility-20261112.md).
+
 ## November 12, 2026 — complete Napa checkpoint
 
 Strict whole-race Napa L1/seed1 human replay matches all29055 ticks including RNG. Hiway14084 full regression remains exact; four prefixes pass. Full MSVC Release and SDL gate pass104 with35 explicit skips, two unavailable D3D exclusions. Completed City33819 matches18,307 ticks; first fails18,308 pedestrian resource availability. Medly ended in arrest. Other tracks/levels/branches remain open; multiplayer stays held.

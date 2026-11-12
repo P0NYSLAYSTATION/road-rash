@@ -183,6 +183,24 @@ void recycled_pedestrian(const Fixture& f) {
     race->set_track_ring(&next_ring);
     check(later.active && !p.active && later.body.bike.i32(0x10c) == -77,
           "allocation reuses the most recently returned slot and its retained motion");
+    // Reversing storage order must not reverse the original ascending
+    // scheduler prepass's return order when two slots expire together.
+    race->set_live_schedule(true);
+    race->riders()[0].sched_next = race->riders()[0].half_sched_next = 1000;
+    p.active = later.active = true;
+    p.pending_remove = later.pending_remove = true;
+    p.body.bike.i32(0x1c) = 56 * 256;
+    later.body.bike.i32(0x1c) = 55 * 256;
+    p.body.sample = 56;
+    later.body.sample = 55;
+    p.lane = -1;
+    later.lane = 0;
+    race->countdown_step();
+    check(!p.active && !later.active, "marked pedestrians return during the scheduler prepass");
+    rr::TrackRing third_ring(course, 0);
+    race->set_track_ring(&third_ring);
+    check(p.active && !later.active && p.lane == -1,
+          "simultaneous returns reuse the last linked-list node, retaining its lane");
 }
 
 void pedestrian_statics(const Fixture& f) {

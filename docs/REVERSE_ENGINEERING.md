@@ -1,5 +1,10 @@
 # Binary evidence and next work
 
+## November 12, 2026 — marked car motion and allocation order
+
+0044dc10 can mark a crossing car and suppress0044e710 think; the independent0043adc0 mover still runs. Medly3759 markedlast3859 but moves44549->44559 and slows1762->1520. 00437df0 walks ascending+0 links while returning marked actors, so simultaneous returns must preserve that order before LIFO allocation. Medly seed2 newborn36 retains lane-1 from previous slot occupant27; native storage order chose a different image. Rebuild the lookup before clearing sort keys, and only when a return is pending.
+[Evidence](agent-handoffs/parity-city-visibility-20261112.md).
+
 ## November 12, 2026 — traffic scans and finished scheduler
 
 0044e958/66/6e reads projected obstacle velocity +108/+10c, not scalar +ec. City1559 speed386/projected382 crosses an integer target threshold. 00449d1b/64 retains equal-position nodes;00449d30 filters physical roadway bits. 00455155 skips4547e0 smoothing for event4 before a merge. 00405da3 computes the police initial target from persistent speed before replan and00406cc3 pursuit overwrite. Original scheduling continues during result delay after every rider finishes. These corrections match complete Napa29055 including RNG.

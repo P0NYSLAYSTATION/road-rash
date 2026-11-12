@@ -195,6 +195,17 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
     (void)controls; // plan 34: each rider's word comes from controls_ via word()
     // 0x00438170(0): every node whose +0x0c is due runs 0x00437e60 with
     // param_3 = (+0x2c != 0) sampled before the call.
+    if (pedestrians_ && std::any_of(pedestrians_->pool().begin(), pedestrians_->pool().end(),
+                                    [](const Pedestrian& p) { return p.pending_remove; })) {
+        //00437df0 follows ascending links before this pass changes sort keys.
+        //The LIFO free list retains the last returned node's object image.
+        build_scan_list();
+        for (const auto& node : scan_)
+            if (node.pedestrian >= 0) {
+                auto& p = pedestrians_->pool()[size_t(node.pedestrian)];
+                if (p.pending_remove) pedestrians_->recycle(p);
+            }
+    }
     std::vector<ScheduleNode> order = schedule_order();
     const int32_t camera = ring_ ? ring_->front_q8() - 0x5000 : int32_t(previous_camera_position_) + 0x100;
     // 00438170 walks one list. In particular, controller rand() draws
@@ -231,13 +242,9 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
             if (controllers[i].active && controllers[i].next_tick <= ticks_)
                 actors.push_back({controllers[i].position_q8, 0x400, i});
     }
-    // 00437df0 unlinks last tick's marked pedestrians before dispatch.
+    //00437df0 has already returned marked pedestrians before dispatch.
     ped_scan_keys_.clear();
     if (pedestrians_) {
-        for (auto& p : pedestrians_->pool())
-            if (p.pending_remove) {
-                pedestrians_->recycle(p);
-            }
         for (size_t i = 0; i < pedestrians_->pool().size(); ++i) {
             const auto& p = pedestrians_->pool()[i];
             ped_scan_keys_.push_back(p.body.bike.i32(0x1c));

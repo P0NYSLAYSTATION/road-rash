@@ -620,41 +620,48 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
     const bool in_window = car.position >= back_q8 && car.position < front_q8;
     const size_t slot = size_t(ring_slot_sample(int32_t(sample), front_q8, int32_t(route.size())));
     const RouteSample& at = route.at(slot);
+    bool think = true;
     if (car.kind & 1) {
         // 0x0044dc10: inside the ring window a crossing car needs an
         // intersection slice and zone; outside it keeps moving until the
         // window check below unlinks it.
         if (in_window && ((at.path.marking_flags & 0x20) == 0 || car.zone_end == 0 || car.zone_lanes == 0)) {
             car.pending_remove = true;
-            return;
+            think = false;
         }
-        car.collides = uint32_t(car.position - camera_q8 + 0x400) < 0x2801;
-        for (size_t k = 1; k < windows_.size(); ++k) // plan 34: near any human's camera
-            car.collides = car.collides || uint32_t(car.position - windows_[k].camera_q8 + 0x400) < 0x2801;
+        if (think) {
+            car.collides = uint32_t(car.position - camera_q8 + 0x400) < 0x2801;
+            for (size_t k = 1; k < windows_.size(); ++k) // plan 34: near any human's camera
+                car.collides = car.collides || uint32_t(car.position - windows_[k].camera_q8 + 0x400) < 0x2801;
+        }
     }
-    const auto [target, rate] = plan_speed(car, route, window_front_for(car.position, front_q8));
-    // 0x0044e710 -> 0x00449880/0x004498c0: set heading and approach the
-    // target BEFORE the mover applies drag. The target is not a post-move cap.
-    // 0x0044edfc: +0x1dc = lane-centre error, halfway from its previous
-    // value on a lane-change think.
-    const int32_t full = wrap(int64_t(at.offset + car.lane * 250 + 125) * 256 - car.lateral);
-    car.steer_error =
-        car.lane_changed ? wrap(int64_t(wrap(int64_t(full) - car.steer_error)) / 2 + car.steer_error) : full;
-    int32_t error = car.steer_error;
-    int32_t drift = drift_rates_[car.kind & 3];
-    if (car.kind & 1) {
-        error = car.steer_error = car.kind == 1 ? 0x32000 : -0x32000;
-        drift = 0;
+    //0044dc10 can suppress the think after marking the node. The scheduler
+    //still calls0043adc0, retaining the last heading and target-speed result.
+    if (think) {
+        const auto [target, rate] = plan_speed(car, route, window_front_for(car.position, front_q8));
+        // 0x0044e710 -> 0x00449880/0x004498c0: set heading and approach the
+        // target BEFORE the mover applies drag. The target is not a post-move cap.
+        // 0x0044edfc: +0x1dc = lane-centre error, halfway from its previous
+        // value on a lane-change think.
+        const int32_t full = wrap(int64_t(at.offset + car.lane * 250 + 125) * 256 - car.lateral);
+        car.steer_error =
+            car.lane_changed ? wrap(int64_t(wrap(int64_t(full) - car.steer_error)) / 2 + car.steer_error) : full;
+        int32_t error = car.steer_error;
+        int32_t drift = drift_rates_[car.kind & 3];
+        if (car.kind & 1) {
+            error = car.steer_error = car.kind == 1 ? 0x32000 : -0x32000;
+            drift = 0;
+        }
+        car.heading = approx_atan2(drift, error >> 8) * 0x10000;
+        if (car.heading > 0x7fffff) car.heading -= 0x1000000;
+        car.speed = std::min(target, wrap(int64_t(car.speed) + int64_t(car.dt) * rate));
     }
-    car.heading = approx_atan2(drift, error >> 8) * 0x10000;
-    if (car.heading > 0x7fffff) car.heading -= 0x1000000;
-    car.speed = std::min(target, wrap(int64_t(car.speed) + int64_t(car.dt) * rate));
     Bike& body = car.motion;
     body.i32(0x18) = car.dt;
     body.i32(0x1c) = car.position;
     body.i32(0x28) = car.lateral;
     body.i32(0xec) = car.speed;
-    body.i32(0x128) = car.heading;
+    if (think) body.i32(0x128) = car.heading;
     // 0x0043adc0: cars retain the template ground word and skip vertical
     // settling (type 0x10). Reuse the recovered 0x004390c0/0x00439920 laws.
     if (body.i32(0x160) == 0) {
