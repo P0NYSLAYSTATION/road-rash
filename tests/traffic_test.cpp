@@ -173,6 +173,11 @@ static std::vector<uint8_t> synthetic_exe() {
     w32(data(0x75698 + 0x24), 50);
     w32(data(0x75698 + 0x2c), 111);
     exe[data(0x75698 + 0x28)] = 10;                                     // template size
+    for (int kind = 0; kind < 4; ++kind) {
+        const uint32_t shape[6] = {uint32_t(kind & 1 ? 0xa000 : 0x4000), 64, 8960,
+                                  uint32_t(190 + kind), uint32_t(1800 + kind), 0};
+        for (int i = 0; i < 6; ++i) w32(data(0x75700 + (kind * 6 + i) * 4), shape[i]);
+    }
     for (int k = 0; k < 4; ++k) w32(data(0x68f00 + 4 * k), 0x40u << k); // lookahead windows
     for (int i = 0; i < 1024; ++i) w32(data(0x75768 + 4 * i), uint32_t(i * 32));
     return exe;
@@ -629,6 +634,10 @@ static void test_spawn_and_move() {
     if (active == 0) throw std::runtime_error("no spawn after timer decay");
     if (oncoming != 1) throw std::runtime_error("oncoming spawn count");
     if (spawned->position != front - 0x100) throw std::runtime_error("spawn position");
+    if (spawned->motion.i32(0x174) != 0x4000 || spawned->motion.i32(0x178) != 64 ||
+        spawned->motion.i32(0x17c) != 8960 || spawned->motion.i32(0x180) != 192 ||
+        spawned->motion.i32(0x194) != 1802)
+        throw std::runtime_error("oncoming allocation must use its kind-specific dimensions and mass");
     if (spawned->lane != -1 && spawned->lane != -2)
         throw std::runtime_error("oncoming lane"); // -1 - (rand % 2)
     if (spawned->lateral != (1000 + spawned->lane * 250 + 125) * 256)
@@ -1031,6 +1040,18 @@ static void test_deferred_controller() {
     system.run_controller(0, front - 0x8000, front, 571, route, random);
     if (system.signals()[size_t(signal)].accum != 1)
         throw std::runtime_error("controller must not execute twice during one scheduler pass");
+    system.run_controller(0, front + 1, front + 0x8000, 601, route, random);
+    const auto retained = system.signals()[size_t(signal)];
+    auto& car = system.cars_mut()[0];
+    car.active = true;
+    car.signal = signal;
+    car.next_tick = 10000;
+    system.begin_schedule(route, front, random, 602, true);
+    const auto& removed = system.signals()[size_t(signal)];
+    if (system.controllers()[0].active || removed.active || car.signal != signal ||
+        removed.position_q8 != retained.position_q8 || removed.phase != retained.phase ||
+        removed.accum != retained.accum || removed.controller != retained.controller)
+        throw std::runtime_error("returning signal slots must retain their data and car-held references");
 }
 
 static void test_opposite_intersection() {

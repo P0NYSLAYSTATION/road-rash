@@ -151,6 +151,9 @@ TrafficSystem::TrafficSystem(const VehicleLibrary& library, std::vector<uint8_t>
     for (int k = 0; k < 4; ++k) drift_rates_[k] = int8_t(drift[size_t(k)]) * 800; // 0x0044e710: +0x1e0
     const auto car_template = read_exe_data(exe, 0x00475698, 26 * 4);
     for (size_t i = 0; i < 26; ++i) car_template_[i] = bits(word(car_template, i * 4));
+    const auto kinds = read_exe_data(exe, 0x00475700, 4 * 6 * 4);
+    for (size_t kind = 0; kind < 4; ++kind)
+        for (size_t i = 0; i < 6; ++i) kind_templates_[kind][i] = bits(word(kinds, (kind * 6 + i) * 4));
     const auto drag = read_exe_data(exe, 0x0046dce4, 4);
     for (size_t i = 0; i < 4; ++i) physics_.surface_drag[i] = int8_t(drag[i]);
     const auto wave = read_exe_data(exe, 0x00475768, 4096);
@@ -192,7 +195,7 @@ bool TrafficSystem::place(uint8_t kind, int8_t lane, const RouteSample& at, int3
         const Bike previous_motion = car.motion;
         car = TrafficCar{};
         car.motion = previous_motion; // 0x00438a80 recycles without clearing the object.
-        init_object(car.motion, car_template_);
+        init_car(car.motion, kind);
         car.motion.i32(0x1f8) = 0; // 0x0044e1e7: contact pause is explicitly reset.
         car.interval = car_template_[2];
         car.next_tick = int32_t(tick_);
@@ -259,6 +262,14 @@ int32_t follow_speed(int kind, int32_t self_position, int32_t self_lateral, int3
 constexpr int32_t crossing_half_width = 0xa000; // 0x00475700 + kind*0x18 for kinds 1/3 (0x4000 for 0/2)
 constexpr int32_t car_half_length = 0x40;       // +0x178 from the same table
 } // namespace
+
+void TrafficSystem::init_car(Bike& body, int kind) const {
+    //0044e0c3/0044e3f5 copy six kind-specific words into the allocation
+    //template, starting at +44, before004387a0 initializes the car.
+    auto object = car_template_;
+    for (size_t i = 0; i < 6; ++i) object[17 + i] = kind_templates_[size_t(kind & 3)][i];
+    init_object(body, object);
+}
 
 int32_t TrafficSystem::car_half_width(const TrafficCar& car) {
     return (car.kind & 1) ? crossing_half_width : 0x4000;
@@ -490,7 +501,7 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
     // Signal: stop line and phase.
     if (car.signal >= 0 && target >= 1) {
         const auto& s = signals_[size_t(car.signal)];
-        if (!s.active || s.controller < 0 || !controllers_[size_t(s.controller)].active)
+        if (s.controller < 0)
             car.signal = -1;
         else {
             const auto& c = controllers_[size_t(s.controller)];
@@ -650,6 +661,11 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
         body.i32(0x130) = bend;
         body.i32(0x12c) = rise;
     });
+    if (wall_response_) {
+        const size_t current = size_t(ring_slot_sample(int32_t(body.i32(0x1c)) >> 8,
+                                                      front_q8, int32_t(route.size())));
+        wall_response_(body, current, slot);
+    }
     car.speed = body.i32(0xec);
     car.position = body.i32(0x1c);
     car.lateral = body.i32(0x28);
@@ -890,7 +906,7 @@ void TrafficSystem::place_crossing(const IntersectionController& c, int signal, 
         const Bike previous_motion = car.motion;
         car = TrafficCar{};
         car.motion = previous_motion;
-        init_object(car.motion, car_template_);
+        init_car(car.motion, kind);
         car.motion.i32(0x1f8) = 0;
         car.interval = car_template_[2];
         car.next_tick = int32_t(tick_);
@@ -971,10 +987,12 @@ bool TrafficSystem::begin_schedule(const std::vector<RouteSample>& route, int32_
     for (auto& c : controllers_)
         if (c.active && c.pending_remove) {
             for (int k = 0; k < 4; ++k)
-                if (c.signals[k] >= 0) signals_[size_t(c.signals[k])] = IntersectionSignal{};
-            for (auto& car : cars_)
-                if (car.signal >= 0 && signals_[size_t(car.signal)].active == false) car.signal = -1;
-            c = IntersectionController{};
+                if (c.signals[k] >= 0) signals_[size_t(c.signals[k])].active = false;
+            //0041f1f0 marks these pool objects;00438c20 returns them without
+            //clearing their data or pointers held by cars. A later allocation
+            //overwrites the slot, so existing cars observe that new occupant.
+            c.active = false;
+            c.pending_remove = false;
         }
     if (!filled_) build_slices(route, front_q8, 0, tick);
     if (!defer_controllers) think_intersections(front_q8 - 0x8000, front_q8, tick, route, random);

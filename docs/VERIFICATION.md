@@ -1,5 +1,15 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — traffic wall and signal lifetime gate
+
+`build/hiway-signal-lifetime.json`: unchanged14084-tick completed original trace
+matches through8191 including RNG;8192 police brain+140 is12/native0, exit1.
+This remains failed whole-race acceptance. Strict Napa2400/City600 pass
+(`build/traffic-lifetime-checkpoint-regressions.json`). Original car-wall
+diagnostics each validate8140 controls and restore the working E:/RR DLL.
+Synthetic tests cover kind-specific allocation constants and retained signal
+data/references after teardown. [Receipts and limits](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — parking and physical-half continuation
 
 `build/hiway-standings-road-mask.json` checks the unchanged14084-tick completed

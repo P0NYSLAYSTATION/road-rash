@@ -2106,6 +2106,14 @@ Race::SubSliceView Race::sub_slice(const Rider& r, size_t sample) const {
     v.p3a = int8_t(path.event_parameters[1]);
     v.b3b = path.event_parameters[2];
     v.sel = {t.selectors[0], t.selectors[1], path.side_flags[0], path.side_flags[1]};
+    //Building-height filtering writes ff during drawing. A future physical
+    //ring slot has been built but has not entered the 32-slice draw window;
+    //its selectors must remain the raw profile bytes (Hiway8132 car walls).
+    if (undrawn_selectors_ && int64_t(sample) > int64_t(camera_position() >> 8) + 31) {
+        const auto selectors = undrawn_selectors_(rs);
+        v.sel[0] = selectors[0];
+        v.sel[1] = selectors[1];
+    }
     v.e0 = rs.offset - path.left;
     v.e4 = rs.offset + path.right;
     const WallProfile w = wall_profile(t, path, t.type == 3);

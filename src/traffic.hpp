@@ -228,6 +228,11 @@ class TrafficSystem {
     void set_terrain_type(std::function<int(const RouteSample&)> source) {
         terrain_type_ = std::move(source);
     }
+    //0043adc0 calls the same wall response as bikes, after swept motion
+    //and before the car's window-removal/scheduling checks.
+    void set_wall_response(std::function<void(Bike&, size_t, size_t)> response) {
+        wall_response_ = std::move(response);
+    }
     const VehicleLibrary& library() const { return *library_; }
     // 0x00437e60 car LOD after the move, using the pre-driver ring camera.
     static int32_t schedule_interval(const TrafficCar&, int32_t camera_q8, int32_t player_velocity);
@@ -302,6 +307,9 @@ class TrafficSystem {
     std::vector<IntersectionSignal> signals_{signal_pool};
     std::vector<TrafficObstacle> obstacles_;
     std::function<int(const RouteSample&)> terrain_type_;
+    std::function<void(Bike&, size_t, size_t)> wall_response_;
+    std::array<std::array<int32_t, 6>, 4> kind_templates_{};
+    void init_car(Bike& body, int kind) const;
     uint8_t sprite_size_ = 10;
     // Plan 34 C3.
     bool net_ = false;

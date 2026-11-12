@@ -1,13 +1,22 @@
 # Parking continuation and retained road pointers
 
-Baseline be17861, branch codex/simulation-parity. This continuation is in
-progress; the working-tree parking changes are not yet committed or released.
+Baseline be17861, branch codex/simulation-parity. Parking checkpoint1b3179d
+is committed, pushed and released; the traffic wall continuation is in progress.
 The ongoing user instruction is to continue autonomously until all tracks have
 start-to-finish parity. Multiplayer remains on hold. The saved task API reports
 the older long-running goal paused; that state cannot be resumed by update_goal.
 Continue the authorized work within the active turn; do not stop after status.
 
 ## Published checkpoint
+
+Release1.1.6 is published from clean1b3179df89b123eb9656afb938d38fff5a6e8c2d:
+https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.6
+Installer SHA25680ebb793a9609052e0d0f5693f4401e86228f9b9dd7b0f57110b406bd14f0d7f.
+Public download verified (`build/v116-publish.log`). Isolated1.1.5->1.1.6
+update preserved600 files and passed installed-menu smoke using SDL
+(`build/parity-v116-upgrade-validation.json`). Source build, strict regression
+and installer receipts use the v116 prefix. Release notes explicitly exclude
+unavailable Direct3D validation. The parking fixes are committed and pushed.
 
 Release1.1.5 is published from clean be178614925c8fed4010aac443935b08649fc37e:
 https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.5
@@ -107,11 +116,67 @@ The route shortcut is replaced with that literal predicate using both half
 mirrors' samples, also reusing refresh_place during wake. The full Hiway replay
 measures exact through8131. Napa2400/City600 regressions still pass.
 
-Next coherent parking checkpoint needs refreshed docs/status, commit/push and
-new installer1.1.6 with an isolated1.1.5 upgrade check. Scripts in
-C:/Users/eddj9/Documents/New project/publish-v115.py and
-verify-parity-v115-upgrade.py are templates. Keep source clean throughout final
+The next coherent traffic checkpoint needs refreshed docs/status, commit/push
+and installer1.1.7 with an isolated1.1.6 upgrade check. Scripts in
+C:/Users/eddj9/Documents/New project/publish-v116.py and
+verify-parity-v116-upgrade.py are templates. Keep source clean throughout final
 build/installer/publication checks. No commercial assets in releases.
 
 Independent Napa moving1259 and City moving1251 still differ. Medly's old
 scripted wreck is not finish evidence. All-track full-race parity is unfinished.
+
+## Next slice in progress — traffic wall response
+
+Original0043adc0 calls0043a610 after swept motion; the native car mover omitted
+this call. A callback now reuses Race::walls with the car's type0x10 image,
+before scheduling/removal.0044e0c3 and0044e3f5 also copy six kind-specific words
+from475700+kind*24 into the allocation template. Native used only the common
+template, losing crossing-car width and other per-kind words. Constructor
+now reads that table and init_car uses it for both spawn paths.
+
+Intermediate measurements were not sufficient for Hiway8132:
+`build/hiway-traffic-wall-response.json` gives193024 and the kind-template
+fix gives168448, versus original152320. No claim of a measured fix yet.
+The shared wall routine applies a selector==ff widening absent in the original
+result; investigate original physical selectors before changing it.
+
+Diagnostic `hiway-car-wall-8140.tsv` SHA256
+c633dd0c4de90b3a9524ff9f1702b2f6411e00805c15f5a48f9fd34957329767,
+8140 validated controls, restored DLL, proves8132 car entry201994 and exit152320
+with type0, flags0, shoulders-505/755. Native trace shows future physical slot
+1260, same shoulders and type, but widening and originally width16384.
+Enhanced diagnostic `hiway-car-wall-dimensions-8140` completed8140 validated
+controls and restored the working DLL. SHA256
+7084f2fd9933b0375805426c3fd4675162269aaa6359f588b00d1496699b4b61.
+At8132 it proves physical selectors67/67 and halfwidth40960. The native scene
+pre-filtered short buildings to selector255 before those future physical slots
+were drawn, incorrectly adding widening. CourseScene now preserves raw
+selector bytes; Race::sub_slice uses them beyond the32-slice draw window.
+This handles the measured future-slot case, not every hidden-road draw latch.
+No original capture remains active. The caller helper was rebuilt successfully
+(`build/traffic-wall-dimensions-proxy-build.log`).
+
+Synthetic oncoming allocation checks kind-specific dimensions and mass;
+`build/traffic-kind-fixture-tests.log` passes. Established Napa2400/City600
+pass with kind templates and selector preservation. Separate
+moving Napa1259/City1251 remain unchanged (`build/traffic-wall-moving-diagnostics.json`).
+
+Hiway then reached8144, where native eagerly cleared a car's signal reference
+when returning a controller to the pool.0041f1f0 marks pool objects;00438c20
+does not clear their data or other objects' pointers.0044eb89 reads the retained
+signal without an active-state guard. Native now preserves returned slot data
+and references; later allocation can overwrite that same slot. An intermediate
+attempt to preserve references during ordinary-car allocation was removed:
+0044e1d5 explicitly writes the allocation's signal, and that attempt did not
+advance parity. The deferred-controller synthetic test now checks retained
+signal fields and car references on teardown.
+
+`build/hiway-signal-lifetime.json` matches through8191 including RNG, with first
+gap8192 police native rider15 brain+140 original12/native0 (exit1).
+`build/traffic-lifetime-checkpoint-regressions.json` passes Napa2400/City600.
+Final full build and SDL suite succeeded, logs
+`build/traffic-lifetime-checkpoint-full-build.log` and
+`build/traffic-lifetime-checkpoint-native-tests.log`:104 passes,35 explicit skips,
+zero failures; two unavailable Direct3D tests explicitly excluded. No claim of whole-race
+parity. Next: finish validation/docs, commit/push, installer1.1.7 upgrade/release,
+then trace8192. Do not end the turn after a partial status.

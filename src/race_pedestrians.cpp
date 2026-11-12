@@ -715,7 +715,23 @@ void Race::collide_pedestrians() {
     }
 }
 void Race::attach_terrain_type() {
-    if (traffic_ && terrain_source_)
+    if (traffic_ && terrain_source_) {
         traffic_->set_terrain_type([this](const RouteSample& s) { return int(ground(s).type); });
+        traffic_->set_wall_response([this](Bike& body, size_t current, size_t previous) {
+            Rider actor;
+            actor.bike = body;
+            actor.route = riders_[0].route;
+            actor.sample = current;
+            actor.previous_sample = previous;
+            if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+                const auto s = sub_slice(actor, current);
+                std::fprintf(stderr, "car-wall tick %d pos %d lat %d samples %zu/%zu type %u flags %u edges %d/%d shoulders %d/%d halfwidth %d\n",
+                             ticks_, int32_t(body.i32(0x1c)), int32_t(body.i32(0x28)), previous, current,
+                             unsigned(s.type), unsigned(s.flags), s.e0, s.e4, s.e8, s.ec, int32_t(body.i32(0x174)));
+            }
+            walls(actor);
+            body = actor.bike;
+        });
+    }
 }
 } // namespace rr

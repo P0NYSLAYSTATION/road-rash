@@ -49,6 +49,9 @@ class CourseScene {
     // (Race::apply_ring_terrain) over these values; terrain() stays the
     // render view.
     const TerrainSlice& base_terrain(uint32_t section, uint32_t local) const;
+    std::array<uint8_t, 2> undrawn_selectors(uint32_t section, uint32_t local) const {
+        return undrawn_selectors_.at(section).at(local);
+    }
     std::vector<uint32_t> terrain_section_sizes() const;
     // Plan 20 Task 3: family textures for generation (read-only walk).
     const std::map<uint32_t, Family>& families() const { return families_; }
@@ -106,6 +109,7 @@ class CourseScene {
     std::array<int32_t, 257> sine_words_{};             // 0x004766f0
     std::array<uint8_t, 128> sine_bytes_{};             // 0x00476870
     std::vector<std::vector<TerrainSlice>> terrain_;
+    std::vector<std::vector<std::array<uint8_t, 2>>> undrawn_selectors_;
     std::map<std::pair<uint32_t, uint32_t>, TerrainSlice> base_saved_; // originals of ring-written samples
     std::vector<std::vector<std::array<uint16_t, 4>>> family_slots_;
     struct FamilyTimeline {

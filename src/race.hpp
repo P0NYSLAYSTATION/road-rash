@@ -354,6 +354,9 @@ class Race {
         terrain_source_ = std::move(source);
         attach_terrain_type();
     }
+    void set_undrawn_selectors(std::function<std::array<uint8_t, 2>(const RouteSample&)> source) {
+        undrawn_selectors_ = std::move(source);
+    }
     // Guard-rail height 0x0041c200 writes into sub-slice +0x3b when it draws a
     // CESR event-5 strip (category-6 group header); 0 when it has no group.
     void set_rail_height_source(std::function<int32_t(const RouteSample&)> source) {
@@ -820,6 +823,7 @@ class Race {
     }
 
     std::function<const TerrainSlice&(const RouteSample&)> terrain_source_; // base terrain (no ring writes)
+    std::function<std::array<uint8_t, 2>(const RouteSample&)> undrawn_selectors_;
     // Plan 34 Task 3: ring terrain the simulation reads (0x00451910 slices),
     // per course (section, local), copy-on-write so snapshots restore it.
     struct RingGround {

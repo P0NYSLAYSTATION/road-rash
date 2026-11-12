@@ -1041,10 +1041,11 @@ static void __fastcall rr_wall_probe(uintptr_t self) {
     uintptr_t sl = (uint32_t)RD32(self + 0x2c);
     int probe = g_slice_probe >= 0 && ((int32_t)RD32(self + 0x1c) >> 8) == g_slice_probe;
     if (probe && g_out && sl && readable(sl, 0x164))
-        fprintf(g_out, "# wall-entry tick=%u actor=%u kind=%u pos=%d lat=%d slice=%u type=%u event=%u flags=%u shoulders=%d/%d rate=%d\n",
+        fprintf(g_out, "# wall-entry tick=%u actor=%u kind=%u pos=%d lat=%d slice=%u type=%u event=%u flags=%u shoulders=%d/%d rate=%d selectors=%u/%u halfwidth=%d\n",
                 RD32(0x004b7ecc), (unsigned)self, RD32(self + 0xc4), (int32_t)RD32(self + 0x1c),
                 (int32_t)RD32(self + 0x28), (unsigned)sl, RD8(sl + 0x3c), RD8(sl + 0x38), RD8(sl + 0x37),
-                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec), (int32_t)RD32(self + 0xf0));
+                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec), (int32_t)RD32(self + 0xf0),
+                RD8(sl + 0x148), RD8(sl + 0x149), (int32_t)RD32(self + 0x174));
     ((void(__fastcall*)(uintptr_t))0x0043a610)(self);
     if (probe && g_out)
         fprintf(g_out, "# wall-exit actor=%u pos=%d lat=%d rate=%d\n", (unsigned)self,

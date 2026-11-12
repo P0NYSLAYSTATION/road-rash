@@ -1,5 +1,15 @@
 # Port progress
 
+## November 12, 2026 — traffic walls and signal pool lifetime
+
+The unchanged completed Hiway recording now matches through8191 including RNG.
+Cars now run the shared original wall response and load their kind-specific
+allocation constants. Future physical slots keep raw terrain selectors until
+the draw window, avoiding premature short-building widening. Returned signal
+slots retain their data and car-held references as the original does.
+First gap8192 is a police AI counter; whole-race/all-track parity remains open.
+[Evidence and validation](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — parking, retained halves and standings
 
 The completed Hiway recording now matches through8131 including RNG, using

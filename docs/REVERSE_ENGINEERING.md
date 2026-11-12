@@ -1,5 +1,15 @@
 # Binary evidence and next work
 
+## November 12, 2026 — traffic walls, dimensions and retained signals
+
+0043adc0 calls0043a610 after car motion;0044e0c3/0044e3f5 copy six kind-specific
+allocation words from475700+kind*24. At Hiway8132, original halfwidth40960 and
+undrawn selectors67/67 produce lateral152320; native omitted the wall call,
+used width16384 and prematurely filtered selectors to255.0041f1f0 marks signals
+and controllers for return without clearing their data or car-held pointers;
+0044eb89 subsequently reads retained signal data without an active-state guard.
+[Captures and precise remaining limits](agent-handoffs/parity-parking-20261112.md).
+
 ## November 12, 2026 — parking and retained physical halves
 
 00407610 filters parked pace candidates through00454040 branch flags40/80/C0

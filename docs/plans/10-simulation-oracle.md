@@ -2,6 +2,11 @@
 
 ## Windows continuation — November 12, 2026
 
+Latest traffic continuation matches the completed Hiway trace through8191,
+including RNG. First gap8192 is police brain+140 original12/native0. Traffic
+wall/dimension, undrawn selector and signal-lifetime evidence supersedes older
+gap statements below; see the [current handoff](../agent-handoffs/parity-parking-20261112.md).
+
 Current continuation supersedes the historical first-gap statements below:
 the unchanged completed Hiway trace matches through8131 including RNG.
 First gap8132 is ring actor0x336fb08 lateral152320/native201994.

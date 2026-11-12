@@ -156,6 +156,10 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
             families_.emplace(entry.id,
                               read_family(std::vector<uint8_t>(file.begin() + entry.offset,
                                                                file.begin() + entry.offset + entry.size)));
+    for (const auto& section : terrain_) {
+        undrawn_selectors_.emplace_back();
+        for (const auto& t : section) undrawn_selectors_.back().push_back(t.selectors);
+    }
     for (size_t section = 0; section < terrain_.size(); ++section)
         for (size_t local = 0; local < terrain_[section].size(); ++local) {
             auto& t = terrain_[section][local];
