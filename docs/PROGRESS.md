@@ -1,5 +1,9 @@
 # Port progress
 
+## November13 — release1.1.19 published
+
+Code commitb377447 is pushed and tagged3do-1.1.19. The clean optimized revision passes152selected native tests with no failures/CTest skips, all five completed Level1 races (143764ticks), the Level5 Highway arrest run (94929ticks), and all ten required police/crash cases. Update18->19 preserves600checked asset/save/soundfont/settings files byte-for-byte and launches successfully. The asset-free installer is published; its public download matches SHA256542219f4ffa60854933cc731f23c13e5fd14aeb44aaf789b9cfe3e3af69a5924. Menu pixels and widescreen-only checks remain owner-excluded. Further higher-level/branch finish combinations remain unmeasured; multiplayer work remains held during gameplay parity completion.
+
 ## November13 — initial-slot and finish-result branches
 
 Production gates exposed two additional cases. Unbuilt forward slots have initialized500-unit road edges and150-unit shoulders, so allocation-time hill interpolation now uses that original template. The original crashed-finish branch starts the result without waiting for the uncrashed braking threshold; normal and crashed finish integration checks now pass separately. Optimized strict Level5 Highway matches94929ticks through arrest. Renewed optimized native gate passes152selected tests with zero failures/CTest skips, and all five finish recordings match143764ticks. Earlier interrupted gates remain incomplete evidence; new complete reports supersede them. Installer/update/release work follows this verified milestone.

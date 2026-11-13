@@ -6,7 +6,7 @@
       "area": "Native build",
       "implementation": "Playable native game + research viewer",
       "verification": "Windows optimized MSVC Release:152 selected CTests pass, zero failures/CTest skips; owner excludes menu pixel comparisons and widescreen-only checks. Actual compiler configuration now recorded in build metadata. Historical macOS/Linux gates retain their own dates.",
-      "remaining": "Clean revision installer build, update validation and release publication pending.",
+      "remaining": "Release1.1.19 published and public checksum verified;1.1.18->1.1.19update preserves600checked files. Further simulation coverage remains separate.",
       "evidence": [
         "VERIFICATION.md",
         "RUN_NATIVE.md",
@@ -19,7 +19,7 @@
       "area": "Simulation parity",
       "implementation": "Original live rider/car scheduler, native countdown, scene construction, AI combat/relationships, car callbacks, marking lifetimes and single-anchor replay",
       "verification": "Optimized five Level1 human races match143764 ticks from tick1 through finish with one RNG anchor. HighwayLevel5 matches94929ticks through arrest. Ten required police/crash cases match35916ticks. Initial-slot geometry and both normal/crashed finish-result integration verified.",
-      "remaining": "Higher-level/branch finish combinations remain unmeasured. Installer upgrade/release pending. Menu and widescreen-only parity excluded by owner. Multiplayer held.",
+      "remaining": "Higher-level/branch finish combinations remain unmeasured. Release1.1.19publishes the verified milestone. Menu and widescreen-only parity excluded by owner. Multiplayer held.",
       "evidence": [
         "agent-handoffs/skip-removal-20261112.md",
         "agent-handoffs/parity-resource-lookup-20261112.md",
