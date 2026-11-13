@@ -56,7 +56,7 @@ std::vector<std::pair<std::string, Message>> samples() {
     reconnect.seat_token = token(0x10);
     RoomState state;
     state.code = "K7MPQ2";
-    state.options = {2, 1, false, true};
+    state.options = {2, 1, false, true, true};
     state.status = RoomStatus::lobby;
     state.host_seat = 0;
     state.your_seat = 1;
@@ -66,7 +66,8 @@ std::vector<std::pair<std::string, Message>> samples() {
     start.race_id = 77;
     start.seed = 0xdeadbeef;
     start.course = 4;
-    start.options = {0, 2, true, true};
+    start.options = {0, 2, true, true, true};
+    start.authority_seat = 1;
     start.start_tick = 600;
     start.your_seat = 1;
     start.humans = {{0, 3, 2, "Natasha"}, {1, 7, 5, "Viper"}};
@@ -82,7 +83,7 @@ std::vector<std::pair<std::string, Message>> samples() {
         {"hello_reconnect", reconnect},
         {"welcome", Welcome{9, 1700000000123ull, "K7MPQ2", token(0x40)}},
         {"reject", Reject{RejectReason::fingerprint}},
-        {"room_create", RoomCreate{{3, 0, true, false}}},
+        {"room_create", RoomCreate{{3, 0, true, false, true}}},
         {"room_join", RoomJoin{"K7MPQ2", false}},
         {"room_list", RoomList{}},
         {"room_list_reply", RoomListReply{{{"K7MPQ2", "Natasha", 2, 3, RoomStatus::lobby},
@@ -109,6 +110,10 @@ std::vector<std::pair<std::string, Message>> samples() {
         {"log_chunk", log},
         {"ready", Ready{true}},
         {"rtc_close", RtcClose{}},
+        {"snapshot_controls", SnapshotControls{77,5,0x0103,1}},
+        {"snapshot_state", SnapshotState{77,100,{5,7},{1,3},{0,1,2}}},
+        {"snapshot_results", SnapshotResults{77,100,{{0,Outcome::won,0},{1,Outcome::finished,1}}}},
+        {"snapshot_presence", SnapshotPresence{77,3}},
     };
 }
 
@@ -176,9 +181,9 @@ int main() {
     {
         Hello h = std::get<Hello>(all[0].second);
         std::vector<uint8_t> b = encode(h);
-        b[1] = 2; // protocol 2
+        b[1] = uint8_t(protocol_version + 1); // deliberately unsupported version
         check(rejects(b), "other protocol version rejected");
-        check(peek_hello_protocol(b) == uint16_t(2), "peek reads the protocol of any version");
+        check(peek_hello_protocol(b) == uint16_t(protocol_version + 1), "peek reads the protocol of any version");
         check(!peek_hello_protocol(encode(Ping{1})).has_value(), "peek only reads Hello");
     }
     // Out-of-range fields: encode refuses them, and hand-built bytes are rejected.

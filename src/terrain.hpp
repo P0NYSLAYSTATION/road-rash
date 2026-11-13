@@ -51,6 +51,7 @@ struct TerrainIteratorState {
 // Random source returns a nonnegative value, as the original CRT rand wrapper.
 // Caller owns definition and random-stream lifetime; no per-sample random cache.
 class TerrainIterator {
+    friend struct SnapshotStateCodec;
   public:
     TerrainIterator(const TerrainDefinition& definition, int32_t position_q8,
                     std::function<uint32_t()> random);

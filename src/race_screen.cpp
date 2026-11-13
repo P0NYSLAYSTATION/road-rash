@@ -355,7 +355,7 @@ void RaceScreen::step_online(uint64_t now, uint32_t controls) {
     const int seat = client.start()->your_seat == 0xff ? 0 : client.start()->your_seat;
     const auto before = g_.view_drawn;
     g_.present_online(*client.race(), seat);
-    g_.countdown = std::max(0, int(client.start()->countdown) - client.rollback()->current_tick());
+    g_.countdown = std::max(0, int(client.start()->countdown) - client.current_tick());
     capture_view(g_.view_cur, g_.race(), g_.traffic());
     g_.view_drawn = g_.view_cur;
     g_.view_prev = g_.view_cur;

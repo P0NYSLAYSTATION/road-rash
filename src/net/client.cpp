@@ -11,6 +11,7 @@ RaceConfig race_config(const Start& start) {
         throw std::invalid_argument("Invalid Start roster or course");
     NetRaceConfig net;
     net.seed = start.seed;
+    net.authoritative_snapshots=start.options.snapshots;
     net.ai_bikers = start.options.ai;
     net.cars = start.options.cars;
     for (size_t slot = 0; slot < start.humans.size(); ++slot) {
@@ -87,6 +88,11 @@ void Client::receive(const Message& m, uint64_t now) {
             failed_ = true;
             return;
         }
+        if(s->options.snapshots){
+            rollback_.reset();start_=*s;snapshot_=std::make_unique<SnapshotSession>(setup_->instance,*s,[this](const Message& value){send(value);},now);
+            finished_=failed_=false;sounds_.clear();outcomes_.clear();next_ping_=now;ping_.reset();return;
+        }
+        snapshot_.reset();
         rollback_ =
             std::make_unique<Rollback>(setup_->instance, int(s->humans.size()), local, window_, s->countdown);
         sound_history_ = SoundHistory(window_);
@@ -122,6 +128,7 @@ void Client::receive(const Message& m, uint64_t now) {
         ping_.reset();
         next_ping_ = now;
     }
+    if(snapshot_&&snapshot_->receive(m,now))return;
     auto frames = [&](const Frames& fs) {
         if (!rollback_ || fs.humans != start_->humans.size() || fs.first_tick < 0 ||
             int64_t(fs.first_tick) + int64_t(fs.frames.size()) > 216000 ||
@@ -180,6 +187,13 @@ void Client::update(uint64_t now, const Sampler& sample, int32_t stop) {
         ping_ = uint32_t(now);
         race_send(Ping{*ping_});
         next_ping_ = now + 500;
+    }
+    if(snapshot_){
+        if(!failed_&&!finished_)snapshot_->update(now,sample,std::min(stop,216000));
+        failed_|=snapshot_->failed();stats_.rollback_depth=snapshot_->correction_depth;stats_.malformed=snapshot_->malformed;
+        auto sound=snapshot_->take_sounds();for(const auto& value:sound)if(sounds_.size()<256)sounds_.push_back(value);
+        while(auto outcome=snapshot_->poll_outcome())if(outcomes_.size()<32)outcomes_.push_back({outcome->tick,outcome->slot,outcome->outcome});
+        return;
     }
     const uint64_t elapsed = last_ms_ ? now - last_ms_ : 0;
     last_ms_ = now;

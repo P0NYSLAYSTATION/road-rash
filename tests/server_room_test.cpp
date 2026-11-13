@@ -139,7 +139,7 @@ int main() {
     nr.send(RoomJoin{"ZZZZZZ", false});
     Client old = connect(s);
     std::vector<uint8_t> v2 = encode(hello("Old"));
-    v2[1] = 2;
+    v2[1] = uint8_t(protocol_version + 1);
     old.raw(v2);
     run(s, 10);
     check(other.last<Reject>() && other.last<Reject>()->reason == RejectReason::fingerprint,

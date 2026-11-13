@@ -4416,11 +4416,61 @@ static int rr_install_hooks(void) {
     return 1;
 }
 
+
+/* Native capture uses the working installation's files, with its registry
+ * settings copied into a per-run user key. Only this executable's IAT is
+ * redirected; installed game settings and machine registry are untouched. */
+static char g_native_registry[240];
+static LSTATUS WINAPI rr_native_regopen(HKEY root,LPCSTR name,DWORD options,REGSAM access,PHKEY output) {
+    int game_key=name && !_stricmp(name,"SOFTWARE\\Electronic Arts\\RoadRash 95");
+    LSTATUS result=game_key && g_native_registry[0]
+        ? RegOpenKeyExA(HKEY_CURRENT_USER,g_native_registry,options,access,output)
+        : RegOpenKeyExA(root,name,options,access,output);
+    if(game_key && g_out){fprintf(g_out,"# startup registry open root=%p access=%08lx result=%ld redirected=%d\n",(void*)root,(unsigned long)access,(long)result,g_native_registry[0]!=0);fflush(g_out);}
+    return result;
+}
+static LSTATUS WINAPI rr_native_regcreate(HKEY root,LPCSTR name,DWORD reserved,LPSTR cls,DWORD options,REGSAM access,LPSECURITY_ATTRIBUTES security,PHKEY output,LPDWORD disposition) {
+    if(name && !_stricmp(name,"SOFTWARE\\Electronic Arts\\RoadRash 95"))
+        return RegCreateKeyExA(HKEY_CURRENT_USER,g_native_registry,reserved,cls,options,access,security,output,disposition);
+    return RegCreateKeyExA(root,name,reserved,cls,options,access,security,output,disposition);
+}
+static int WINAPI rr_native_message(HWND owner,LPCSTR text,LPCSTR title,UINT type) {
+    if(g_out){fprintf(g_out,"# startup dialog: %s: ",title?title:"");if(text)for(const char* p=text;*p;++p)fputc(*p=='\r'||*p=='\n'?' ':*p,g_out);fputc('\n',g_out);fflush(g_out);}
+    return IDOK;
+}
+static int rr_native_import(const char* name,void* replacement) {
+    unsigned char* module=(unsigned char*)GetModuleHandleA(NULL);
+    IMAGE_DOS_HEADER* dos=(IMAGE_DOS_HEADER*)module;
+    IMAGE_NT_HEADERS32* nt=(IMAGE_NT_HEADERS32*)(module+dos->e_lfanew);
+    IMAGE_IMPORT_DESCRIPTOR* descriptors=(IMAGE_IMPORT_DESCRIPTOR*)(module+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    for(;descriptors->Name;++descriptors){
+        IMAGE_THUNK_DATA32* lookup=(IMAGE_THUNK_DATA32*)(module+(descriptors->OriginalFirstThunk?descriptors->OriginalFirstThunk:descriptors->FirstThunk));
+        IMAGE_THUNK_DATA32* address=(IMAGE_THUNK_DATA32*)(module+descriptors->FirstThunk);
+        for(;lookup->u1.AddressOfData;++lookup,++address){
+            if(IMAGE_SNAP_BY_ORDINAL32(lookup->u1.Ordinal))continue;
+            IMAGE_IMPORT_BY_NAME* symbol=(IMAGE_IMPORT_BY_NAME*)(module+lookup->u1.AddressOfData);
+            if(strcmp((const char*)symbol->Name,name))continue;
+            DWORD old;if(!VirtualProtect(&address->u1.Function,sizeof(DWORD),PAGE_READWRITE,&old))return 0;
+            address->u1.Function=(DWORD)(uintptr_t)replacement;
+            VirtualProtect(&address->u1.Function,sizeof(DWORD),old,&old);return 1;
+        }
+    }return 0;
+}
+static int rr_native_context(void){
+    GetEnvironmentVariableA("RR_ORACLE_REGISTRY_KEY",g_native_registry,sizeof g_native_registry);
+    if(!rr_native_import("RegOpenKeyExA",rr_native_regopen)||!rr_native_import("RegCreateKeyExA",rr_native_regcreate))return 0;
+    if(getenv("RR_ORACLE_NONINTERACTIVE")&&!rr_native_import("MessageBoxA",rr_native_message))return 0;
+    return 1;
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
     (void)inst;
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
-        char path[MAX_PATH];
+        char path[MAX_PATH], exe_sha[65];
+        env("RR_ORACLE_EXE_SHA256",exe_sha,sizeof exe_sha,"73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2");
+        if(strlen(exe_sha)!=64)return FALSE;
+        for(int i=0;i<64;++i)if(!strchr("0123456789abcdef",exe_sha[i]))return FALSE;
         env("RR_ORACLE_OUT", path, sizeof path, "C:\\oracle.tsv");
         memcpy(g_output, path, sizeof path);
         env("RR_ORACLE_SCENARIO", g_scenario, sizeof g_scenario, "unnamed");
@@ -4430,12 +4480,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             fprintf(
                 g_out,
                 "# rr-oracle "
-                "1\nexe\t73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2\nscenario\t%s\n",
-                g_scenario);
+                "1\nexe\t%s\nscenario\t%s\n",
+                exe_sha,g_scenario);
         }
-        HMODULE real = LoadLibraryA("AWEMAN_REAL.DLL");
+#ifndef RR_EMBEDDED_CAPTURE
+        const int embedded_capture = getenv("RR_ORACLE_EMBEDDED") && atoi(getenv("RR_ORACLE_EMBEDDED"));
+        HMODULE real = embedded_capture ? NULL : LoadLibraryA("AWEMAN_REAL.DLL");
         g_real2 = real ? (void*)GetProcAddress(real, MAKEINTRESOURCEA(2)) : NULL;
-        if (!g_real2) {
+        if (!embedded_capture && !g_real2) {
             if (g_out) {
                 fputs("# AWEMAN_REAL.DLL ordinal 2 not found\n", g_out);
                 fclose(g_out);
@@ -4443,7 +4495,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             }
             return FALSE;
         }
-        if (!rr_install_hooks()) {
+#endif
+        if (!rr_native_context() || !rr_install_hooks()) {
             if (g_out) {
                 fclose(g_out);
                 g_out = NULL;

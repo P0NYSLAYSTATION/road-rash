@@ -84,3 +84,13 @@ if(NOT EMSCRIPTEN)
     # deploy.py needs fcntl: a unit test on POSIX hosts, skipped (77) on Windows.
     set_tests_properties(net_deploy PROPERTIES SKIP_RETURN_CODE 77 LABELS "unit;posix")
 endif()
+
+add_executable(snapshot-test tests/snapshot_test.cpp)
+target_link_libraries(snapshot-test PRIVATE rr-resource)
+target_include_directories(snapshot-test PRIVATE tests)
+add_test(NAME snapshot COMMAND snapshot-test)
+
+add_executable(snapshot_server-test tests/snapshot_server_test.cpp)
+target_link_libraries(snapshot_server-test PRIVATE rr-netd-core)
+target_include_directories(snapshot_server-test PRIVATE tests)
+add_test(NAME snapshot_server COMMAND snapshot_server-test)

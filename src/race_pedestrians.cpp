@@ -40,6 +40,23 @@ constexpr int32_t car_half_length = 64, car_half_height = 8960; // 0x00475700 + 
 constexpr int32_t car_mass = 1800;
 } // namespace
 
+void Race::build_authority_regions(){
+    if(!snapshot_authority_||!pedestrians_)return;
+    for(int seat=0;seat<humans();++seat){
+        const auto& human=riders_[size_t(human_rider(seat))];const auto& road=route_of(human);
+        const int64_t center=int64_t(seat_camera(seat))+0x100;
+        const int64_t first=std::max<int64_t>(0,(center-0x3000)>>8);
+        const int64_t last=std::min<int64_t>(int64_t(road.size()),((center+0x5000)>>8)+1);
+        actor_seat_=seat;
+        for(int64_t index=first;index<last;++index){
+            const auto& sample=road[size_t(index)];const auto& records=pedestrians_->actors(sample);
+            for(size_t i=0;i<records.size();++i)if(pedestrians_->consume(sample.section,sample.local,i))
+                spawn_pedestrian(sample,size_t(index),records[i],random());
+        }
+    }
+    actor_seat_=0;load_pedestrian_looks();
+}
+
 void Race::build_pedestrian_slices() {
     // 0x004552e0 fills the ring back to front (128 slices); 0x00454120 then
     // builds the old front slice when moving forward and the new back slice
@@ -121,6 +138,7 @@ bool Race::outside_windows(int32_t pos, int32_t front, int32_t back) const {
 }
 
 void Race::ring_actor(const RingActor& a, uint32_t jitter) {
+    if(snapshot_authority_)return;
     // Single-road ring: the slice's route sample is its ring position.
     if (!pedestrians_) return;
     const auto& road = route_of(riders_[0]);
@@ -153,7 +171,7 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
         }
         return;
     }
-    const int32_t player = ring_setup_ ? 0 : riders_[0].bike.i32(0x1c); // local_8
+    const int32_t player = ring_setup_ ? 0 : riders_[size_t(snapshot_authority_?human_rider(actor_seat_):0)].bike.i32(0x1c); // local_8
     Pedestrian* slot = nullptr;
     for (auto& p : system.pool())
         if (!p.active) {
@@ -176,7 +194,7 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
     for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
     b.i32(0x134) = position;
     b.i32(0x138) = position;
-    p.body.route = riders_[0].route;
+    p.body.route = riders_[size_t(snapshot_authority_?human_rider(actor_seat_):0)].route;
     p.body.sample = p.body.previous_sample = s;
     p.anchor = position; // +0x1c8..+0x1d8 copy of +0x1c..+0x2c
     p.selector = uint8_t(w0 >> 8);
@@ -316,8 +334,10 @@ bool Race::pedestrian_road_clear(const Pedestrian& p, int factor, int delta) con
         const auto& road = route_of(riders_[0]);
         for (const auto& car : traffic_->cars()) {
             if (!car.active || car.position < 0) continue;
-            const size_t s = std::min(size_t(car.position) >> 8, road.size() - 1);
-            consider(car.position, car.lateral, road[s].offset, car.kind == 2 ? -car.speed : car.speed);
+            const auto& own=snapshot_authority_?route_for(car.road):road;
+            const size_t s = std::min(size_t(car.position) >> 8, own.size() - 1);
+            if(snapshot_authority_&&!same_collision_road(p.body.route,p.body.sample,car.road,s))continue;
+            consider(car.position, car.lateral, own[s].offset, car.kind == 2 ? -car.speed : car.speed);
         }
     }
     if (!found) return true;
@@ -354,7 +374,7 @@ void Race::pedestrian_voice(Pedestrian& p, int which) {
 void Race::think_pedestrian(Pedestrian& p) {
     // 0x00440dd0.
     Bike& b = p.body.bike;
-    const int32_t player = riders_[0].bike.i32(0x1c);
+    const int32_t player = (snapshot_authority_?nearest_human(p.body.bike.i32(0x1c)):riders_[0]).bike.i32(0x1c);
     const uint32_t tick = uint32_t(ticks_);
     auto set = [&](int8_t code) {
         if (p.look) set_animation(p.animation, p.look->bank, code, tick);
@@ -379,7 +399,7 @@ void Race::think_pedestrian(Pedestrian& p) {
     // check; other phases hold; no signal checks the road.
     const int signal = traffic_
                            ? traffic_->pedestrian_signal(route_of(p.body)[p.body.sample].path.marking_flags,
-                                                         b.i32(0x1c), pedestrian_lane(p))
+                                                         b.i32(0x1c), pedestrian_lane(p), snapshot_authority_?p.body.route:-1)
                            : -1;
     p.pace = 0;
     if (p.state != 2) {
@@ -654,6 +674,7 @@ void Race::collide_pedestrians() {
         Bike& q = p.body.bike;
         for (auto& car : traffic_->cars_mut()) {
             if (!car.active || !car.collides) continue;
+            if(snapshot_authority_&&!same_collision_road(p.body.route,p.body.sample,car.road,size_t(std::max(car.position,0)>>8)))continue;
             const int32_t car_half_width = TrafficSystem::car_half_width(car);
             if (std::abs(car.position - q.i32(0x1c)) > car_half_length + q.i32(0x178)) continue;
             if (std::abs(car.lateral - q.i32(0x28)) > car_half_width + q.i32(0x174)) continue;

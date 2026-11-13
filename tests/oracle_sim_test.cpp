@@ -319,7 +319,7 @@ int compare_fields(const std::map<std::string, int64_t>& golden, const std::vect
     return 0;
 }
 } // namespace
-int main(int argc, char** argv) {
+static int replay_main(int argc, char** argv) {
     bool reanchor = false;
     std::string driver_cli;
     std::vector<std::string> args;
@@ -356,7 +356,7 @@ int main(int argc, char** argv) {
         return rr::golden::skip;
     }
     const auto g = rr::golden::load(file);
-    if (g.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2")
+    if (g.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" && g.exe != "b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563")
         throw std::runtime_error("different executable");
     if (g.frames.empty()) throw std::runtime_error("no frames");
     const auto& h = g.frames.at(0);
@@ -1534,4 +1534,13 @@ int main(int argc, char** argv) {
                       << " rpm-timing notes on the nondeterministic channel)\n";
     }
     return 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return replay_main(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "oracle replay failed: " << error.what() << '\n';
+        return 1;
+    }
 }

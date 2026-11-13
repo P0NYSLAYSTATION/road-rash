@@ -13,8 +13,8 @@
 
 namespace rr::net {
 
-inline constexpr uint16_t protocol_version = 1;
-inline constexpr size_t max_message_bytes = 64 * 1024; // server and client limit
+inline constexpr uint16_t protocol_version = 2;
+inline constexpr size_t max_message_bytes = 512 * 1024; // server and client limit
 inline constexpr int max_seats = 8;                    // humans per room
 inline constexpr int max_input_batch = 16;             // unacknowledged inputs per packet
 inline constexpr int max_frames_batch = 64;            // sealed frames per packet
@@ -76,6 +76,7 @@ struct RoomOptions {
     uint8_t ai = 2;        // 0 humans only, 1 limited, 2 full (strings 497-503)
     bool cars = true;      // strings 398-399
     bool is_public = true; // "Public games" / "Unlisted games" (426/421)
+    bool snapshots = false; // authoritative host state; legacy input timeline is retained for other targets
     bool operator==(const RoomOptions&) const = default;
 };
 struct RoomCreate {
@@ -159,6 +160,7 @@ struct Start {
     uint16_t countdown = 0x168; // networked countdown (0x00442dd0)
     uint8_t your_seat = 0xff;
     std::vector<StartHuman> humans; // seat order, 1..8
+    uint8_t authority_seat = 0; // compact index in humans, not the room slot
     bool operator==(const Start&) const = default;
 };
 struct RtcOffer {
@@ -251,10 +253,37 @@ struct RtcClose {
     bool operator==(const RtcClose&) const = default;
 };
 
+// Snapshot sessions authenticate the sender at the room relay. A client can
+// submit controls only; only the elected host can publish world state/results.
+struct SnapshotControls {
+    uint32_t race_id=0, sequence=0;
+    uint16_t controls=0;
+    uint8_t seat=0xff; // relay fills this from the authenticated connection
+    bool operator==(const SnapshotControls&) const = default;
+};
+struct SnapshotState {
+    uint32_t race_id=0;
+    int32_t tick=0;
+    std::array<uint32_t,8> acknowledged{};
+    std::array<uint16_t,8> controls{};
+    std::vector<uint8_t> world;
+    bool operator==(const SnapshotState&) const = default;
+};
+struct SnapshotResults {
+    uint32_t race_id=0;
+    int32_t tick=0;
+    std::vector<OfficialRow> rows;
+    bool operator==(const SnapshotResults&) const = default;
+};
+struct SnapshotPresence {
+    uint32_t race_id=0;
+    uint8_t connected=0;
+    bool operator==(const SnapshotPresence&) const = default;
+};
 using Message =
     std::variant<Hello, Welcome, Reject, RoomCreate, RoomJoin, RoomList, RoomListReply, RoomLeave, RoomState,
                  PickCharacter, VoteCourse, Chat, ChatRelay, Start, RtcOffer, RtcAnswer, RtcCandidate, Input,
-                 Frames, Ack, Ping, Pong, Hash, Desync, Result, Official, LogChunk, Ready, RtcClose>;
+                 Frames, Ack, Ping, Pong, Hash, Desync, Result, Official, LogChunk, Ready, RtcClose, SnapshotControls, SnapshotState, SnapshotResults, SnapshotPresence>;
 
 // Message type byte = variant index + 1 (0 is never valid on the wire).
 inline uint8_t message_type(const Message& m) {

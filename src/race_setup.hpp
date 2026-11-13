@@ -46,6 +46,7 @@ struct HumanSeat {
     std::string alias;
 };
 struct NetRaceConfig {
+    bool authoritative_snapshots = false;
     std::vector<HumanSeat> humans;
     int ai_bikers = 2; // 0 humans only, 1 limited (8 riders), 2 full (15 riders); 0x00405600
     bool cars = true;  // strings 398-399

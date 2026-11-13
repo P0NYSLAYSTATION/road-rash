@@ -65,6 +65,7 @@ int traffic_lane_count(int32_t lanes_q8);
 // One car object. Field comments name the original object offsets
 // (0x004387a0 template copies and 0x0044df60 writes).
 struct TrafficCar {
+    int road = 0;
     uint8_t kind = 0;                            // +0x1cc
     uint8_t vehicle = 0;                         // +0x1fc
     int8_t lane = 0;                             // +0x1e8
@@ -93,12 +94,14 @@ struct TrafficCar {
 struct TrafficObstacle {
     int32_t position = 0, lateral = 0, velocity = 0, lateral_velocity = 0;
     uint32_t type = 4;
+    int road = -1;
 };
 // Intersection controller (0x0041eca0; pool 0x00468ee4, 10 x 0x114, type
 // 0x400, think 0x0041f040 every 0x1e ticks, teardown 0x0041f1f0) and its
 // signals (0x0041ef60; pool 0x00468ee0, 40 x 0x108, type 0x40 << index,
 // no think). Field comments name the original offsets.
 struct IntersectionSignal {
+    int road = 0;
     bool active = false;
     int index = 0;           // +0xf8: 0..3; odd indices spawn crossing cars; type 0x40 << index
     int side = 0;            // 0x0041ef60 param_2: 0 left shoulder, 1 right
@@ -111,6 +114,7 @@ struct IntersectionSignal {
     bool quiet = false;      // 0x0041eca0 bVar13: clears +0xdc (0x0041f220) when true
 };
 struct IntersectionController {
+    int road = 0;
     bool active = false;
     int32_t durations[3] = {600, 180,
                             780};     // +0xfc..+0x104; {75, 0, 240} on a dual type-4 slice with flag byte 0
@@ -123,6 +127,7 @@ struct IntersectionController {
     bool pending_remove = false;          // 0x0041f1f0 marked; unlinked by the next prepass
 };
 class TrafficSystem {
+    friend struct SnapshotStateCodec;
   public:
     static constexpr size_t pool_size = 16;       // 0x00438b70(0x210, 0x10): 16 objects
     static constexpr size_t controller_pool = 10; // 0x00468ee4: 10 x 0x114
@@ -160,9 +165,14 @@ class TrafficSystem {
     struct SeatWindow {
         int32_t camera_q8 = 0, front_q8 = 0, distance = 0, me_q8 = 0, velocity = 0;
         bool ahead = false, behind = false;
+        const std::vector<RouteSample>* road = nullptr;
+        int road_id = 0;
     };
     // Seat order; [0] is seat 0. Seats >= 1 keep their own timers and slice
     // cursor; a slice inside another window when built places nothing.
+    void set_authority_roads(const std::vector<RouteSample>* first,const std::vector<RouteSample>* second){ authority_roads_={first,second}; }
+    bool independent_regions()const{return authority_roads_[0]!=nullptr;}
+    const std::vector<RouteSample>& car_road(const TrafficCar& car,const std::vector<RouteSample>& fallback)const{return independent_regions()?*authority_roads_[size_t(car.road)]:fallback;}
     void set_seat_windows(const std::vector<SeatWindow>& w);
     // One simulation tick on the player's route. camera/front are the ring
     // cursors 0x004b6e5c (camera) and 0x004b6e50 (front, ring camera +
@@ -218,7 +228,7 @@ class TrafficSystem {
     // flags in this lane: only on crosswalk edge slices (flags & 0x18), the
     // nearer of the index-0 (lane >= 0) or index-2 (lane < 0) signals within
     // 0x1e0 ahead/behind (behind wins ties), when within 0x801; else -1.
-    int pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane) const;
+    int pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane, int road = -1) const;
     // Non-car obstacles for this tick's lane scans (set by Race before step).
     std::vector<TrafficObstacle>& obstacles() { return obstacles_; }
     // Terrain type of a route sample (0x00454240 +0x3c), for 0x0041eca0's
@@ -292,6 +302,7 @@ class TrafficSystem {
     uint8_t sprite_size_ = 10;
     // Plan 34 C3.
     bool net_ = false;
+    std::array<const std::vector<RouteSample>*,2> authority_roads_{};
     int configured_density_ = 6;
     struct SeatState {
         TrafficTimers timers;
@@ -303,12 +314,14 @@ class TrafficSystem {
     int32_t primary_front_ = 0;       // seat 0's front of the current call
     int32_t primary_built_end_ = 0;   // seat 0's cursor while a seat's state is swapped in
     bool primary_filled_ = false;
+    bool shares_surface(int first, int32_t first_q8, int second, int32_t second_q8) const;
+    int building_road() const { return independent_regions() && size_t(building_seat_) < windows_.size() ? windows_[size_t(building_seat_)].road_id : 0; }
     int building_seat_ = 0; // whose slices/timers run now (gate + dedupe)
     bool in_window(int32_t q8, int32_t front_q8) const { return q8 >= front_q8 - 0x8000 && q8 < front_q8; }
-    bool inside_any_window(int32_t q8, int32_t front_q8) const; // the call's window or any seat's
+    bool inside_any_window(int32_t q8, int32_t front_q8, int road = -1) const; // the call's window or any seat's
     bool slice_owned_elsewhere(int32_t sample) const;           // another window already built it
-    int32_t nearest_camera(int32_t q8, int32_t camera_q8, int32_t& velocity) const;
-    int32_t window_front_for(int32_t q8, int32_t front_q8) const; // front of the window holding q8
+    int32_t nearest_camera(int32_t q8, int32_t camera_q8, int32_t& velocity, int road = -1) const;
+    int32_t window_front_for(int32_t q8, int32_t front_q8, int road = -1) const; // front of the window holding q8
     void step_seat_windows(const std::vector<RouteSample>&, const std::function<uint32_t()>&, uint32_t tick,
                            bool hold);
 };

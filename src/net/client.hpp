@@ -3,6 +3,7 @@
 #include "net/protocol.hpp"
 #include "net/rollback.hpp"
 #include "net/effects.hpp"
+#include "net/snapshot_session.hpp"
 #include <deque>
 #include <functional>
 #include <memory>
@@ -31,6 +32,8 @@ class Client {
     void send(const Message&); // lobby/control, always reliable
     void update(uint64_t now_ms, const Sampler&, int32_t stop_before = 216000);
     std::optional<Message> poll_event();
+    int32_t current_tick() const { return snapshot_ ? snapshot_->current_tick() : rollback_ ? rollback_->current_tick() : 0; }
+    bool snapshot_mode() const { return bool(snapshot_); }
     Rollback* rollback() { return rollback_.get(); }
     RaceInstance* race() { return setup_ ? &setup_->instance : nullptr; }
     const Stats& stats() const { return stats_; }
@@ -76,6 +79,7 @@ class Client {
     Factory factory_;
     std::unique_ptr<RaceSetup> setup_;
     std::unique_ptr<Rollback> rollback_;
+    std::unique_ptr<SnapshotSession> snapshot_;
     std::optional<Start> start_;
     std::deque<std::pair<int32_t, uint16_t>> inputs_;
     std::deque<Message> events_;

@@ -119,6 +119,7 @@ void put(Writer& w, const RoomOptions& o) {
     w.u8(o.ai);
     w.boolean(o.cars);
     w.boolean(o.is_public);
+    w.boolean(o.snapshots);
 }
 RoomOptions get_options(Reader& r) {
     RoomOptions o;
@@ -126,6 +127,7 @@ RoomOptions get_options(Reader& r) {
     o.ai = r.range<uint8_t>(r.u8(), 0, 2);
     o.cars = r.boolean();
     o.is_public = r.boolean();
+    o.snapshots = r.boolean();
     return o;
 }
 
@@ -169,7 +171,15 @@ bool valid(const Message& m) {
     return std::visit(
         [](const auto& v) -> bool {
             using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, Hello>)
+            if constexpr(std::is_same_v<T, SnapshotControls>)
+                return v.race_id && (v.seat<8||v.seat==0xff) && !(v.controls & ~uint16_t(0x7fff));
+            else if constexpr(std::is_same_v<T, SnapshotState>)
+                return v.race_id && v.tick>=0 && v.tick<=216000 && !v.world.empty() && v.world.size()<=max_message_bytes-128;
+            else if constexpr(std::is_same_v<T, SnapshotResults>)
+                return v.race_id && v.tick>=0 && v.tick<=216000 && !v.rows.empty() && v.rows.size()<=8 &&
+                    std::all_of(v.rows.begin(),v.rows.end(),[](const OfficialRow& row){return row.seat<8&&row.outcome>=Outcome::won&&row.outcome<=Outcome::left&&row.place<=15;});
+            else if constexpr(std::is_same_v<T, SnapshotPresence>) return v.race_id!=0;
+            else if constexpr (std::is_same_v<T, Hello>)
                 return v.protocol == protocol_version && text_ok(v.alias, max_alias, false) &&
                        v.platform <= Platform::bot;
             else if constexpr (std::is_same_v<T, Welcome>)
@@ -203,7 +213,7 @@ bool valid(const Message& m) {
             else if constexpr (std::is_same_v<T, ChatRelay>)
                 return v.seat < max_seats && v.tick >= -1 && text_ok(v.text, max_chat_text, false);
             else if constexpr (std::is_same_v<T, Start>)
-                return v.course >= 1 && v.course <= 5 && options_ok(v.options) && !v.humans.empty() &&
+                return v.authority_seat < v.humans.size() && v.course >= 1 && v.course <= 5 && options_ok(v.options) && !v.humans.empty() &&
                        int(v.humans.size()) <= max_seats &&
                        (v.your_seat < max_seats || v.your_seat == 0xff) &&
                        std::all_of(v.humans.begin(), v.humans.end(), [](const StartHuman& h) {
@@ -303,6 +313,7 @@ void encode_body(Writer& w, const Message& m) {
                 put(w, v.options);
                 w.i32(v.start_tick);
                 w.u16(v.countdown);
+                w.u8(v.authority_seat);
                 w.u8(v.your_seat);
                 w.u8(uint8_t(v.humans.size()));
                 for (const StartHuman& h : v.humans) {
@@ -352,6 +363,18 @@ void encode_body(Writer& w, const Message& m) {
                 w.u32(v.race_id);
                 w.boolean(v.last);
                 put_frames(w, v.frames);
+            } else if constexpr(std::is_same_v<T, SnapshotControls>){
+                w.u32(v.race_id);w.u32(v.sequence);w.u16(v.controls);w.u8(v.seat);
+            } else if constexpr(std::is_same_v<T, SnapshotState>){
+                w.u32(v.race_id);w.i32(v.tick);
+                for(auto value:v.acknowledged)w.u32(value);
+                for(auto value:v.controls)w.u16(value);
+                w.u32(uint32_t(v.world.size()));for(auto value:v.world)w.u8(value);
+            } else if constexpr(std::is_same_v<T, SnapshotResults>){
+                w.u32(v.race_id);w.i32(v.tick);w.u8(uint8_t(v.rows.size()));
+                for(const auto& row:v.rows){w.u8(row.seat);w.u8(uint8_t(row.outcome));w.u8(row.place);}
+            } else if constexpr(std::is_same_v<T, SnapshotPresence>){
+                w.u32(v.race_id);w.u8(v.connected);
             } else if constexpr (std::is_same_v<T, Ready>) {
                 w.boolean(v.ready);
             }
@@ -455,6 +478,7 @@ std::optional<Message> decode_body(uint8_t type, Reader& r) {
         v.options = get_options(r);
         v.start_tick = r.i32();
         v.countdown = r.u16();
+        v.authority_seat = r.u8();
         v.your_seat = r.u8();
         const int n = r.range<int>(r.u8(), 1, max_seats);
         for (int i = 0; i < n && r.ok(); ++i) {
@@ -540,6 +564,20 @@ std::optional<Message> decode_body(uint8_t type, Reader& r) {
         return Ready{r.boolean()};
     case 29:
         return RtcClose{};
+    case 30: {
+        SnapshotControls v;v.race_id=r.u32();v.sequence=r.u32();v.controls=r.u16();v.seat=r.u8();return v;
+    }
+    case 31: {
+        SnapshotState v;v.race_id=r.u32();v.tick=r.i32();
+        for(auto& value:v.acknowledged)value=r.u32();for(auto& value:v.controls)value=r.u16();
+        const auto count=r.range<uint32_t>(r.u32(),1,uint32_t(max_message_bytes-128));
+        for(uint32_t i=0;i<count&&r.ok();++i)v.world.push_back(r.u8());return v;
+    }
+    case 32: {
+        SnapshotResults v;v.race_id=r.u32();v.tick=r.i32();const auto count=r.range<int>(r.u8(),1,8);
+        for(int i=0;i<count&&r.ok();++i)v.rows.push_back({r.u8(),Outcome(r.u8()),r.u8()});return v;
+    }
+    case 33: return SnapshotPresence{r.u32(),r.u8()};
     default:
         return std::nullopt;
     }

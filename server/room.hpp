@@ -128,6 +128,9 @@ class Server {
         RaceRecord record;
         uint64_t first_result_ms = 0;
         bool finished = false;
+        std::optional<net::SnapshotState> latest_snapshot;
+        std::array<uint32_t,8> snapshot_sequences{};
+        uint8_t snapshot_presence=0xff;
     };
     struct Room {
         std::string code;
@@ -148,6 +151,8 @@ class Server {
     void on_join(Conn&, const net::RoomJoin&, uint64_t now);
     void on_leave(Conn&, uint64_t now);
     void on_chat(Conn&, const net::Chat&);
+    void on_snapshot(Conn&, const net::Message&, uint64_t now);
+    void snapshot_presence(Room&);
     void on_input(Conn&, const net::Input&);
     void on_hash(Conn&, const net::Hash&);
     void on_result(Conn&, const net::Result&, uint64_t now);

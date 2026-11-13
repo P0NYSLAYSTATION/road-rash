@@ -64,6 +64,7 @@ void Frontend::net_open_host() {
     }
 #endif
     net_pending_options_ = {};
+    net_pending_options_.snapshots = net_direct_;
     open_popup(data_.popups.at(native_popup::net_level), 1, native_setter::net_level);
 }
 void Frontend::net_open_rooms() {

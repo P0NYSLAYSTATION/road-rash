@@ -327,8 +327,16 @@ struct RaceSnapshot {
 // (0x004395e0/0x00439270/0x00439390/0x004394c0), ground height and vertical motion
 // (0x00439b10 case 0, 0x0043a190), branch choice at splits, AI racing (0x00407bd0 state 1)
 // and the chase camera (0x00437c30) on rider 0, the player.
+struct SnapshotStateCodec;
 class Race {
+    friend struct SnapshotStateCodec;
   public:
+    void set_snapshot_authority(bool enabled);
+    using AuthorityScenery = std::function<const std::vector<SceneryObject>&(const RouteSample&)>;
+    void set_authority_scenery(AuthorityScenery source) { authority_scenery_ = std::move(source); }
+    bool same_collision_road(int first, size_t first_sample, int second, size_t second_sample) const;
+
+    bool snapshot_authority() const { return snapshot_authority_; }
     // route_a/route_b: make_route(course,false/true). Identical up to the first split.
     // road_base_q8: absolute Q8 anchor of the route. The original sub-slice
     // +0xcc is absolute while RouteSample::offset accumulates from 0 at the
@@ -851,6 +859,7 @@ class Race {
         uint8_t borr_count = 0;
         std::array<int32_t, 8> borr{}; // absolute laterals, units (+0x6c)
         const AnimationFrame* borr_frame = nullptr;
+        std::array<const AnimationFrame*,8> authority_borr_frames{};
         uint8_t billboards = 0;
         struct Billboard {
             uint8_t type = 0;
@@ -871,6 +880,9 @@ class Race {
     std::vector<int> human_riders_{0};   // seat -> rider index (plan 34)
     std::array<uint32_t, 8> controls_{}; // this tick's word per seat
     bool net_ = false;
+    bool snapshot_authority_ = false;
+    AuthorityScenery authority_scenery_;
+    void build_authority_regions();
     std::array<int8_t, 8> handicap_{}; // 0x004c1200[slot]
     int32_t handicap_tick_ = 0;        // DAT_0049bdd0
     void update_handicap();            // 0x00442f60

@@ -100,3 +100,25 @@ as ZIP. A damaged archive returns setup exit 1 and preserves the current bank.
 Repeated imports replace read-only destination CD files without changing source
 attributes. Debug also builds and passes its 138 registered tests (36 fixture
 skips). The optional upstream WebRTC test targets account for the Release count.
+
+## Windows 1.1.1
+
+Published [3do-1.1.1](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.1),
+commit `05d6c3186f665522850dd964cfce25a5729a37e2`. Controller discovery runs only
+at startup, including XInput slot discovery. There is no background/periodic
+scan. Connect controllers before starting the game. The rendering backend
+remains DX9. [Timing evidence](WINDOWS_FRAME_PACING.md) records the old discovery
+stall and the final 2,400-frame run.
+
+The clean MSVC Release checkout passed 105 tests with 36 unavailable fixture or
+platform skips, zero failures. An isolated 1.1.0-to-1.1.1 update with no asset
+arguments preserved all 600 checked game, 3DO audio, save, soundfont, settings
+and configuration files; its runtime/build metadata updated and the installed
+game rendered 120 menu frames. Logs: `build/pacing-release-tests.log`,
+`build/pacing-upgrade-validation.json`. Installer checksum:
+`e36e9f5612ca6ebfa3c2ba1b5fa96e5fec6b9d10a5a32952ffe1e60662876ded`.
+The public downloaded installer was checksum-verified. Release artifacts and
+clean provenance are preserved in `artifacts/release/`.
+
+The snapshot/capture implementation remains separate work in progress; none of
+those unfinished changes is included in 1.1.1.

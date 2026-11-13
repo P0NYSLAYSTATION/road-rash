@@ -109,7 +109,7 @@ if(WIN32 AND NOT RR_NETD_STANDALONE)
 endif()
 
 if(NOT RR_NETD_STANDALONE)
-    target_sources(rr-resource PRIVATE ${RR_NET_ROOT}/src/net/client.cpp ${RR_NET_ROOT}/src/net/compat.cpp ${RR_NET_ROOT}/src/net/mano.cpp ${RR_NET_ROOT}/src/frontend_net.cpp)
+    target_sources(rr-resource PRIVATE ${RR_NET_ROOT}/src/net/client.cpp ${RR_NET_ROOT}/src/net/snapshot_session.cpp ${RR_NET_ROOT}/src/net/snapshot_state.cpp ${RR_NET_ROOT}/src/net/compat.cpp ${RR_NET_ROOT}/src/net/mano.cpp ${RR_NET_ROOT}/src/frontend_net.cpp)
     target_link_libraries(rr-resource PUBLIC rr-net)
 endif()
 

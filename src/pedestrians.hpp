@@ -40,6 +40,7 @@ struct Pedestrian {
 };
 
 class PedestrianSystem {
+    friend struct SnapshotStateCodec;
   public:
     static constexpr size_t pool_size = 15; // 0x00438b70(0x468, 0xf)
     using ActorSource = std::function<const std::vector<DzhrActor>&(const RouteSample&)>;

@@ -197,6 +197,24 @@ int main() {
             if (scenario == 1)
                 check(car.motion.i32(0x1f8) == 240, "crossing car contact with bike starts240 tick pause");
         }
+        for(bool same_road:{false,true}){
+            auto first=route(),second=route();
+            for(size_t i=0;i<first.size();++i){first[i].node=1;first[i].section=0;first[i].local=uint32_t(i);second[i].node=2;second[i].section=1;second[i].local=uint32_t(i);}
+            auto tables=rr::PhysicsTables::synthetic();rr::BikeSpec spec{};
+            rr::Opponent remote{spec,90,90,90,1,1};remote.human=1;
+            rr::Race race(first,second,tables,spec,90,{remote});
+            rr::TrafficSystem traffic(library,executable());traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);race.set_snapshot_authority(true);
+            auto& rider=race.riders()[1];rider.route=1;rider.sample=rider.previous_sample=600;rider.frozen=true;rider.stamina.current=0;
+            auto& b=rider.bike;b.i32(0x1c)=600*256+128;b.i32(0x2f0)=1000;b.i32(0x18)=1;
+            b.i32(0x174)=7680;b.i32(0x178)=64;b.i32(0x17c)=8960;b.i32(0x20)=0;b.i32(0x28)=0;
+            b.i32(0x30)=b.i32(0x1c)-1000;b.i32(0x3c)=0;b.i32(0x108)=8000;b.i32(0xec)=8000;
+            b.i32(0x2d8)=196;b.i32(0x180)=256;
+            auto& car=traffic.cars_mut()[0];car.active=true;car.road=same_road?1:0;car.position=b.i32(0x1c);car.speed=0;car.lateral=0;
+            const std::array<uint32_t,2> controls{};race.step(controls);
+            check((b.i32(0x2f4)!=0)==same_road,"remote car contact uses its own road outside host draw distance");
+            check(race.riders()[0].sample<100,"host stayed outside remote car-contact region");
+        }
         std::cout << "car contact crash tails pass\n";
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';

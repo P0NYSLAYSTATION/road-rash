@@ -54,7 +54,9 @@ def verify(binary, fixtures, assets, mode='acceptance', rules=None, timeout=120,
     for fixture in fixtures:
         row = {'fixture': str(fixture), 'mode': mode}
         try:
-            info = validate_trace(fixture, True, reference_hash())
+            from oracle_windows import COMPATIBLE_SHA
+            info = validate_trace(fixture, True)
+            if info['exe_sha256'] not in {reference_hash(),COMPATIBLE_SHA}:raise ValueError('Unrecognized reference runtime executable')
             row.update(info)
             if mode == 'acceptance':
                 receipt_path = Path(str(fixture) + '.receipt.json')

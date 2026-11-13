@@ -180,6 +180,7 @@ bool TrafficSystem::place(uint8_t kind, int8_t lane, const RouteSample& at, int3
         if (car.active) continue;
         // 0x0044df60 (kind bit 0 clear): lateral from the road centre.
         car = TrafficCar{};
+        if(independent_regions()&&size_t(building_seat_)<windows_.size())car.road=windows_[size_t(building_seat_)].road_id;
         init_object(car.motion, car_template_);
         car.interval = car_template_[2];
         car.next_tick = int32_t(tick_);
@@ -311,7 +312,7 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
         int32_t best = limit;
         for (size_t i = 0; i < signals_.size(); ++i) {
             const auto& s = signals_[i];
-            if (!s.active || s.index != want) continue;
+            if (!s.active || s.index != want || !shares_surface(car.road,car.position,s.road,s.position_q8)) continue;
             const int32_t ahead = kind == 0 ? s.position_q8 - car.position : car.position - s.position_q8;
             if (ahead < 0 || ahead >= best) continue;
             best = ahead;
@@ -347,13 +348,14 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
         }
     };
     for (const auto& other : cars_) {
-        if (!other.active || &other == &car) continue;
+        if (!other.active || &other == &car || !shares_surface(car.road,car.position,other.road,other.position)) continue;
         const int32_t forward = other.kind == 2 ? -other.speed : (other.kind & 1) ? 0 : other.speed;
         const int32_t across = other.kind == 1 ? other.speed : other.kind == 3 ? -other.speed : 0;
         consider({other.position, other.lateral, forward, across, other.motion.i32(0x108), 0x10});
     }
     for (const auto& o : obstacles_)
-        consider({o.position, o.lateral, o.velocity, o.lateral_velocity, o.velocity, o.type});
+        if(shares_surface(car.road,car.position,o.road,o.position))
+            consider({o.position, o.lateral, o.velocity, o.lateral_velocity, o.velocity, o.type});
     car.lane_changed = false;
     if (obstacle) {
         gap = kind == 0   ? (obstacle->position - car.position) >> 4
@@ -528,7 +530,7 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
         for (size_t k = 1; k < windows_.size(); ++k) // plan 34: near any human's camera
             car.collides = car.collides || uint32_t(car.position - windows_[k].camera_q8 + 0x400) < 0x2801;
     }
-    const auto [target, rate] = plan_speed(car, route, window_front_for(car.position, front_q8));
+    const auto [target, rate] = plan_speed(car, route, window_front_for(car.position, front_q8, car.road));
     // 0x0044e710 -> 0x00449880/0x004498c0: set heading and approach the
     // target BEFORE the mover applies drag. The target is not a post-move cap.
     // 0x0044edfc: +0x1dc = lane-centre error, halfway from its previous
@@ -570,7 +572,7 @@ void TrafficSystem::move(TrafficCar& car, const std::vector<RouteSample>& route,
     car.position = body.i32(0x1c);
     car.lateral = body.i32(0x28);
     const bool outside = windows_.size() < 2 ? (car.position >= front_q8 || car.position < back_q8)
-                                             : !inside_any_window(car.position, front_q8);
+                                             : !inside_any_window(car.position, front_q8, car.road);
     if (outside || car.lateral < -0xc8000 || car.lateral > 0xc8000) car.pending_remove = true;
     if (car.kind & 1) return;
     // 0x0044efa0 is a contact callback, not a movement/proximity RNG tap.
@@ -595,7 +597,7 @@ void TrafficSystem::build_slice(const std::vector<RouteSample>& route, int32_t s
         ++zone_events_;
     };
     zone(at.path);
-    if (at.dual) zone(at.other);
+    if (at.dual && !independent_regions()) zone(at.other);
 }
 
 int TrafficSystem::place_signal(const std::vector<RouteSample>& route, int controller, int index, int side,
@@ -627,6 +629,7 @@ int TrafficSystem::place_signal(const std::vector<RouteSample>& route, int contr
     g.controller = controller;
     g.lane = lane;
     g.phase = (~index & 1) * 2;
+    g.road = controllers_[size_t(controller)].road;
     g.accum = 0x30c;
     g.position_q8 = int32_t(s) * 256 + fraction;
     g.lateral_q8 = div256((next * 256 - here * 256) * fraction) + here * 256;
@@ -658,6 +661,7 @@ void TrafficSystem::place_intersection(const std::vector<RouteSample>& route, in
     if (ci < 0) return; // 0x00438930 returned null
     auto& c = controllers_[size_t(ci)];
     c = IntersectionController{};
+    c.road = building_road();
     c.active = true;
     int32_t position = s * 256;
     if (front_q8 < position)
@@ -705,13 +709,13 @@ void TrafficSystem::place_intersection(const std::vector<RouteSample>& route, in
     finish_signals();
 }
 
-int TrafficSystem::pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane) const {
+int TrafficSystem::pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane, int road) const {
     if ((marking_flags & 0x18) == 0) return -1;
     const int want = lane >= 0 ? 0 : 2;
     const IntersectionSignal* ahead = nullptr;
     const IntersectionSignal* behind = nullptr;
     for (const auto& s : signals_) {
-        if (!s.active || s.index != want) continue;
+        if (!s.active || s.index != want || !shares_surface(road,position_q8,s.road,s.position_q8)) continue;
         const int32_t d = s.position_q8 - position_q8;
         if (d > 0 && d < 0x1e0 && (!ahead || d < ahead->position_q8 - position_q8)) ahead = &s;
         if (d <= 0 && -d < 0x1e0 && (!behind || -d < position_q8 - behind->position_q8)) behind = &s;
@@ -739,8 +743,9 @@ void TrafficSystem::think_intersections(int32_t back_q8, int32_t front_q8, uint3
             auto& s = signals_[size_t(si)];
             s.accum += dt;
             bool near = back_q8 + 0x100 <= s.position_q8 && s.position_q8 <= front_q8 - 0x200;
+            if(independent_regions()&&!windows_.empty())near=near&&shares_surface(c.road,s.position_q8,windows_[0].road_id,s.position_q8);
             for (size_t k = 1; k < windows_.size(); ++k) // plan 34: any human's window
-                near = near || (windows_[k].front_q8 - 0x7f00 <= s.position_q8 &&
+                near = near || (shares_surface(c.road,s.position_q8,windows_[k].road_id,s.position_q8) && windows_[k].front_q8 - 0x7f00 <= s.position_q8 &&
                                 s.position_q8 <= windows_[k].front_q8 - 0x200);
             if (!(near && c.durations[s.phase] < s.accum)) continue;
             do {
@@ -758,7 +763,7 @@ void TrafficSystem::think_intersections(int32_t back_q8, int32_t front_q8, uint3
                     }
                     if (range > 0) { // a zero range divides by zero in the original
                         lane = int8_t(lane + int32_t(random() % uint32_t(range)));
-                        if (spawn_enabled_) place_crossing(c, si, kind, lane, route, random);
+                        if (spawn_enabled_) place_crossing(c, si, kind, lane, independent_regions()?*authority_roads_[size_t(c.road)]:route, random);
                     }
                 }
             } while (c.durations[s.phase] < s.accum);
@@ -773,6 +778,7 @@ void TrafficSystem::think_intersections(int32_t back_q8, int32_t front_q8, uint3
         // 0x00437c10; the next prepass (0x00437df0) unlinks them, so they are
         // still listed on the teardown tick (traffic-field box capture: the
         // controller at 109824 thinks on 3861 and is gone on 3862).
+        if(independent_regions())outside=!inside_any_window(c.position_q8,front_q8,c.road);
         if (outside) c.pending_remove = true;
     }
 }
@@ -808,6 +814,7 @@ void TrafficSystem::place_crossing(const IntersectionController& c, int signal, 
         car.jitter_c = int8_t(random());
         car.serial = ++serial_;
         car.signal = signal;
+        car.road = c.road;
         car.zone_start = c.start_q8;
         car.zone_end = c.end_q8;
         car.zone_lanes = c.lanes;
@@ -882,10 +889,13 @@ void TrafficSystem::run_car(size_t index, const std::vector<RouteSample>& route,
     car.dt = int32_t(tick) - car.last_tick;
     car.last_tick = int32_t(tick);
     primary_front_ = front_q8;
-    move(car, route, camera_q8, front_q8, front_q8 - 0x8000, player_q8, player_lateral, random);
+    int32_t own_velocity=player_velocity;
+    const int32_t own_camera=independent_regions()?nearest_camera(car.position,camera_q8,own_velocity,car.road):camera_q8;
+    const int32_t own_front=independent_regions()?window_front_for(car.position,front_q8,car.road):front_q8;
+    move(car,car_road(car,route),own_camera,own_front,own_front-0x8000,player_q8,player_lateral,random);
     if (windows_.size() > 1) {
         int32_t velocity = player_velocity;
-        const int32_t camera = nearest_camera(car.position, camera_q8, velocity);
+        const int32_t camera = nearest_camera(car.position, camera_q8, velocity, car.road);
         car.interval = schedule_interval(car, camera, velocity);
     } else {
         car.interval = schedule_interval(car, camera_q8, player_velocity);
@@ -932,10 +942,20 @@ void TrafficSystem::set_seat_windows(const std::vector<SeatWindow>& w) {
     }
 }
 
-bool TrafficSystem::inside_any_window(int32_t q8, int32_t front_q8) const {
-    if (in_window(q8, front_q8)) return true;
-    for (size_t k = 1; k < windows_.size(); ++k)
-        if (in_window(q8, windows_[k].front_q8)) return true;
+bool TrafficSystem::shares_surface(int first,int32_t a,int second,int32_t b) const {
+    if(!independent_regions()||first<0||second<0||first==second)return true;
+    if(first>1||second>1)return false;
+    const auto& x=*authority_roads_[size_t(first)];const auto& y=*authority_roads_[size_t(second)];
+    if(a<0||b<0||size_t(a>>8)>=x.size()||size_t(b>>8)>=y.size())return false;
+    return x[size_t(a>>8)].node==y[size_t(b>>8)].node && x[size_t(a>>8)].section==y[size_t(b>>8)].section;
+}
+bool TrafficSystem::inside_any_window(int32_t q8,int32_t front_q8,int road) const {
+    if(independent_regions()&&road>=0){
+        for(const auto& window:windows_)if(shares_surface(road,q8,window.road_id,q8)&&in_window(q8,window.front_q8))return true;
+        return false;
+    }
+    if(in_window(q8,front_q8))return true;
+    for(size_t k=1;k<windows_.size();++k)if(in_window(q8,windows_[k].front_q8))return true;
     return false;
 }
 
@@ -945,15 +965,23 @@ bool TrafficSystem::slice_owned_elsewhere(int32_t sample) const {
     auto holds = [&](bool filled, int32_t built_end, int32_t front_q8) {
         return filled && sample < built_end && sample >= (front_q8 >> 8) - 128;
     };
-    if (building_seat_ != 0 && holds(primary_filled_, primary_built_end_, primary_front_)) return true;
+    if (building_seat_ != 0 && (!independent_regions()||windows_.empty()||shares_surface(building_road(),sample*256,windows_[0].road_id,sample*256)) && holds(primary_filled_, primary_built_end_, primary_front_)) return true;
     for (size_t k = 1; k < windows_.size(); ++k)
-        if (int(k) != building_seat_ &&
+        if (int(k) != building_seat_ && shares_surface(building_road(),sample*256,windows_[k].road_id,sample*256) &&
             holds(seats_[k - 1].filled, seats_[k - 1].built_end, windows_[k].front_q8))
             return true;
     return false;
 }
 
-int32_t TrafficSystem::nearest_camera(int32_t q8, int32_t camera_q8, int32_t& velocity) const {
+int32_t TrafficSystem::nearest_camera(int32_t q8, int32_t camera_q8, int32_t& velocity, int road) const {
+    if(independent_regions()&&road>=0){
+        int64_t best=INT64_MAX;int32_t out=camera_q8;
+        for(const auto& window:windows_)if(shares_surface(road,q8,window.road_id,q8)){
+            const int64_t distance=std::abs(int64_t(q8)-window.camera_q8);
+            if(distance<best){best=distance;out=window.camera_q8;velocity=window.velocity;}
+        }
+        return out;
+    }
     int64_t best = std::abs(int64_t(q8) - camera_q8);
     int32_t out = camera_q8;
     for (size_t k = 1; k < windows_.size(); ++k) {
@@ -963,7 +991,11 @@ int32_t TrafficSystem::nearest_camera(int32_t q8, int32_t camera_q8, int32_t& ve
     return out;
 }
 
-int32_t TrafficSystem::window_front_for(int32_t q8, int32_t front_q8) const {
+int32_t TrafficSystem::window_front_for(int32_t q8, int32_t front_q8, int road) const {
+    if(independent_regions()&&road>=0){
+        for(const auto& window:windows_)if(shares_surface(road,q8,window.road_id,q8)&&in_window(q8,window.front_q8))return window.front_q8;
+        return front_q8;
+    }
     if (windows_.size() < 2 || in_window(q8, front_q8)) return front_q8;
     for (size_t k = 1; k < windows_.size(); ++k)
         if (in_window(q8, windows_[k].front_q8)) return windows_[k].front_q8;
@@ -983,8 +1015,9 @@ void TrafficSystem::step_seat_windows(const std::vector<RouteSample>& route,
         std::swap(built_end_, s.built_end);
         std::swap(filled_, s.filled);
         building_seat_ = int(k);
-        build_slices(route, w.front_q8, hold ? 0 : w.distance, tick);
-        step_timers(route, w.front_q8, w.front_q8 - 0x8000, hold ? 0 : w.distance, random);
+        const auto& road=independent_regions()&&w.road?*w.road:route;
+        build_slices(road, w.front_q8, hold ? 0 : w.distance, tick);
+        step_timers(road, w.front_q8, w.front_q8 - 0x8000, hold ? 0 : w.distance, random);
         building_seat_ = 0;
         std::swap(timers_, s.timers);
         std::swap(built_end_, s.built_end);

@@ -366,6 +366,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
             return scene->base_terrain(sample.section, sample.local);
         });
         race->set_ground_layout(scene->terrain_section_sizes());
+        race->set_authority_scenery([scene](const RouteSample& sample)->const std::vector<SceneryObject>&{return scene->objects(sample.section,sample.local);});
     }
     // 4. RNG state, then the track ring (0x004552e0 setup on the loaded state).
     if (config.ring_rng_state) race->set_rng_state(*config.ring_rng_state);
@@ -448,6 +449,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
     if (out.traffic && !config.net.humans.empty() && !config.net.cars) out.traffic->set_spawn_enabled(false);
     // 8. Police (0x00406b80 / 0x00407f30): periodic and DZHR cops, arrest -> busted.
     if (!config.solo) race->set_police(assets.police, assets.specs, &assets.actors->library());
+    if(config.net.authoritative_snapshots)race->set_snapshot_authority(true);
     out.race = std::move(race);
     return out;
 }

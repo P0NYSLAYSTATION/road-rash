@@ -287,7 +287,7 @@ void Server::handle(Conn& c, const net::Message& m, uint64_t now) {
         std::holds_alternative<net::RoomListReply>(m) || std::holds_alternative<net::RoomState>(m) ||
         std::holds_alternative<net::ChatRelay>(m) || std::holds_alternative<net::Start>(m) ||
         std::holds_alternative<net::Frames>(m) || std::holds_alternative<net::Desync>(m) ||
-        std::holds_alternative<net::Official>(m) || std::holds_alternative<net::LogChunk>(m)) {
+        std::holds_alternative<net::Official>(m) || std::holds_alternative<net::LogChunk>(m) || std::holds_alternative<net::SnapshotPresence>(m)) {
         ++counters_.invalid;
         return;
     }
@@ -326,6 +326,10 @@ void Server::handle(Conn& c, const net::Message& m, uint64_t now) {
         else if (std::holds_alternative<net::Hash>(m) || std::holds_alternative<net::Result>(m))
             ++counters_.invalid;
         return;
+    }
+    if(r->race&&r->options.snapshots){
+        if(std::holds_alternative<net::SnapshotControls>(m)||std::holds_alternative<net::SnapshotState>(m)||std::holds_alternative<net::SnapshotResults>(m))return on_snapshot(c,m,now);
+        if(std::holds_alternative<net::Input>(m)||std::holds_alternative<net::Hash>(m)||std::holds_alternative<net::Result>(m)||std::holds_alternative<net::Ack>(m)){++counters_.invalid;return;}
     }
     if (const auto* x = std::get_if<net::Chat>(&m)) return on_chat(c, *x);
     if (const auto* x = std::get_if<net::Input>(&m)) return on_input(c, *x);
@@ -459,6 +463,11 @@ void Server::on_join(Conn& c, const net::RoomJoin& m, uint64_t now) {
 }
 
 void Server::on_leave(Conn& c, uint64_t now) {
+    if(Room* room=room_of(c);room&&room->race&&room->options.snapshots&&race_slot(*room,c.seat)==room->race->start.authority_seat){
+        for(int seat:room->race->seat_of_slot)room->seats[size_t(seat)].result=net::Result{0,net::Outcome::left,15,0};
+        finish_race(*room,now);
+    }
+
     Room* r = room_of(c);
     if (!r) return;
     std::erase(r->spectators, c.id);
@@ -493,6 +502,10 @@ void Server::vacate(Room& r, int s, uint64_t) {
 }
 
 void Server::disconnect_seat(Room& r, int s, uint64_t now) {
+    if(r.race&&r.options.snapshots&&race_slot(r,s)==r.race->start.authority_seat){
+        for(int seat:r.race->seat_of_slot)r.seats[size_t(seat)].result=net::Result{0,net::Outcome::left,15,0};
+        finish_race(r,now);
+    }
     Seat& seat = r.seats[size_t(s)];
     seat.conn = 0;
     seat.disconnected_ms = now;
@@ -512,6 +525,46 @@ void Server::on_chat(Conn& c, const net::Chat& m) {
             if (auto it = conns_.find(s.conn); it != conns_.end()) send(it->second, relay);
     for (ConnId id : r->spectators)
         if (auto it = conns_.find(id); it != conns_.end()) send(it->second, relay);
+}
+
+void Server::snapshot_presence(Room& room){
+    if(!room.race||!room.options.snapshots)return;
+    uint8_t present=0;
+    for(size_t i=0;i<room.race->seat_of_slot.size();++i)if(room.seats[size_t(room.race->seat_of_slot[i])].conn)present|=uint8_t(1u<<i);
+    if(present==room.race->snapshot_presence)return;
+    room.race->snapshot_presence=present;
+    net::SnapshotPresence value{room.race->start.race_id,present};
+    for(int seat:room.race->seat_of_slot)if(auto it=conns_.find(room.seats[size_t(seat)].conn);it!=conns_.end())send(it->second,value);
+    for(auto id:room.spectators)if(auto it=conns_.find(id);it!=conns_.end())send(it->second,value);
+}
+void Server::on_snapshot(Conn& connection,const net::Message& message,uint64_t now){
+    Room* room=room_of(connection);if(!room||!room->race||!room->options.snapshots){++counters_.invalid;return;}
+    auto& race=*room->race;const int slot=race_slot(*room,connection.seat);
+    const int authority=race.start.authority_seat;
+    if(const auto* input=std::get_if<net::SnapshotControls>(&message)){
+        if(slot<0||slot==authority||input->race_id!=race.start.race_id||input->sequence>216000){++counters_.wrong_seat_inputs;return;}
+        if(input->sequence<=race.snapshot_sequences[size_t(slot)])return;
+        race.snapshot_sequences[size_t(slot)]=input->sequence;
+        auto relay=*input;relay.seat=uint8_t(slot);
+        const int host_room_seat=race.seat_of_slot[size_t(authority)];
+        if(auto it=conns_.find(room->seats[size_t(host_room_seat)].conn);it!=conns_.end())send(it->second,relay);
+        return;
+    }
+    if(slot!=authority){++counters_.invalid;return;}
+    if(const auto* snapshot=std::get_if<net::SnapshotState>(&message)){
+        if(snapshot->race_id!=race.start.race_id||(race.latest_snapshot&&snapshot->tick<=race.latest_snapshot->tick)){++counters_.invalid;return;}
+        race.latest_snapshot=*snapshot;
+        for(int seat:race.seat_of_slot)if(seat!=connection.seat)if(auto it=conns_.find(room->seats[size_t(seat)].conn);it!=conns_.end())send(it->second,*snapshot);
+        for(auto id:room->spectators)if(auto it=conns_.find(id);it!=conns_.end())send(it->second,*snapshot);
+        return;
+    }
+    if(const auto* result=std::get_if<net::SnapshotResults>(&message)){
+        if(result->race_id!=race.start.race_id||result->rows.size()!=race.seat_of_slot.size()){++counters_.invalid;return;}
+        uint8_t seen=0;
+        for(const auto& row:result->rows){if(row.seat>=8||(seen&(1u<<row.seat))||std::find(race.seat_of_slot.begin(),race.seat_of_slot.end(),row.seat)==race.seat_of_slot.end()){++counters_.invalid;return;}seen|=uint8_t(1u<<row.seat);}
+        for(const auto& row:result->rows)room->seats[row.seat].result=net::Result{result->tick,row.outcome,row.place,0};
+        finish_race(*room,now);
+    }
 }
 
 void Server::on_input(Conn& c, const net::Input& m) {
@@ -625,6 +678,7 @@ void Server::maybe_start(Room& r, uint64_t now) {
         seat.outcome = net::Outcome::racing;
         seat.result.reset();
     }
+    race.start.authority_seat=uint8_t(std::find(race.seat_of_slot.begin(),race.seat_of_slot.end(),r.host)-race.seat_of_slot.begin());
     race.sealer = std::make_unique<Sealer>(humans);
     race.tick0_ms = now + cfg_.load_ms;
     race.record.start = race.start;
@@ -651,6 +705,7 @@ void Server::maybe_start(Room& r, uint64_t now) {
 }
 
 void Server::send_catch_up(Conn& c, Room& r) {
+    if(r.options.snapshots){if(r.race->latest_snapshot)send(c,*r.race->latest_snapshot);snapshot_presence(r);return;}
     const Sealer& sealer = *r.race->sealer;
     const int32_t sealed = sealer.sealed_tick();
     int32_t first = 0;
@@ -669,6 +724,7 @@ void Server::send_catch_up(Conn& c, Room& r) {
 
 void Server::step_race(Room& r, uint64_t now) {
     Race& race = *r.race;
+    if(r.options.snapshots){snapshot_presence(r);return;}
     if (now >= race.tick0_ms) {
         const int32_t current = ticks_at(now) - ticks_at(race.tick0_ms);
         const int32_t before = race.sealer->sealed_tick();

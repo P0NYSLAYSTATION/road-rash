@@ -53,6 +53,7 @@ struct TrackRingState {
     TrackWalkerState front, back;
 };
 class TrackRing {
+    friend struct SnapshotStateCodec;
   public:
     using Random = std::function<uint32_t()>;
     // Called for each DZHR actor record 0x004520d0 fires, with its lateral

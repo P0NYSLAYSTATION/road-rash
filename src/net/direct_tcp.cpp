@@ -17,7 +17,7 @@
 #include <map>
 namespace rr::net {
 namespace {
-constexpr size_t max_packet = 65536, max_buffer = 4 * 1024 * 1024;
+constexpr size_t max_packet = 512 * 1024, max_buffer = 4 * 1024 * 1024;
 struct Winsock {
     Winsock() {
         WSADATA data{};
