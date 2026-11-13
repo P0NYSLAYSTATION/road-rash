@@ -4819,3 +4819,11 @@ Connected mini_dash to the live dashboard renderer, restored F10 release cycling
 and persistence, and added Pause / Dashboard / Full, Small, Off. The rendered
 mode regression and affected input/menu/settings checks pass.
 See [implementation and evidence](agent-handoffs/mini-dashboard-20261113.md).
+
+
+## Full and small HUD geometry correction
+
+Corrected mixed low/high HUD coordinates and the incomplete speed-only small
+HUD. Original executable disassembly confirms four native layouts and shared
+meters/text in both modes. The previous mode-difference check was insufficient.
+See [recovered behavior, correction and evidence](agent-handoffs/hud-geometry-20261113.md).

@@ -71,8 +71,7 @@ Hud::Hud(const Assets& assets, const std::vector<uint8_t>& exe, int bike, bool m
     };
     // 0x00446c30 indexes layout (MiniDash + HiRes*2)*0xdc at 0x00474f50:
     // strides 0/1 are the low (320-wide) full/mini rows, 2/3 the high rows.
-    layout_ = read_stride(2);
-    layout_mini_ = read_stride(3);
+    for (int i = 0; i < 4; ++i) layouts_[size_t(i)] = read_stride(i);
 }
 CountdownBanner countdown_banner(int countdown, int start) {
     CountdownBanner b;
@@ -246,141 +245,119 @@ HudState Hud::state(const Race& race, const std::string& player,
     return s;
 }
 RgbImage Hud::compose(const HudState& state, const PhysicsTables& physics, DashMode mode, int scale) const {
-    // Plan 19 Task 5: artwork blits nearest-neighbour x scale (plan 20 swaps
-    // in upscaled art); text rasterises at height x scale with shadow x scale;
-    // needles use the pen width x scale. scale = 1 keeps today's output exactly.
     if (scale < 1 || scale > 4) throw std::runtime_error("HUD scale out of range 1..4");
-    RgbImage image(640 * scale, 480 * scale, transparent);
-    // 0x00446c30 draws nothing at all when MiniDash == 2 (mode off).
-    if (mode == DashMode::off) return image;
-    const std::vector<uint8_t>& dash_art = low_ ? dashboard_low_ : dashboard_;
-    const std::vector<uint8_t>& meter_art = low_ ? meter_low_ : meter_;
-    const int stride = low_ ? 320 : 640, meter_stride = low_ ? 95 : 190;
-    const std::array<int32_t, 55>& layout = mode == DashMode::mini ? layout_mini_ : layout_;
-    const float lscale = low_ ? 0.5f : 1.f;
-    auto blit = [&](const std::vector<uint8_t>& source, int src_stride, int left, int top, int right,
-                    int bottom, int x, int y, bool keyed = true) {
-        const int dx = low_ ? x / 2 : x, dy = low_ ? y / 2 : y;
+    if (mode == DashMode::off) return RgbImage(640 * scale, 480 * scale, transparent);
+    // 00446c48..00446c64 selects four genuinely different native layouts.
+    // Compose entirely in that layout's pixel space, then double low mode once.
+    const int width = low_ ? 320 : 640, height = low_ ? 240 : 480;
+    RgbImage image(width * scale, height * scale, transparent);
+    const auto& layout = layouts_[size_t((low_ ? 0 : 2) + (mode == DashMode::mini ? 1 : 0))];
+    const auto& dash_art = low_ ? dashboard_low_ : dashboard_;
+    const auto& meter_art = low_ ? meter_low_ : meter_;
+    const int meter_stride = low_ ? 95 : 190;
+    const int shadow = (low_ ? 1 : 2) * scale;
+    const int font_height = (low_ ? 18 : 32) * scale;
+    auto blit = [&](const std::vector<uint8_t>& source, int stride, int left, int top,
+                    int right, int bottom, int x, int y, bool keyed = true) {
         for (int row = top; row < bottom; ++row)
             for (int col = left; col < right; ++col) {
-                if (row < 0 || col < 0 || col >= src_stride ||
-                    size_t(row) * src_stride + col >= source.size())
-                    continue;
-                const uint8_t index = source[size_t(row) * src_stride + col];
+                if (row < 0 || col < 0 || col >= stride || size_t(row) * stride + col >= source.size()) continue;
+                const uint8_t index = source[size_t(row) * stride + col];
                 if (!index && keyed) continue;
                 const auto* rgb = &palette_.rgbx[4 * index];
                 const uint32_t pixel = index ? uint32_t(rgb[0]) << 16 | uint32_t(rgb[1]) << 8 | rgb[2] : 0;
-                const int dbl = low_ ? 2 : 1;
-                for (int yy = 0; yy < dbl * scale; ++yy)
-                    for (int xx = 0; xx < dbl * scale; ++xx) {
-                        const int px = (dx + col - left) * dbl * scale + xx,
-                                  py = (dy + row - top) * dbl * scale + yy;
+                for (int yy = 0; yy < scale; ++yy)
+                    for (int xx = 0; xx < scale; ++xx) {
+                        const int px = (x + col - left) * scale + xx;
+                        const int py = (y + row - top) * scale + yy;
                         if (image.contains(px, py)) image.at(px, py) = pixel;
                     }
             }
     };
     auto bar = [&](int value, int offset) {
-        // 0x0044ca50 (flags 0x10). Vertical meters: full colour column
-        // {11,0,62,31}, then the black {11,32,62,63-value} empties it from the top.
-        const int type = layout[offset], x = int(layout[offset + 1] * lscale),
-                  y = int(layout[offset + 2] * lscale);
+        // 0044ca66..0044cb74 has separate source rectangles for LILMETER.
+        const int x = layout[offset + 1], y = layout[offset + 2];
         value = std::clamp(value, 0, 31);
-        if (!type) {
-            blit(meter_art, meter_stride, 62, 16, 126, 34, x, y, false);
-            blit(meter_art, meter_stride, 62, 0, 62 + value * 2, 16, x + 1, y + 1, false);
+        if (layout[offset] == 0) {
+            if (low_) {
+                blit(meter_art, meter_stride, 31, 8, 64, 18, x, y, false);
+                blit(meter_art, meter_stride, 31, 0, 31 + value, 8, x + 1, y + 1, false);
+            } else {
+                blit(meter_art, meter_stride, 62, 16, 126, 34, x, y, false);
+                blit(meter_art, meter_stride, 62, 0, 62 + value * 2, 16, x + 1, y + 1, false);
+            }
+        } else if (low_) {
+            blit(meter_art, meter_stride, 6, 0, 31, 15, x, y, false);
+            blit(meter_art, meter_stride, 6, 16, 31, 31 - (value >> 1), x, y, false);
         } else {
             blit(meter_art, meter_stride, 11, 0, 62, 31, x, y, false);
             blit(meter_art, meter_stride, 11, 32, 62, 63 - value, x, y, false);
         }
     };
-    // 0x00446880/0x004468e0 skip tach/speedo math when MiniDash is nonzero;
-    // in mini mode (1) only the numeric speed readout is drawn, no needles/bars.
-    if (mode == DashMode::mini) {
-        auto label = [&](const std::string& value, int offset, uint32_t color) {
-            TextRect rect{int(layout[offset + 1] * lscale) * scale, int(layout[offset + 2] * lscale) * scale,
-                          int(layout[offset + 3] * lscale) * scale, int(layout[offset + 4] * lscale) * scale};
-            auto shadow = rect;
-            shadow.left += 2 * scale;
-            shadow.top += 2 * scale;
-            shadow.right += 2 * scale;
-            shadow.bottom += 2 * scale;
-            text_.draw_box(&image, Face::badloc, 32 * scale, shadow, 0, value, uint32_t(layout[offset]));
-            text_.draw_box(&image, Face::badloc, 32 * scale, rect, color, value, uint32_t(layout[offset]));
-        };
-        char speed[32];
-        std::snprintf(speed, sizeof speed, "%d", state.speed);
-        // Mini-table record 20 {DT_RIGHT, 0, 436, 240, 480}; the full table
-        // keeps the speed needle there (offset 21 is needle data, and read as
-        // a DrawText rect it is empty, so ETO_CLIPPED would draw nothing).
-        label(speed, 20, 0xffffff);
-        return image;
-    }
-    // 0x00446c30 draws the third (opponent) meter whenever the full dashboard
-    // is up (mode 0), empty without a target; the artwork has a hole there.
+    // 00446c83..00446cf4: the first two meters draw in both modes;
+    // the third draws for full mode or a nonempty opponent name.
     bar(state.stamina, 40);
     bar(state.condition, 45);
-    bar(state.target.empty() ? 0 : state.target_stamina, 50);
-    const int dashboard_height = int(dash_art.size() / stride);
-    blit(dash_art, stride, 0, 0, stride, dashboard_height, 0, 480 - dashboard_height);
-    const auto selected_pen = pen();
-    const uint32_t pen_color = selected_pen.color;
-    const int pen_band = selected_pen.width * scale;
-    auto needle = [&](int angle, int offset) {
-        // 0x00446c30 draws the speed needle first and the rpm needle second,
-        // both with the selected pen; the rpm needle is on top. Colors are
-        // identical so only the width selection is observable here.
-        const int32_t sx = sine(physics, uint32_t(angle)), cy = sine(physics, uint32_t(angle + 1024));
-        const int x = int(layout[offset] * lscale) * scale, y = int(layout[offset + 1] * lscale) * scale;
-        line(image, x, y, x + high_product(sx, int(layout[offset + 2] * lscale)) * scale,
-             y - high_product(cy, int(layout[offset + 3] * lscale)) * scale, pen_color, pen_band);
-    };
-    // 0x00446c30 order: speed (DAT_0049e10c) first, rpm (DAT_0049e108) second.
-    needle(state.speed_angle, 21);
-    needle(state.rpm_angle, 16);
+    if (mode == DashMode::full || !state.target.empty())
+        bar(state.target.empty() ? 0 : state.target_stamina, 50);
+    if (mode == DashMode::full) {
+        const int dash_height = int(dash_art.size() / width);
+        blit(dash_art, width, 0, 0, width, dash_height, 0, height - dash_height);
+    }
     auto label = [&](const std::string& value, int offset, uint32_t color) {
-        TextRect rect{int(layout[offset + 1] * lscale) * scale, int(layout[offset + 2] * lscale) * scale,
-                      int(layout[offset + 3] * lscale) * scale, int(layout[offset + 4] * lscale) * scale};
-        auto shadow = rect;
-        shadow.left += 2 * scale;
-        shadow.top += 2 * scale;
-        shadow.right += 2 * scale;
-        shadow.bottom += 2 * scale;
-        text_.draw_box(&image, Face::badloc, 32 * scale, shadow, 0, value, uint32_t(layout[offset]));
-        text_.draw_box(&image, Face::badloc, 32 * scale, rect, color, value, uint32_t(layout[offset]));
+        TextRect rect{layout[offset + 1] * scale, layout[offset + 2] * scale,
+                      layout[offset + 3] * scale, layout[offset + 4] * scale};
+        TextRect dark{rect.left + shadow, rect.top + shadow, rect.right + shadow, rect.bottom + shadow};
+        text_.draw_box(&image, Face::badloc, font_height, dark, 0, value, uint32_t(layout[offset]));
+        text_.draw_box(&image, Face::badloc, font_height, rect, color, value, uint32_t(layout[offset]));
     };
-    label(state.player, 0, 0xffff00);
-    label(std::to_string(state.place), 25, 0xffffff);
+    // 00446d9f..0044706f is common to full and small dashboards.
     char distance[32];
     std::snprintf(distance, sizeof distance, "%02d.%d", state.distance / 10, state.distance % 10);
     label(distance, 30, 0xffffff);
+    label(std::to_string(state.place), 25, 0xffffff);
+    label(state.player, 0, 0xffff00);
     if (!state.target.empty()) {
         label(state.target, 5, 0xffffff);
-        // 0x00446c30 with a target: gap at layout entry 10 as "%d%c%03d" of
-        // (|gap|*1000 >> 4) / (metric ? 3279 : 5280), i.e. miles or km to
-        // three places (one sample is 16 feet). Opponent ahead (gap <= 0):
-        // COLORREF 0x10e7 and Wingdings 0xe9; behind: 0x1ca328 and 0xea.
-        // The arrow is DrawTextA of the Wingdings 18 glyph (0x00442990) in
-        // entry 10's rect offset by (-12, +9 ahead / +11 behind) in high
-        // resolution, through 0x00447b20 (black, then white at -2,-2).
-        const uint32_t magnitude =
-            state.target_gap < 0 ? 0u - uint32_t(state.target_gap) : uint32_t(state.target_gap);
+        const uint32_t magnitude = state.target_gap < 0 ? 0u - uint32_t(state.target_gap) : uint32_t(state.target_gap);
         const int32_t scaled = int32_t(magnitude * 1000u);
         const int64_t wide = int64_t(uint64_t(uint32_t(scaled >> 31)) << 32 | uint32_t(scaled >> 4));
         const int32_t value = int32_t(wide / (metric_ ? 3279 : 5280));
         char gap[32];
         std::snprintf(gap, sizeof gap, "%d.%03d", value / 1000, value % 1000);
         const bool ahead = state.target_gap < 1;
-        label(gap, 10, ahead ? 0xe71000 : 0x28a31c);
-        const int dy = ahead ? 9 : 11;
-        TextRect arrow{int((layout[11] - 12) * lscale) * scale, int((layout[12] + dy) * lscale) * scale,
-                       int((layout[13] - 12) * lscale) * scale, int((layout[14] + dy) * lscale) * scale};
+        const int dx = low_ ? 9 : 12, dy = (ahead ? 9 : 11) - (low_ ? 6 : 0);
+        TextRect arrow{(layout[11] - dx) * scale, (layout[12] + dy) * scale,
+                       (layout[13] - dx) * scale, (layout[14] + dy) * scale};
         const std::string glyph(1, ahead ? '\xe9' : '\xea');
-        text_.draw_box(&image, Face::wingdings, 18 * scale, arrow, 0, glyph, 0);
-        arrow = {arrow.left - 2 * scale, arrow.top - 2 * scale, arrow.right - 2 * scale,
-                 arrow.bottom - 2 * scale};
-        text_.draw_box(&image, Face::wingdings, 18 * scale, arrow, 0xffffff, glyph, 0);
+        text_.draw_box(&image, Face::wingdings, (low_ ? 12 : 18) * scale, arrow, 0, glyph, 0);
+        arrow = {arrow.left - shadow, arrow.top - shadow, arrow.right - shadow, arrow.bottom - shadow};
+        text_.draw_box(&image, Face::wingdings, (low_ ? 12 : 18) * scale, arrow, 0xffffff, glyph, 0);
+        label(gap, 10, ahead ? 0xe71000 : 0x28a31c);
     }
-    return image;
+    if (mode == DashMode::mini) {
+        label(std::to_string(state.speed), 20, 0xffffff);
+    } else {
+        // 00447112..00447284: speed needle, then rpm needle, in native coordinates.
+        const auto selected_pen = pen();
+        auto needle = [&](int angle, int offset) {
+            const int32_t sx = sine(physics, uint32_t(angle)), cy = sine(physics, uint32_t(angle + 1024));
+            const int x = layout[offset] * scale, y = layout[offset + 1] * scale;
+            line(image, x, y, x + high_product(sx, layout[offset + 2]) * scale,
+                 y - high_product(cy, layout[offset + 3]) * scale,
+                 selected_pen.color, selected_pen.width * scale);
+        };
+        needle(state.speed_angle, 21);
+        needle(state.rpm_angle, 16);
+    }
+    if (!low_) return image;
+    RgbImage doubled(640 * scale, 480 * scale, transparent);
+    for (int y = 0; y < image.height; ++y)
+        for (int x = 0; x < image.width; ++x)
+            for (int yy = 0; yy < 2; ++yy)
+                for (int xx = 0; xx < 2; ++xx)
+                    doubled.at(x * 2 + xx, y * 2 + yy) = image.at(x, y);
+    return doubled;
 }
 uint8_t DashLut::index(uint32_t c, const Palette& pal) {
     const auto it = memo_.find(c);

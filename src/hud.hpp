@@ -34,7 +34,7 @@ struct NearestOpponent {
 };
 NearestOpponent nearest_opponent(const Race&);
 // MiniDash 0x00467a98 (F10 cycles 0->1->2->0 in 0x004431d0): 0 full dashboard,
-// 1 mini (numeric speed, no needles/name bars), 2 off (0x00446c30 draws nothing).
+// 1 mini (meters and readouts, no bike artwork/needles), 2 off.
 enum class DashMode : int { full = 0, mini = 1, off = 2 };
 // Original full high-resolution dashboard. Geometry and indexed artwork come
 // from the imported executable/disc; text and pen rasterization use native code.
@@ -143,7 +143,6 @@ class Hud {
     Palette palette_;
     TextRenderer text_;
     std::vector<uint8_t> dashboard_, dashboard_low_, meter_, meter_low_;
-    std::array<int32_t, 55> layout_{};
-    std::array<int32_t, 55> layout_mini_{};
+    std::array<std::array<int32_t, 55>, 4> layouts_{};
 };
 } // namespace rr

@@ -2984,3 +2984,11 @@ inECX;0040a938 requires result<80, followed by animation37 loop>=1 before
 registering player wreck5. An ahead body1296units away therefore must not
 terminate a race. Medly12964 exposed the old negative-distance mistake;
 original waits until13271. Component tests cover both directions at79/80/1296.
+
+
+## Full and small HUD geometry correction
+
+Corrected mixed low/high HUD coordinates and the incomplete speed-only small
+HUD. Original executable disassembly confirms four native layouts and shared
+meters/text in both modes. The previous mode-difference check was insufficient.
+See [recovered behavior, correction and evidence](agent-handoffs/hud-geometry-20261113.md).

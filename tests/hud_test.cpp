@@ -419,13 +419,13 @@ int main() {
             if (full.at(230, 449) != 0x721108 || full.at(230, 448) != 0x721108 ||
                 full.at(230, 450) != 0x721108)
                 throw std::runtime_error("High-resolution speedo needle is not 3-wide");
-            // Low mode: halved-high tach origin (194,220), rx 14 -> spine
-            // y220 x180..194; the width-2 pen paints rows 219..220 only.
+            // Original low table: tach (194,220), radii (18,12).
+            // Its native two-pixel band is doubled with the entire 320x240 HUD.
             hud.set_low_mode(true);
             const auto low = hud.compose(parked, physics, rr::DashMode::full);
-            if (low.at(185, 220) != 0x721108 || low.at(185, 219) != 0x721108)
+            if (low.at(370, 440) != 0x721108 || low.at(370, 438) != 0x721108)
                 throw std::runtime_error("Low-resolution needle spine is missing");
-            if (low.at(185, 221) == 0x721108) throw std::runtime_error("Low-resolution needle is not 2-wide");
+            if (low.at(370, 442) == 0x721108) throw std::runtime_error("Low-resolution needle band is not doubled once");
             hud.set_low_mode(false);
         }
         // 0x00446a40 via the 0x00438450 +0x1c -> +0x44 snapshot: tenths travelled.
@@ -475,16 +475,15 @@ int main() {
                 size_t changed = 0;
                 for (int y = 424; y < 455; ++y)
                     for (int x = 134; x < 185; ++x) changed += full.at(x, y) != empty.at(x, y);
-                // MiniDash 1 (0x00446899/0x004468e1 skip tach/speedo; 0x00446c76 skips
-                // name bars): numeric readout only, no 3x3 needle pixels at the dial.
+                // Mini retains its meters and text; only art/needles are omitted.
                 const auto mini = hud.compose(state, physics, rr::DashMode::mini);
                 if (mini.width != 640 || mini.height != 480)
                     throw std::runtime_error("Mini dashboard bounds");
                 if (mini.at(250, 449) == 0x721108) throw std::runtime_error("Mini mode still draws needles");
                 auto moved = state;
                 moved.distance = state.distance + 79;
-                if (hud.compose(moved, physics, rr::DashMode::mini).pixels != mini.pixels)
-                    throw std::runtime_error("Mini speed readout changes with distance");
+                if (hud.compose(moved, physics, rr::DashMode::mini).pixels == mini.pixels)
+                    throw std::runtime_error("Mini HUD lost the travelled distance");
                 moved = state;
                 moved.speed = 88;
                 if (hud.compose(moved, physics, rr::DashMode::mini).pixels == mini.pixels)
@@ -509,6 +508,74 @@ int main() {
                             lit += low.at(x, y) != 0x01000000;
                         }
                     if (lit < total / 10) throw std::runtime_error("Low dashboard mostly transparent");
+                }
+                for (int y = 0; y < 350; ++y)
+                    for (int x = 0; x < 640; ++x)
+                        if (low.at(x, y) != 0x01000000)
+                            throw std::runtime_error("Low full HUD elements are displaced into the upper scene");
+                // Low artwork starts at native 240 - artwork_height, doubled once.
+                const std::string prefix = bike < 5 ? "RAT" : bike < 10 ? "SUPER" : "SPORT";
+                const auto art = assets.read("IMAGES/BIKES/" + prefix + (metric ? "/KLODASH.BOB" : "/MLODASH.BOB"));
+                const auto pal = rr::Palette::from_raw(assets.read("DATA/PALETTE.RAW"));
+                const int art_y = 240 - int(art.size() / 320);
+                size_t artwork_pixels = 0;
+                for (int y = 0; y < 8; ++y)
+                    for (int x = 0; x < 320; ++x) {
+                        const auto index = art[size_t(y) * 320 + x];
+                        if (!index) continue;
+                        const auto* colour = &pal.rgbx[4 * index];
+                        const uint32_t expected = uint32_t(colour[0]) << 16 | uint32_t(colour[1]) << 8 | colour[2];
+                        if (low.at(x * 2, (art_y + y) * 2) != expected)
+                            throw std::runtime_error("Low dashboard artwork is displaced or scaled twice");
+                        ++artwork_pixels;
+                    }
+                if (!artwork_pixels) throw std::runtime_error("Low dashboard artwork assertion was empty");
+                if (low.at(248, 448) != 0x721108)
+                    throw std::runtime_error("Low speed needle does not use its native layout");
+                for (bool low_mode : {true, false}) {
+                    hud.set_low_mode(low_mode);
+                    const auto small = hud.compose(state, physics, rr::DashMode::mini);
+                    for (int y = 0; y < 400; ++y)
+                        for (int x = 0; x < 640; ++x)
+                            if (small.at(x, y) != 0x01000000)
+                                throw std::runtime_error("Small HUD is displaced into the upper scene");
+                    size_t meter_pixels = 0;
+                    for (int y = 440; y < 460; ++y)
+                        for (int x = 286; x < 350; ++x)
+                            meter_pixels += small.at(x, y) != 0x01000000;
+                    if (meter_pixels < 100) throw std::runtime_error("Small HUD condition meter is missing");
+                    auto other_place = state;
+                    other_place.place = 15;
+                    if (hud.compose(other_place, physics, rr::DashMode::mini).pixels == small.pixels)
+                        throw std::runtime_error("Small HUD place is missing");
+                    auto opponent = state;
+                    opponent.target = "Gruc";
+                    opponent.target_stamina = 31;
+                    opponent.target_gap = -400;
+                    const auto with_opponent = hud.compose(opponent, physics, rr::DashMode::mini);
+                    size_t opponent_meter = 0;
+                    for (int y = 440; y < 460; ++y)
+                        for (int x = 478; x < 540; ++x)
+                            opponent_meter += with_opponent.at(x, y) != 0x01000000;
+                    if (opponent_meter < 100) throw std::runtime_error("Small HUD opponent meter is missing");
+                    if (const char* dump = std::getenv("RR_HUD_DUMP"); dump && bike == 0 && !metric) {
+                        auto preview = opponent;
+                        preview.place = 15;
+                        for (auto mode : {rr::DashMode::full, rr::DashMode::mini}) {
+                            const auto image = hud.compose(preview, physics, mode);
+                            const auto path = std::string(dump) + (low_mode ? "-low" : "-high") +
+                                              (mode == rr::DashMode::full ? "-full.ppm" : "-mini.ppm");
+                            std::ofstream file(path, std::ios::binary);
+                            file << "P6\n" << image.width << ' ' << image.height << "\n255\n";
+                            for (int y = 0; y < image.height; ++y)
+                                for (int x = 0; x < image.width; ++x) {
+                                    const auto p = image.at(x, y);
+                                    const auto c = p == 0x01000000 ? 0x283848u : p;
+                                    const char rgb[3] = {char(c >> 16), char(c >> 8), char(c)};
+                                    file.write(rgb, 3);
+                                }
+                        }
+                    }
                 }
                 hud.set_low_mode(false);
                 // Plan 19 Task 5: compose at scale 2 is 1280 wide and downsamples
