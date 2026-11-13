@@ -3569,3 +3569,11 @@ Corrected mixed low/high HUD coordinates and the incomplete speed-only small
 HUD. Original executable disassembly confirms four native layouts and shared
 meters/text in both modes. The previous mode-difference check was insufficient.
 See [recovered behavior, correction and evidence](agent-handoffs/hud-geometry-20261113.md).
+
+
+## Nitro HUD pips
+
+Restored original inactive/active boost-pip artwork and recharge indication in
+full/small, low/high HUD modes. A loaded level 5 race verifies visible pips,
+actual boost consumption and recharge cycling through the real renderer.
+See [recovered behavior and evidence](agent-handoffs/nitro-hud-20261113.md).

@@ -231,6 +231,21 @@ HudState Hud::state(const Race& race, const std::string& player,
     s.distance = int(uint8_t(s.distance));
     s.stamina = meter_level(race.riders()[0].stamina.current, race.riders()[0].stamina.base);
     s.condition = meter_level(b.i32(0x2f0), b.i32(0x2ec));
+    // 004469d0..00446a33: show remaining uses, or cycle 0..uses while
+    // recharging and not actively boosting. The sheet contains ten pip slots.
+    s.nitro_available = race.nitro().minimum > 0;
+    if (s.nitro_available) {
+        const int uses = std::clamp(race.nitro_charges(), 0, 10);
+        if (race.riders()[0].nitro_charge / 256 < race.nitro().max && !(b.u8(0xc0) & 0x20)) {
+            nitro_display_ = uint8_t(nitro_display_ + 1);
+            if (nitro_display_ > uses) nitro_display_ = 0;
+        } else {
+            nitro_display_ = uint8_t(uses);
+        }
+        s.nitro_pips = nitro_display_;
+    } else {
+        nitro_display_ = 0;
+    }
     // 0x00446b80: name (0x00446bf0) and stamina meter of the 0x00438550
     // target; both clear without one. +0x3c current, +0x34 base. The gap
     // rides with the name: no name row means no gap either, so a state with
@@ -303,6 +318,19 @@ RgbImage Hud::compose(const HudState& state, const PhysicsTables& physics, DashM
     if (mode == DashMode::full) {
         const int dash_height = int(dash_art.size() / width);
         blit(dash_art, width, 0, 0, width, dash_height, 0, height - dash_height);
+    }
+    // 00446d07 -> 0044cc50: native layout record 35 positions the strip.
+    // Draw inactive artwork, then the active prefix with the original colour key.
+    if (state.nitro_available) {
+        const int x = layout[36], y = layout[37];
+        const int count = std::clamp(state.nitro_pips, 0, 10);
+        if (low_) {
+            blit(meter_art, meter_stride, 31, 27, 81, 32, x, y);
+            if (count) blit(meter_art, meter_stride, 31, 22, 31 + count * 5, 27, x, y);
+        } else {
+            blit(meter_art, meter_stride, 62, 54, 172, 64, x, y);
+            if (count) blit(meter_art, meter_stride, 62, 44, 62 + count * 11, 54, x, y);
+        }
     }
     auto label = [&](const std::string& value, int offset, uint32_t color) {
         TextRect rect{layout[offset + 1] * scale, layout[offset + 2] * scale,

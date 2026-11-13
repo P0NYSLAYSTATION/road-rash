@@ -19,6 +19,8 @@ struct HudState {
     // MiniDash numeric speed (0x004468e0), independent of travelled distance.
     // Appended to preserve existing aggregate initializer field positions.
     int speed = 0;
+    int nitro_pips = 0;
+    bool nitro_available = false;
 };
 // 0x00438550, run every frame from 0x00438450: the opponent the dashboard
 // names. d = player.+0x1f8 - opponent.+0x1f8 over every opponent slot (no
@@ -140,6 +142,7 @@ class Hud {
     void draw_banner(RgbImage&, const std::string& text, bool big, int scale) const;
     bool metric_;
     bool low_ = false;
+    mutable uint8_t nitro_display_ = 0; // 004469d0 charging animation, presentation only
     Palette palette_;
     TextRenderer text_;
     std::vector<uint8_t> dashboard_, dashboard_low_, meter_, meter_low_;

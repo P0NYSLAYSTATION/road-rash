@@ -223,6 +223,73 @@ int main() {
             check(screen.result().outcome == rr::RaceOutcome::wrecked, "quit counts as wrecked");
             game.career = false;
         }
+        // Level 5 with a nitro-equipped bike: actual race assets/state and renderer.
+        {
+            rr::Game boost_game;
+            boost_game.depth = rr::read_depth_table(exe);
+            boost_game.config.level = 4; // displayed Level 5
+            boost_game.config.bike = 7;
+            boost_game.config.career = false;
+            boost_game.load_course(assets, exe);
+            boost_game.restart();
+            boost_game.countdown = 0;
+            boost_game.palette = rr::Palette::from_raw(assets.read("DATA/PALETTE.RAW"));
+            check(boost_game.assets.hud && boost_game.race().nitro().minimum > 0 &&
+                      boost_game.race().nitro_charges() == 10,
+                  "level 5 race loads a bike with ten available boosts");
+            rr::RaceOptions boost_options;
+            boost_options.assets = &assets;
+            boost_options.settings = &settings;
+            boost_options.custom_keys = true;
+            {
+                rr::RaceScreen screen(boost_game, renderer, boost_options, display);
+                constexpr uint64_t now = 1000000000ull;
+                for (bool high : {false, true}) {
+                    settings.high_resolution = high;
+                    settings.render_scale = high ? 1 : -1;
+                    for (int mode : {0, 1}) {
+                        settings.mini_dash = mode;
+                        screen.iterate(now);
+                        auto& hud = *boost_game.assets.hud;
+                        const auto state = hud.state(boost_game.race(), "Player", boost_game.rider_names);
+                        check(state.nitro_available && state.nitro_pips == 10,
+                              "level 5 HUD reads the actual available boost count");
+                        auto empty = state;
+                        empty.nitro_pips = 0;
+                        const auto full_strip = hud.compose(state, boost_game.assets.physics, rr::DashMode(mode));
+                        const auto empty_strip = hud.compose(empty, boost_game.assets.physics, rr::DashMode(mode));
+                        const int x = mode ? 268 : high ? 271 : 274;
+                        const int y = mode ? 464 : 374;
+                        size_t visible_pips = 0;
+                        const auto live = rr::capture_race_frame(renderer);
+                        for (int py = y; py < y + 10; ++py)
+                            for (int px = x; px < x + (high ? 110 : 100); ++px)
+                                if (full_strip.at(px, py) != empty_strip.at(px, py)) {
+                                    ++visible_pips;
+                                    check(live.at(px, py) == full_strip.at(px, py),
+                                          "level 5 boost pips reach the real composed race frame");
+                                }
+                        check(visible_pips > 20, "boost artwork is visible in full/small and low/high modes");
+                    }
+                }
+                const int uses = boost_game.race().nitro_charges();
+                for (int tick = 0; tick < 8 && boost_game.race().nitro_charges() == uses; ++tick)
+                    boost_game.tick(rr::control_accelerate | rr::control_nitro);
+                const auto used = boost_game.assets.hud->state(boost_game.race(), "Player", boost_game.rider_names);
+                check(boost_game.race().nitro_charges() == uses - 1 && used.nitro_pips == uses - 1,
+                      "using nitro in a level 5 race removes one displayed pip");
+                screen.iterate(now);
+                boost_game.tick(0); // stop boost while the charge is below its maximum
+                const auto start = boost_game.assets.hud->state(boost_game.race(), "Player", boost_game.rider_names);
+                const auto next = boost_game.assets.hud->state(boost_game.race(), "Player", boost_game.rider_names);
+                check(start.nitro_pips == 0 && next.nitro_pips == 1,
+                      "original recharge indicator cycles after a spent boost");
+            }
+            settings.high_resolution = false;
+            settings.render_scale = -2;
+            settings.mini_dash = 0;
+            std::cout << "Level 5 nitro HUD: ten pips, actual boost consumption and recharge cycle checked\n";
+        }
         // Exercise the saved setting and real F10 event path through the live renderer.
         {
             game.restart();

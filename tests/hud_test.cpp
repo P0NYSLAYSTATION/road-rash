@@ -449,6 +449,10 @@ int main() {
             for (int bike : {0, 5, 10}) {
                 rr::Hud hud(assets, exe, bike, metric);
                 auto state = hud.state(race, "Player", names);
+                // Isolate art/meter geometry here; the real level-5 screen test
+                // covers nitro state, active/inactive pips and boost consumption.
+                state.nitro_available = false;
+                state.nitro_pips = 0;
                 if (state.place != 1 || state.stamina != 31 || state.condition != 31)
                     throw std::runtime_error("Starting dashboard values");
                 for (int value : {0, 1, 15, 31}) {
@@ -561,6 +565,8 @@ int main() {
                     if (const char* dump = std::getenv("RR_HUD_DUMP"); dump && bike == 0 && !metric) {
                         auto preview = opponent;
                         preview.place = 15;
+                        preview.nitro_available = true;
+                        preview.nitro_pips = 10;
                         for (auto mode : {rr::DashMode::full, rr::DashMode::mini}) {
                             const auto image = hud.compose(preview, physics, mode);
                             const auto path = std::string(dump) + (low_mode ? "-low" : "-high") +
