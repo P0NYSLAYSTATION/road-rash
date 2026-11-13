@@ -4743,42 +4743,42 @@ results for that identical binary. Corrected integrated gate still pending.
 
 ### Final release 1.1.20 verification
 
-Clean code revision `14c861562476192456f4f0c4afdaa40f97559e56`, sourceSHA256
+Clean code revision `14c861562476192456f4f0c4afdaa40f97559e56`, source SHA256
 `9825f5ffc1f5bd963c86e9eacf557698956458a63458226ea14892ce3b673e90`,
 MSVC Release `/O2 /Ob2 /DNDEBUG`. `build/v1120-native-tests.xml`/`.log`:
-153selected tests PASS,0failures,0CTestskips,454.31s. Full passed stdout retained.
+153 selected tests PASS,0 failures, 0 CTest skips, 454.31s. Full passed stdout retained.
 `build/v1120-native-tests-summary.json` audits positive execution markers for
 all seven required component comparisons and all ten police cases. The only
-internal exclusions are40owner-excluded menu-pixel comparisons; CTestwidescreen
-andwide_math are likewise excluded by the owner's scope. No other absent/skip
+internal exclusions are 40 owner-excluded menu-pixel comparisons; CTest widescreen
+and wide_math are likewise excluded by the owner's scope. No other absent/skip
 messages remain (JSON `skip:0` counters are not skipped tests).
 
 The seven component executables each reject an intentionally missing fixture
 with exit1 (`build/v1120-missing-fixture-rejections.json`). Real original-data
-coverage now includes2048actor animation steps,256projection cases,9312actor
-view selections,256walking/256recovery/64remount/64crash-entry cases,
-1024arrest cases,police construction,207vehicle cells/1440vehicle selections,
-and128building/128building-shoulder cases. Terrain2112original queries and
-42CELresources also pass against their configured corpora.
+coverage now includes 2,048 actor animation steps,256 projection cases,9,312 actor
+view selections,256 walking / 256 recovery / 64 remount / 64 crash-entry cases,
+1,024 arrest cases, police construction,207 vehicle cells / 1,440 vehicle selections,
+and 128 building / 128 building-shoulder cases. Terrain 2,112 original queries and
+42 CEL resources also pass against their configured corpora.
 
-`build/v1120-whole-race-acceptance.json`:5pass,143764ticks through original
-finishes; `build/release/oracle-wreck-acceptance.json`:13271ticks through
-original wreck5; `build/v1120-release-regressions.json`:94929level5ticks through
-arrest4, NOT a finish. Replay executableSHA256
+`build/v1120-whole-race-acceptance.json`:5 pass, 143,764 ticks through original
+finishes; `build/release/oracle-wreck-acceptance.json`:13,271 ticks through
+original wreck outcome 5; `build/v1120-release-regressions.json`:94,929 level 5 ticks through
+arrest outcome 4, NOT a finish. Replay executable SHA256
 `54c3f0bd2b3bc205cf4d23b4a46cd5590533341ebb7fad5410fb2a7620139a48`
 is unchanged across the fixture-enforcement follow-up; the recorded five-race
-and level5 checks therefore use the identical final executable bytes.
+and level 5 checks therefore use the identical final executable bytes.
 
-`build/parity-v1120-upgrade-validation.json`:1.1.19test installer followed by
-1.1.20test installer over the same destination, no new asset arguments;
-600files preserved across assets,saves,soundfonts/settings,0changes. Updated
-executable has the clean code revision and launches120frames. Isolated test
+`build/parity-v1120-upgrade-validation.json`:1.1.19 test installer followed by
+1.1.20 test installer over the same destination, no new asset arguments;
+600 files preserved across assets, saves, soundfonts/settings, 0 changes. Updated
+executable has the clean code revision and launches 120 frames. Isolated test
 AppId used; production AppId remains stable.
 
-Asset-free installer16807031bytes, SHA256
+Asset-free installer 16,807,031 bytes, SHA256
 `fce80f20d05acb306bbd68cf745801999b201de6f21b8dfb531821bd43f5dd82`.
 Published https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.20
-with installer,checksums and FFmpeg/7-Zip source archives. `build/v1120-publish.log`
+with installer, checksums and FFmpeg/7-Zip source archives. `build/v1120-publish.log`
 confirms authenticated owner/fork identity, remote code commit, upload digests
 and independently verified public installer download checksum. No local game
 assets, captured component data or disc-derived icon are distributed.

@@ -3514,13 +3514,13 @@ the corrected final gate and rebuilt installer provenance.
 
 Published [1.1.20](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.20)
 from clean code revision `14c861562476192456f4f0c4afdaa40f97559e56`.
-All five completed level 1 race recordings match143764ticks; the separate Medly
-wreck matches13271ticks, and the Highway level 5 recording matches94929ticks
+All five completed level 1 race recordings match 143,764 ticks; the separate Medly
+wreck matches 13,271 ticks, and the Highway level 5 recording matches 94,929 ticks
 through arrest. The final test/tooling changes leave that gameplay executable
-byte-identical. Corrected full native gate:153pass,0failure,0CTestskip,454.31s.
+byte-identical. Corrected full native gate:153 pass, 0 failures, 0 CTest skips, 454.31s.
 All ten police cases and seven formerly bypassed component comparisons execute.
 
-Installer19-to20 update, without new asset arguments, preserves600files and
-launches120frames. Public installer download checksum verified. No original
+Installer19-to20 update, without new asset arguments, preserves 600 files and
+launches 120 frames. Public installer download checksum verified. No original
 game process, capture resource or release task remains active. Evidence and
 superseded audit details are in VERIFICATION.md and the component handoff.
