@@ -3524,3 +3524,11 @@ Installer19-to20 update, without new asset arguments, preserves 600 files and
 launches 120 frames. Public installer download checksum verified. No original
 game process, capture resource or release task remains active. Evidence and
 superseded audit details are in VERIFICATION.md and the component handoff.
+
+
+## Windows branch integration correction
+
+See [integration and release correction](agent-handoffs/windows-branch-merge-20261113.md).
+Merge 85ca5ec is on the remote Windows branch. Initial gate: 146/156 pass;
+ten missing police capture paths are being supplied and rerun, not waived.
+Six strict replay comparisons pass. Installer packaging now enforces the clean Windows branch.

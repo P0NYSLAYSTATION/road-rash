@@ -4782,3 +4782,11 @@ with installer, checksums and FFmpeg/7-Zip source archives. `build/v1120-publish
 confirms authenticated owner/fork identity, remote code commit, upload digests
 and independently verified public installer download checksum. No local game
 assets, captured component data or disc-derived icon are distributed.
+
+
+## Windows branch integration correction
+
+See [integration and release correction](agent-handoffs/windows-branch-merge-20261113.md).
+Merge 85ca5ec is on the remote Windows branch. Initial gate: 146/156 pass;
+ten missing police capture paths are being supplied and rerun, not waived.
+Six strict replay comparisons pass. Installer packaging now enforces the clean Windows branch.

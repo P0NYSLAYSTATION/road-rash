@@ -24,6 +24,12 @@ def main():
     parser.add_argument('--test-build', action='store_true')
     parser.add_argument('--iscc', default='deps/inno/ISCC.exe')
     args = parser.parse_args()
+    branch = subprocess.check_output(
+        ['git', '-C', str(ROOT), 'branch', '--show-current'], text=True).strip()
+    if branch != 'port/plan33b-windows':
+        raise SystemExit('Build Windows installers from port/plan33b-windows only')
+    if subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain']).strip():
+        raise SystemExit('Commit Windows changes before building a release installer')
     build = (ROOT / args.build_dir).resolve()
     stage = ROOT / 'artifacts/installer-stage'
     stage.mkdir(parents=True, exist_ok=True)
