@@ -56,3 +56,22 @@ Current XML `v1120-native-tests.xml` is the pre-fixture439.96s gate:153CTestpass
 receipt. Preserve it before the final configured full gate. New project scripts
 prepare audit/publication; audit ignores JSON skip:0 counters but rejects actual
 absent/skip messages outside owner's menu exclusions. No pending builds/runs.
+
+
+## Completed publication
+
+Follow-up code commit14c861562476192456f4f0c4afdaa40f97559e56 pushed. Finalclean
+build passes; replaySHA54c3f0bd...139a48 unchanged. Finalnative40202 COMPLETE0:
+153pass0fail0CTestskip454.31s; audit PASSES with positive markers for allseven
+requiredcomponents, alltenpolice, noothermissingdata/skips beyond40owner-menu
+comparisons. Full log/XML isbuild/v1120-native-tests; pre-fixture gate retained
+asv1120-pre-fixture-native-tests. Negative fixture tests nowallsevenPASSexit1.
+
+Finalinstaller48096 COMPLETE0,production/test packages rebuiltfrom14c8615,
+19→20 upgrade preserves600files and launches120frames. FinalinstallerSHA
+fce80f20d05acb306bbd68cf745801999b201de6f21b8dfb531821bd43f5dd82,
+16807031bytes. Publisher98813 COMPLETE0; release3do-1.1.20 public with confirmed
+publicdownloadchecksum, codecommit14c8615. Noactiveprocesses,resources,builds,
+capturesorremainingreleasework. Latestuserquestion(whycontinueafterfivepasses)
+answered:extra wreck/snapshotfixes and formerlybypassedcomponentfixtures; all
+are nowfinished. Do not invent additional work for this completed release batch.

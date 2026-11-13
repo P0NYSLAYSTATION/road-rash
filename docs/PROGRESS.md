@@ -3508,3 +3508,19 @@ Earlier bare CTest totals did not prove this coverage. Details and supersession
 are in [component handoff](agent-handoffs/component-fixtures-20261113.md).
 The gameplay replay binary is unchanged; release1.1.20 publication waits for
 the corrected final gate and rebuilt installer provenance.
+
+
+## Release 1.1.20 completed
+
+Published [1.1.20](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.20)
+from clean code revision `14c861562476192456f4f0c4afdaa40f97559e56`.
+All five completed level 1 race recordings match143764ticks; the separate Medly
+wreck matches13271ticks, and the Highway level 5 recording matches94929ticks
+through arrest. The final test/tooling changes leave that gameplay executable
+byte-identical. Corrected full native gate:153pass,0failure,0CTestskip,454.31s.
+All ten police cases and seven formerly bypassed component comparisons execute.
+
+Installer19-to20 update, without new asset arguments, preserves600files and
+launches120frames. Public installer download checksum verified. No original
+game process, capture resource or release task remains active. Evidence and
+superseded audit details are in VERIFICATION.md and the component handoff.
