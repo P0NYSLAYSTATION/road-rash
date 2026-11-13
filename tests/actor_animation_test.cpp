@@ -37,6 +37,11 @@ int main(int argc, char** argv) {
         if (!rejected) throw std::runtime_error("Invalid signed frame accepted");
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-actor-animation-fixtures.tsv");
+        if (!file) {
+            rr::Assets assets(rr::test::assets_root());
+            if (!assets.exists("DATA/GLOBAL.RSC")) return 77;
+            throw std::runtime_error("Required original animation fixture missing");
+        }
         if (file) {
             std::map<std::string, int64_t> values;
             std::string line, key;

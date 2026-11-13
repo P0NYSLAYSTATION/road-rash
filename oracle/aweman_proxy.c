@@ -100,6 +100,7 @@ static int g_knock_initial_tick, g_knock_applied_tick;
 static int g_order;
 static int32_t g_order_range = 0x1000;
 static int g_police_probe;
+static FILE* g_police_fields;
 static int g_terrain_seeded;
 static int g_terrain_trace;
 static int g_slice_probe = -1;
@@ -503,6 +504,15 @@ static void dump_sim_tick(void) {
         if (g_tick1_caller) rr_log("tick1_caller", (long long)g_tick1_caller);
     } else {
         fprintf(g_out, "frame\t%u\n", g_sim_frames);
+    }
+    if (g_police_fields) {
+        char fields[4096];
+        size_t size;
+        rewind(g_police_fields);
+        while ((size = fread(fields, 1, sizeof fields, g_police_fields)) != 0)
+            fwrite(fields, 1, size, g_out);
+        fclose(g_police_fields);
+        g_police_fields = NULL;
     }
     rr_log("tick", tick);
     uint32_t* rst = sim_rand_state();
@@ -1516,7 +1526,20 @@ static void __cdecl hook_step(void) {
         g_knock_applied_tick = RD32(0x004b7ecc);
         g_knock_tick = 0;
     }
-    if (g_police_probe && g_race_started && g_out) capture_police_spawn();
+    if (g_police_probe && g_race_started && g_out) {
+        // Constructor observations happen before the step but belong inside
+        // its frame record. Never emit integer fields in the trace header.
+        FILE* main_out = g_out;
+        g_police_fields = tmpfile();
+        if (g_police_fields) {
+            g_out = g_police_fields;
+            capture_police_spawn();
+            g_out = main_out;
+        } else {
+            fputs("# instrumentation failure: cannot buffer police fixture\n", g_out);
+            g_fixture_error = 1;
+        }
+    }
     ((void(__cdecl*)(void))0x0044b3b0)();
     if (!g_sim || !g_race_started || !g_out) return;
     dump_sim_tick();

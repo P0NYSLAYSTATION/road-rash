@@ -3496,3 +3496,15 @@ allocation introduced by tracker-map copying. Tracker references now share
 copy-on-write storage, and the allocation/snapshot restoration test passes.
 The failed evidence is preserved. Clean-revision final gates and release1.1.20
 packaging are the remaining work for this batch.
+
+
+## Required original component coverage (November13)
+
+The broader final audit found three component tests returning success on absent
+fixtures and related silent optional comparisons. Captured real component data
+from the workingE:/RR installation; actor,vehicle,crash,police and building
+comparisons now run and pass. Missing fixtures with supplied assets fail.
+Earlier bare CTest totals did not prove this coverage. Details and supersession
+are in [component handoff](agent-handoffs/component-fixtures-20261113.md).
+The gameplay replay binary is unchanged; release1.1.20 publication waits for
+the corrected final gate and rebuilt installer provenance.

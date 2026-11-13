@@ -21,6 +21,11 @@ int main(int argc, char** argv) {
         if (nodes.size() != 2 || !nodes[0].flat_index || nodes[1].texture != &texture)
             throw std::runtime_error("Building facade/roof order");
         std::ifstream file(argc > 1 ? argv[1] : RR_SOURCE_DIR "/analysis/oracle/napa-building-fixtures.tsv");
+        if (!file) {
+            rr::Assets assets(rr::test::assets_root());
+            if (!assets.exists("ROADRASH.EXE")) return 77;
+            throw std::runtime_error("Required original building panel fixture missing");
+        }
         if (file) {
             std::map<std::string, int32_t> values;
             std::string line, key;

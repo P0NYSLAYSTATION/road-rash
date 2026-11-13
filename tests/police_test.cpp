@@ -16,7 +16,7 @@
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
-int main() {
+int main(int argc, char** argv) {
     try {
         rr::PoliceArrestInput in;
         in.found_cop = true;
@@ -91,7 +91,7 @@ int main() {
         rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Police threshold tests passed; imported corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto config = rr::read_police_config(assets.read("ROADRASH.EXE"));
         require(config.bikes[0] == 4 && config.stats[3] == 171 && config.stats[12] == 6 &&
@@ -133,7 +133,8 @@ int main() {
                         recycled.rider.i32(0x1ec) == 0,
                     "police constructor clears crash and attack state without clearing the retained byte");
         }
-        std::ifstream file(RR_SOURCE_DIR "/analysis/oracle/napa-police-spawn.tsv");
+        std::ifstream file(argc > 1 ? argv[1] : RR_SOURCE_DIR "/analysis/oracle/napa-police-spawn.tsv");
+        if (!file) throw std::runtime_error("Required original police spawn fixture missing");
         if (file) {
             std::map<std::string, int64_t> values;
             std::string line, key;
@@ -192,7 +193,8 @@ int main() {
             }
             std::cout << "Original opening Napa police pursuit and stats match\n";
         }
-        std::ifstream arrest_file(RR_SOURCE_DIR "/analysis/oracle/napa-police-arrest.tsv");
+        std::ifstream arrest_file(argc > 2 ? argv[2] : RR_SOURCE_DIR "/analysis/oracle/napa-police-arrest.tsv");
+        if (!arrest_file) throw std::runtime_error("Required original arrest fixture missing");
         if (arrest_file) {
             std::map<std::string, int64_t> values;
             std::string line, key;

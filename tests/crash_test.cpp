@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
         rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/GLOBAL.RSC")) {
             std::cout << "Imported crash corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto exe = assets.read("ROADRASH.EXE");
         const auto config = rr::read_crash_config(exe);
@@ -53,10 +53,7 @@ int main(int argc, char** argv) {
         if (initialized.motion.i32(0xc4) != 8) throw std::runtime_error("Imported rider behavior type");
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-crash-entry-fixtures.tsv");
-        if (!file) {
-            std::cout << "Original crash fixture absent\n";
-            return 0;
-        }
+        if (!file) throw std::runtime_error("Required original crash fixture missing");
         std::map<std::string, int64_t> values;
         std::string line, key;
         int64_t value;
@@ -64,7 +61,8 @@ int main(int argc, char** argv) {
             std::istringstream row(line);
             if (row >> key >> value) values[key] = value;
         }
-        std::ifstream walking_file(RR_SOURCE_DIR "/analysis/oracle/napa-crash-walking.tsv");
+        std::ifstream walking_file(argc > 2 ? argv[2] : RR_SOURCE_DIR "/analysis/oracle/napa-crash-walking.tsv");
+        if (!walking_file) throw std::runtime_error("Required original walking fixture missing");
         if (walking_file) {
             std::map<std::string, int64_t> walking;
             while (std::getline(walking_file, line)) {

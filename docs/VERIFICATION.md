@@ -4724,3 +4724,18 @@ These initial new-build rechecks precede the tracker-map copy-on-write change.
 `build/tracker-cow-snapshot-test.log`:focused race_state PASS5.83s, including
 zero-allocation warmed snapshot copies after tracker references became COW.
 Clean-revision integrated gates and installer publication remain pending.
+
+
+### Component fixture audit correction
+
+A broader stdout/static audit found actor_render,crash and actor_traffic were
+returning success when fixtures were absent; actor_animation,actor_descriptors,
+building_panels and police spawn/arrest also had optional comparisons. This
+supersedes earlier claims that only menu comparisons were omitted. Raw CTest
+0skip counts remain structural facts, not evidence those checks executed.
+`build/v1120-required-components.xml`:six real original-data component tests
+pass; all six reject missing fixtures with exit1. The fresh building comparison
+also passes, alongside2112ground queries and42CELresources. Exact data hashes,
+commands/outputs and coverage are in the component handoff. Gameplay executable
+hash remains54c3f0bd...139a48, preserving the measured five-race/wreck/Level5
+results for that identical binary. Corrected integrated gate still pending.
