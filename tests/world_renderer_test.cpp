@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    const std::string path = argc > 1 ? argv[1] : rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const std::string path = argc > 1 ? argv[1] : rr::golden::raster_fixture();
     if (!std::filesystem::exists(path)) {
         std::cerr << "SKIP missing nodes oracle\n";
         return 0;
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
     size_t failures = 0;
     try {
         const auto golden = rr::golden::load(path);
-        if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+        if (!rr::golden::original_executable(golden.exe) ||
             golden.frames.empty())
             throw std::runtime_error("Wrong node golden");
         const auto& fields = golden.frames.front();

@@ -1,8 +1,32 @@
 #include "road.hpp"
 #include "bike.hpp"
+#include "exe_tables.hpp"
 #include <array>
 
 namespace rr {
+std::array<int32_t, 32> read_road_separation_limits(const std::vector<uint8_t>& exe) {
+    //00444e70: the original32-entry pixel margin table, divided by the
+    //fixed depth scales beginning at46f498, one256-depth step per entry.
+    const auto raw = read_exe_data(exe, 0x004734a0, 128);
+    const auto depths = read_depth_table(exe);
+    std::array<int32_t, 32> out{};
+    for (size_t i = 0; i < out.size(); ++i) {
+        const size_t p = i * 4;
+        const uint32_t v = uint32_t(raw[p]) | uint32_t(raw[p + 1]) << 8 |
+                           uint32_t(raw[p + 2]) << 16 | uint32_t(raw[p + 3]) << 24;
+        out[i] = int32_t(int64_t(v) * 65536 / depths.scale.at(256 + i * 128));
+    }
+    return out;
+}
+bool secondary_road_visible(uint8_t event, int32_t countdown, bool camera_dual,
+                            int32_t camera_countdown, bool camera_building,
+                            int32_t separation, int32_t limit) {
+    //00444553..004445d0 hides the half opposite the camera; events4/6
+    //read this slice's signed countdown, the other events read the camera's.
+    if (event == 4 || event == 6)
+        return separation <= limit && (!camera_building || countdown >= 0);
+    return !camera_dual || (separation <= limit && (!camera_building || camera_countdown > 0));
+}
 namespace {
 constexpr uint32_t image_base = 0x00400000, depth_table_va = 0x0046f098;
 constexpr size_t depth_entries = 4352; // last positive entry before zero padding

@@ -24,4 +24,9 @@ WallProfile wall_profile(const TerrainSlice&, const PathSample&, bool tunnel);
 int32_t terrain_height(const TerrainSlice&, const PathSample&, const TerrainSlice& next,
                        const PathSample& next_path, int32_t lateral_q8, uint8_t fraction,
                        int32_t next_centre = 0, int32_t centre = 0);
+// 00454890: fade the two inner shoulders and join their hillside polylines.
+// Paths and terrain are local to each road; separation translates right to left.
+void adjust_split_terrain(TerrainSlice& left, PathSample& left_path,
+                          TerrainSlice& right, PathSample& right_path,
+                          int32_t separation, int32_t countdown, int32_t threshold);
 } // namespace rr

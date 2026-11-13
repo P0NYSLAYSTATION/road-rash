@@ -16,7 +16,8 @@ struct RasterClip {
     int32_t left = 0, top = 0, right = 0, bottom = 0;
 };
 // 0x0044ce60: normalizes topology/orientation and optionally texture flip.
-bool normalize_quad(std::array<RasterPoint, 4>&, uint32_t flags = 0, bool* texture_flip = nullptr);
+bool normalize_quad(std::array<RasterPoint, 4>&, uint32_t flags = 0, bool* texture_flip = nullptr,
+                    bool translation_invariant = false);
 void fill_quad(Framebuffer&, const RasterQuad&, RasterClip);
 // Full flat entry path: normalize, then fill.
 void draw_flat_quad(Framebuffer&, RasterQuad, RasterClip);

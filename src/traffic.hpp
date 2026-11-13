@@ -66,17 +66,18 @@ int traffic_lane_count(int32_t lanes_q8);
 // (0x004387a0 template copies and 0x0044df60 writes).
 struct TrafficCar {
     int road = 0;
-    uint8_t kind = 0;                            // +0x1cc
-    uint8_t vehicle = 0;                         // +0x1fc
-    int8_t lane = 0;                             // +0x1e8
-    int32_t position = 0;                        // +0x1c: Q8 samples along the route
-    int32_t lateral = 0;                         // +0x28: Q8 world lateral
-    int32_t speed = 0;                           // +0xec
-    int32_t phase = 0;                           // +0x1c4: (rand & 0x7f) + 0xc0, 192..319
-    uint8_t jitter_a = 0;                        // +0x1c8
-    uint8_t jitter_b = 0;                        // +0x1c9
-    uint8_t jitter_c = 0;                        // +0x1ca
-    uint32_t serial = 0;                         // +0x208 (DAT_004b7e98)
+    uint8_t kind = 0;       // +0x1cc
+    uint8_t vehicle = 0;    // +0x1fc
+    int8_t lane = 0;        // +0x1e8
+    int32_t position = 0;   // +0x1c: Q8 samples along the route
+    int32_t lateral = 0;    // +0x28: Q8 world lateral
+    int32_t speed = 0;      // +0xec
+    int32_t phase = 0;      // +0x1c4: (rand & 0x7f) + 0xc0, 192..319
+    uint8_t jitter_a = 0;   // +0x1c8
+    uint8_t jitter_b = 0;   // +0x1c9
+    uint8_t jitter_c = 0;   // +0x1ca
+    uint32_t serial = 0;    // +0x208 (DAT_004b7e98)
+    uint64_t free_rank = 0; // pool return order; original allocates the most recently returned slot
     bool active = false, pending_remove = false; // marked now, returned by next scheduler prepass
     int32_t last_tick = 0, next_tick = 0, interval = 10, dt = 0; // +0x10/+0xc/+0x14/+0x18
     Bike motion;         // 0x0043adc0 physics words, persistent per pool slot
@@ -103,6 +104,7 @@ struct TrafficObstacle {
 struct IntersectionSignal {
     int road = 0;
     bool active = false;
+    uint64_t free_rank = 0;
     int index = 0;           // +0xf8: 0..3; odd indices spawn crossing cars; type 0x40 << index
     int side = 0;            // 0x0041ef60 param_2: 0 left shoulder, 1 right
     int32_t phase = 0;       // +0xf0: 0..2, starts (~index & 1) * 2
@@ -115,10 +117,12 @@ struct IntersectionSignal {
 };
 struct IntersectionController {
     int road = 0;
+    uint64_t free_rank = 0;
     bool active = false;
     int32_t durations[3] = {600, 180,
                             780};     // +0xfc..+0x104; {75, 0, 240} on a dual type-4 slice with flag byte 0
     int32_t start_q8 = 0, end_q8 = 0; // +0x108 / +0x10c: event start / end on the route
+    uint8_t half = 0;                 // physical roadway of the intersection sub-slice
     int variant = 1;                  // +0x110: event type 1..3
     int lanes = 0;                    // +0x111: record byte +9, the cross road's lane span
     int32_t position_q8 = 0;          // +0x1c: zone-end slice, clamped into the ring window
@@ -132,14 +136,11 @@ class TrafficSystem {
     static constexpr size_t pool_size = 16;       // 0x00438b70(0x210, 0x10): 16 objects
     static constexpr size_t controller_pool = 10; // 0x00468ee4: 10 x 0x114
     static constexpr size_t signal_pool = 40;     // 0x00468ee0: 40 x 0x108
-    // DAT_004b7ecc while 0x004552e0 builds the first ring (objects created
-    // there get +0xc next = 1, +0x10 last = 1 - interval); the player and
-    // grid built later by 0x00405600 see 0. Setup controllers think on
-    // 1 + 30k (police capture: 0x0041f040 at tick 751) and their teardown,
-    // marked on a think, unlinks one tick later (2 + 30k on the solo
-    // captures and napa-field-l1-20261017, tick 392). Earlier notes read the
-    // unlink tick as the creation phase (2); corrected October 28, 2026.
-    uint32_t setup_tick = 1;
+    // Pre-step native capture proves construction at DAT_004b7ecc == 0:
+    // +0xc next=0, +0x10 last=-interval. Both next=0 and next=1 run on
+    // the first scheduler tick 1, so the older 1+30k cadence evidence
+    // could not establish construction at 1. It lost one accumulator tick.
+    uint32_t setup_tick = 0;
     void set_setup_tick(uint32_t t) { setup_tick = t; }
     // Nulled-pool solo equivalent: the oracle zeroes the car pool count, so
     // 0x0044df60 returns on entry AFTER 0x0044dd90/0x0041f040 drew the lane
@@ -204,7 +205,10 @@ class TrafficSystem {
                   uint32_t tick, int32_t player_velocity = 0);
     // The live position-ordered walk dispatches each car between rider nodes.
     bool begin_schedule(const std::vector<RouteSample>& route, int32_t front_q8,
-                        const std::function<uint32_t()>& random, uint32_t tick);
+                        const std::function<uint32_t()>& random, uint32_t tick,
+                        bool defer_controllers = false);
+    void run_controller(size_t index, int32_t back_q8, int32_t front_q8, uint32_t tick,
+                        const std::vector<RouteSample>& route, const std::function<uint32_t()>& random);
     void run_car(size_t index, const std::vector<RouteSample>& route, int32_t camera_q8, int32_t front_q8,
                  int32_t player_q8, int32_t player_lateral, const std::function<uint32_t()>& random,
                  uint32_t tick, int32_t player_velocity);
@@ -231,11 +235,23 @@ class TrafficSystem {
     int pedestrian_signal(uint8_t marking_flags, int32_t position_q8, int lane, int road = -1) const;
     // Non-car obstacles for this tick's lane scans (set by Race before step).
     std::vector<TrafficObstacle>& obstacles() { return obstacles_; }
+    //Live0044a070 scans scheduler links, preserving equal-position order.
+    using ObstacleScan = std::function<std::optional<TrafficObstacle>(const TrafficCar&, int32_t)>;
+    void set_obstacle_scan(ObstacleScan scan) { obstacle_scan_ = std::move(scan); }
     // Terrain type of a route sample (0x00454240 +0x3c), for 0x0041eca0's
     // short-phase test; without it the long table is always used.
     void set_terrain_type(std::function<int(const RouteSample&)> source) {
         terrain_type_ = std::move(source);
     }
+    //0043adc0 calls the same wall response as bikes, after swept motion
+    //and before the car's window-removal/scheduling checks.
+    void set_wall_response(std::function<void(Bike&, size_t, size_t)> response) {
+        wall_response_ = std::move(response);
+    }
+    void set_road_motion(std::function<std::optional<std::pair<int32_t, int32_t>>(int32_t)> source) {
+        road_motion_ = std::move(source);
+    }
+    void set_ring_source(std::function<const TrackRing*(int32_t)> source) { ring_source_ = std::move(source); }
     const VehicleLibrary& library() const { return *library_; }
     // 0x00437e60 car LOD after the move, using the pre-driver ring camera.
     static int32_t schedule_interval(const TrafficCar&, int32_t camera_q8, int32_t player_velocity);
@@ -252,6 +268,14 @@ class TrafficSystem {
     // Plan 10: append "car.<pool index>.<field>" rows (tests/sim_fields.hpp
     // car_fields) for every pool slot, active or not.
     void append_snapshot(std::vector<FieldValue>& out) const;
+    struct LaneProbe {
+        int32_t right_q8, left_q8, next_right_q8, next_left_q8, previous_right_q8, previous_left_q8;
+        int32_t slot_link = 0;
+    };
+    // The same rolling-slot lane inputs used by plan_speed, exposed for
+    // original-versus-port state comparisons (raw addresses are not portable).
+    LaneProbe lane_probe(const TrafficCar&, const std::vector<RouteSample>&, int32_t front_q8,
+                           const TrackRing* ring = nullptr) const;
 
   private:
     void build_slices(const std::vector<RouteSample>& route, int32_t front_q8, int32_t distance_moved,
@@ -270,6 +294,7 @@ class TrafficSystem {
     std::pair<int32_t, int32_t> plan_speed(TrafficCar&, const std::vector<RouteSample>& route,
                                            int32_t front_q8);
     const VehicleLibrary* library_; // pointer: copied into race snapshots (plan 34 Task 3)
+    ObstacleScan obstacle_scan_;
     PhysicsTables physics_;
     std::array<int32_t, 26> car_template_{};
     uint32_t tick_ = 0;
@@ -278,7 +303,10 @@ class TrafficSystem {
     std::array<int32_t, 4> drift_rates_{}; // 0x00475694[kind] signed byte * 800
     std::vector<TrafficCar> cars_{pool_size};
     std::vector<SoundEventRecord> events_;
-    uint32_t serial_ = 0;       // DAT_004b7e98
+    uint32_t serial_ = 0; // DAT_004b7e98
+    uint64_t free_rank_ = 0;
+    uint64_t controller_free_rank_ = 0, signal_free_rank_ = 0;
+    size_t next_free(size_t first, size_t last) const;
     bool spawn_enabled_ = true; // false: nulled-pool solo (draw, never place)
     bool filled_ = false;       // initial ring fill replayed
     int32_t built_end_ = 0;     // ring front sample (exclusive) already built
@@ -287,9 +315,10 @@ class TrafficSystem {
                      uint32_t tick);
     // 0x0041eca0 placement from a type-1..3 zone end at route sample s.
     void place_intersection(const std::vector<RouteSample>& route, int32_t s, const PathSample& path,
-                            int32_t back_q8, int32_t front_q8, uint32_t tick);
+                            int32_t back_q8, int32_t front_q8, uint32_t tick, uint8_t half);
     int place_signal(const std::vector<RouteSample>& route, int controller, int index, int side,
-                     int32_t fraction, int32_t slice, int lane); // 0x0041ef60; -1 when the pool is out
+                     int32_t fraction, int32_t slice, int lane,
+                     uint8_t half); // 0x0041ef60; -1 when the pool is out
     // 0x0041f040 every 0x1e ticks, then the scheduler's ring-window teardown.
     void think_intersections(int32_t back_q8, int32_t front_q8, uint32_t tick,
                              const std::vector<RouteSample>& route, const std::function<uint32_t()>& random);
@@ -299,6 +328,11 @@ class TrafficSystem {
     std::vector<IntersectionSignal> signals_{signal_pool};
     std::vector<TrafficObstacle> obstacles_;
     std::function<int(const RouteSample&)> terrain_type_;
+    std::function<void(Bike&, size_t, size_t)> wall_response_;
+    std::function<std::optional<std::pair<int32_t, int32_t>>(int32_t)> road_motion_;
+    std::function<const TrackRing*(int32_t)> ring_source_;
+    std::array<std::array<int32_t, 6>, 4> kind_templates_{};
+    void init_car(Bike& body, int kind) const;
     uint8_t sprite_size_ = 10;
     // Plan 34 C3.
     bool net_ = false;

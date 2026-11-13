@@ -1,5 +1,224 @@
 # Port progress
 
+## November13 — release1.1.19 published
+
+Code commitb377447 is pushed and tagged3do-1.1.19. The clean optimized revision passes152selected native tests with no failures/CTest skips, all five completed Level1 races (143764ticks), the Level5 Highway arrest run (94929ticks), and all ten required police/crash cases. Update18->19 preserves600checked asset/save/soundfont/settings files byte-for-byte and launches successfully. The asset-free installer is published; its public download matches SHA256542219f4ffa60854933cc731f23c13e5fd14aeb44aaf789b9cfe3e3af69a5924. Menu pixels and widescreen-only checks remain owner-excluded. Further higher-level/branch finish combinations remain unmeasured; multiplayer work remains held during gameplay parity completion.
+
+## November13 — initial-slot and finish-result branches
+
+Production gates exposed two additional cases. Unbuilt forward slots have initialized500-unit road edges and150-unit shoulders, so allocation-time hill interpolation now uses that original template. The original crashed-finish branch starts the result without waiting for the uncrashed braking threshold; normal and crashed finish integration checks now pass separately. Optimized strict Level5 Highway matches94929ticks through arrest. Renewed optimized native gate passes152selected tests with zero failures/CTest skips, and all five finish recordings match143764ticks. Earlier interrupted gates remain incomplete evidence; new complete reports supersede them. Installer/update/release work follows this verified milestone.
+
+## November12 — stationary probes and finish-control regression
+
+The user closed the zero-input Napa police/crash capture at1177/5030 ticks; the rider was intentionally parked and the crash was scheduled for4400. That incomplete trace was rejected. The runner now explicitly announces the zero-input policy and duration before capture. This was separate from the earlier City driving run that bypassed two cars and finished.
+
+The post-arrest regression failed all five completed Level1 recordings late in the race. The new control predicate had incorrectly treated the finish-line latch as the original global outcome. Original00434853..00434874 keeps steering active while braking until speed<300, then starts the outcome; AI starts on the next think. A separate finish-control latch now implements that timing. Build passed; renewed headless five-race verification passes all143764 ticks, including latest allocation-ground and finish-control changes. The optimized production build and native result-screen timing remain to verify.
+
+## November12 — driver recovery and required gameplay evidence
+
+The original recording driver now detects300 ticks (five seconds) without a sample of progress and uses ordinary braking/steering/throttle to bypass an obstruction. A real Big Game City run recovered from two cars and reached the finish at32999; original Save As produced a160-byte RRS equal to its captured152-byte payload. Native save-byte/memory checks pass. No menu pixels were compared.
+
+Fresh original component fixtures now load DATA relative to the exact E:/RR working installation, rejecting missing files. All nine raster/material/CEL checks pass. Original4547e0 forward-neighbor lane-grid rules fix four Medly road panels;4764 terrain nodes and2803 ground queries match. Five completed Level1 race recordings previously match143764 ticks; regression after latest simulation edits remains in progress.
+
+Mandatory police/crash gates replace absent historical partial fixtures. They exposed and measured original result-delay AI control and throttle-to-brake rules, plus original pedestrian allocation-ground initialization before previous-placement copying. Napa4730 ticks through the post-arrest delay, City4552 ticks through arrest and explicit crash300/700 ticks now match. All ten required police/crash scenarios now pass35916 exact ticks. Production optimized rebuild and integration acceptance remain pending; no release-completion claim. Original-resolution Canyon sample0 was measured: the original also draws7176 opaque black pixels; corrected dual-clear coverage passes with zero unwritten pixels. Menu and widescreen-only investigations are excluded by owner.
+
+
+## November 12, 2026 — native Windows text and required evidence checks
+
+Native Windows text now draws through GDI memory DIBs, with direct RGB565 menu
+blending and native DrawTextEx layout. Existing Windows probes match all9,856
+disc glyphs/advances in each format, all672 system glyphs/advances in each format,
+196,608 blend samples,292 line-height measurements,7 string extents and6 wrapped
+rectangles. The trailing-space layout mismatch and black HUD transparency are
+fixed. The ten-check offline component gate passes; the synthetic tooling suite
+passes27 tests with zero skips. These are component results, not a full native
+acceptance gate or a new completed-race claim.
+
+Windows deployment contracts run instead of skipping. Native capture contracts
+replace the two skipped Wine-only tooling cases. Original actor comparisons now
+require actual frame/node coverage, and Medly terrain acceptance includes rider
+grounds. Fresh scene/moving/terrain and frontend/save captures can be configured
+without impersonating old filenames. Required missing frontend/driven-save
+evidence now fails acceptance explicitly; those captures remain outstanding.
+No game or recorded simulation replay has run since the owner's PC-use pause.
+The native frontend helper and initial script are prepared but have not run.
+See [current handoff](agent-handoffs/skip-removal-20261112.md).
+
+## November 12, 2026 — higher-level coverage underway
+
+Release [1.1.18](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.18) is published from clean commit `720b591`. The public installer checksum is verified; the isolated 1.1.17-to-1.1.18 update preserves 600 checked assets, settings and saves, and the installed SDL menu smoke passes. A new Hiway Level 5 human prefix matches all 2,400 ticks from one RNG anchor. Three additional completed collision/split prefixes also pass strict replay (Hiway 6,500, City 1,300, Napa 1,310 ticks). The Level 5 full original capture is still running; no full higher-level result is claimed.
+
+The next diagnostic capture measures pedestrian allocation ground height and its previous-position copy. The helper and replay comparison are extended; simulation behavior is unchanged pending that measurement. Longer replay deadlines are now configurable, while timeout remains a strict failure. See [handoff](agent-handoffs/parity-higher-levels-20261112.md).
+
+## November 12, 2026 — all five completed human recordings
+
+Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
+[Evidence](agent-handoffs/parity-resource-lookup-20261112.md).
+
+## November 12, 2026 — Canyn whole-race parity
+
+Canyn L1/seed1 passes all29,620 ticks including RNG on its completed human recording. Hiway14,084 and Napa29,055 remain exact. A marked crossing car now receives its final physics move; pedestrian pool returns follow linked-list order. The completed Medly L1/seed2 recording matches20,645 ticks before a resource-availability gap; City matches18,307 before a similar gap. All five tracks now have finished original recordings. Strict whole-race and four prefix gates pass; the native suite passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions; multiplayer stays held.
+[Evidence](agent-handoffs/parity-city-visibility-20261112.md).
+
+## November 12, 2026 — complete Napa human replay
+
+Napa L1/seed1 now passes strict whole-race human acceptance: all29,055 ticks identical including RNG from one seed anchor. Traffic uses projected car velocities, accepts equal-position obstacles, and rejects opposite-road signals. Police respawns retain initial target speed; merge lane smoothing respects event4. Live simulation continues through the all-finished result delay. City moving2400 is exact; the new completed City recording matches18,307 ticks; first differs18,308. Strict full Hiway14,084 and Napa29,055 regressions pass, plus four short fixtures. Full Release build and SDL gate pass104 tests with35 explicit skips and two unavailable D3D checks excluded. Multiplayer stays held.
+[Evidence](agent-handoffs/parity-projected-velocity-20261112.md).
+
+## November 12, 2026 — one ordered contact walk
+
+Moving Napa now matches all2400 captured ticks including RNG. Live cars, riders,
+crashed halves and pedestrians share the original ordered contact walk; short
+eligible bodies can stop the inner scan before a later longer car. Pedestrian
+scenery callbacks and original car-removal store order advance moving City to1558
+(first1559 car position34152/native34150). Complete Hiway14084 remains exact;
+Napa expanded2400 and City signal600 remain exact. Full MSVC Release and SDL
+gate pass104 tests,35 explicit skips,zero failures; two unavailable Direct3D
+checks excluded. Whole-race acceptance for remaining tracks is still open.
+[Evidence](agent-handoffs/parity-mixed-contacts-20261112.md).
+
+## November 12, 2026 — complete Hiway human replay
+
+The unchanged completed Hiway recording now passes strict whole-race acceptance:
+14084 ticks identical, including RNG, free-running from one seed anchor. Source
+trace SHA2560fe2e9d7dd984990c528ee4b05cf80015c37b2e7a84b2c442e0b524e27d5975d;
+`build/hiway-finish-place-animation.json` reports acceptance_met=true.
+This proves this level1/seed1/input race, not every route/level or every track.
+Parking now preserves physical graph coordinates; AI targets read physical lanes;
+pedestrian slots retain original allocation fields and reuse the last returned
+slot. Finished actors keep scheduled AI/motion and flag-driven contacts. Live
+finish latching belongs to the half mover without clamping the bike. The player's
+victory animation uses finish place. Full MSVC build and SDL gate pass:104 tests,
+35 explicit skips,zero failures; two unavailable Direct3D checks excluded. Strict
+Napa2400/City600 regressions pass. Remaining tracks are still open; multiplayer
+stays held. [Evidence](agent-handoffs/parity-finish-pools-20261112.md).
+
+## November 12, 2026 — physical static-collision identity
+
+Hiway matches through11158 including RNG on the unchanged completed recording.
+Live static builds now address their physical half and road centre even when
+walker section/local differs from the flattened route. This restores the marking
+contact at10073. First remaining gap11159 is active riders5/native6.
+Full-race/all-track acceptance remains open; multiplayer stays held.
+
+## November 12, 2026 — physical force and mover references
+
+The unchanged completed Hiway trace matches through10072 including RNG.
+Contact force reads retained physical rises; wall response distinguishes the
+mover-start slice+40 from swept-motion slice+13c. Physical graph node/local
+identity controls finish-distance transitions. First gap10073 is rider13's
+half+1e8 word384/native131. Full-race/all-track parity remains open; multiplayer
+stays held. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — live family cursor and physical road lookups
+
+The unchanged completed Hiway trace now matches through9748 including RNG.
+Exact global-front family queries avoid firing old-section loads past the
+section's exit and retain incoming families while its biased cursor is negative.
+Car lane planning and AI curvature lookahead now read physical ring words.
+First remaining gap9749 is opponent ground64/native71. Full-race/all-track
+parity remains open. [Evidence and validation](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — physical traffic road motion
+
+Traffic now reads retained physical ring bend/rise words for swept motion,
+as riders already do. The completed Hiway trace matches through9406 including
+RNG; first gap9407 is pedestrian serial8 resource availability. Strict
+Napa2400/City600 pass; SDL gate104 passed,35 skips, two Direct3D tests excluded.
+[Evidence and remaining work](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — crashed-bike car contacts
+
+Hiway now matches through9335 including RNG. The original skips sound draws
+and uncrashed class2/3 decisions when a crashed bike contacts a car; the port
+now follows that branch and uses the car's actual width for the tail nudge.
+First remaining gap9336 is a traffic car's road-rise sum72/native99.
+SDL native gate104 passed,35 skips, two Direct3D checks excluded; strict
+Napa2400/City600 pass. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — repeated police personality lifetime
+
+The completed Hiway trace now matches through8349 including RNG. Police
+appearances reuse their mutable personality counters, relationship easing and
+replan accumulator instead of restarting from the EXE record. The8192 second
+spawn mismatch is resolved. First remaining gap8350 is RNG: original2 calls,
+native4. Full native SDL gate104 passed,35 skips, two Direct3D tests excluded;
+strict Napa2400/City600 still pass. [Evidence](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — traffic walls and signal pool lifetime
+
+The unchanged completed Hiway recording now matches through8191 including RNG.
+Cars now run the shared original wall response and load their kind-specific
+allocation constants. Future physical slots keep raw terrain selectors until
+the draw window, avoiding premature short-building widening. Returned signal
+slots retain their data and car-held references as the original does.
+First gap8192 is a police AI counter; whole-race/all-track parity remains open.
+[Evidence and validation](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — parking, retained halves and standings
+
+The completed Hiway recording now matches through8131 including RNG, using
+one initial anchor. Branch-filtered parked pace bands, discarded-arm parking,
+retained tracker bounds, physical half1 motion data and literal roadway-mask
+standings resolve the6604..6703 gaps. First remaining gap8132 is ring actor
+0x336fb08 lateral152320 versus201994. Napa2400/City600 remain exact. Full-race
+and all-track parity remain unfinished; multiplayer stays on hold.
+[Evidence and current validation](agent-handoffs/parity-parking-20261112.md).
+
+## November 12, 2026 — scenery road visibility
+
+The completed Hiway recording now matches through6603 including RNG. The6557
+steering gap was a false decal contact: the original hides the other roadway
+and leaves that billboard's collision boxes unloaded. Native simulation now
+applies the original depth-margin/countdown gate before loading those boxes.
+First remaining gap6604 is a parked bike/half position223502 versus223501.
+Napa2400 and City600 remain exact. Full native gate106 passed,35 skips, no
+failures. [Evidence and remaining work](agent-handoffs/parity-scenery-culling-20261112.md).
+
+## November 12, 2026 — graph finish and physical split shoulders
+
+The same completed Hiway recording now matches through6556 with one initial
+RNG anchor. Graph-relative finish distance resolves6007, shared-roadway AI
+scanning resolves6056, and zero-residual event initialization plus physical
+inner-shoulder narrowing resolves6254. Preserving the discarded half's terminal
+self-link resolves6552. First remaining gap6557 is opponent steering2310 versus
+3465. Napa2400 and City600 regressions stay exact.
+Recorded-controls companions are now written and checked against every TSV
+control before capture publication. See the [evidence and remaining work](agent-handoffs/parity-split-geometry-20261112.md).
+Whole-race parity across all tracks remains unfinished; multiplayer stays on hold.
+
+## November 12, 2026 — scheduler, resource and split parity
+
+The completed Hiway original recording now matches through tick6006 with one
+initial RNG anchor and no reseeding. The first remaining difference is tick6007:
+an opponent entering the other branch has finish-distance227708 versus232828.
+The original's graph-relative finish calculation before the finish section is
+discovered remains to be ported. This is not start-to-finish parity.
+
+Corrections include mixed controller dispatch and stable equal-position scan
+ordering; pre-green pedestrian contacts; player-half position queries; cached
+RRAN validity across smaller family-buffer replacements and section inheritance;
+the last scheduled move through a reused circular road slot; in-road scenery
+scheduler nodes; opposite-half pedestrian spawn centres; and interior split
+traversal event markers. Race snapshots retain the new simulation state and
+share the immutable traversal cache. The finish replay fixture now drives
+without wrecking and replays recorded controls across save/load.
+
+Napa moving1259 and City moving1251 remain independent first divergences.
+The established Napa2400/City600 fixtures are regression gates, not coverage of
+all tracks. Details and limits: [residency handoff](agent-handoffs/parity-residency-20261112.md).
+
+## November 12, 2026 — complete RNG caller history
+
+The original-game capture now writes each tick's RNG caller entries to the
+trace and flushes the file, then reuses its in-memory buffer. Caller numbering
+continues across ticks; previous entries remain in the saved trace. Buffer
+overflow explicitly invalidates the capture instead of silently truncating it.
+The completed `hiway-finish-streamed-rng-l1-s1` original run retains all 52,137
+entries through tick 14,084 and the finish outcome, including entries beyond
+the former 32,768-entry limit. This establishes complete caller logging for
+that run, not native simulation parity.
+
 The opening inventory below is historical. See [CURRENT_STATUS.md](CURRENT_STATUS.md)
 for the current evidence matrix and the dated continuation entries for updates.
 
@@ -14,7 +233,7 @@ Detailed evidence is in [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) and tes
 | Executable analysis (Ghidra, 1,585 functions exported) | Done; types and names not manually validated | `tools/decompile.sh`, `analysis/decompiled/` |
 | Disc inventory (341 files, SHA-256) | Done | `tools/inventory.py`, `analysis/inventory.json` |
 | Resource container directory (`CRSR`/`LBTR`) | Done; all 13 containers validated | `src/resource.cpp`, `tests/resource_test.cpp` |
-| Menu images (`.RRI` JPEG), dashboard and horizon `.BOB`, palette | Done (display only; no scrolling/cropping) | `src/viewer.cpp` |
+| Menu images (`.RRI` JPEG), dashboard and horizon `.BOB`, palette | Done; menu pictures bit-exact against the original's decoded-image cache (226 dumps, October 31) | `src/rri.cpp`, `src/viewer.cpp` |
 | Course graph (`NOD `: roads, splits, merges, ends) | Done; all 5 courses | `src/course.cpp` |
 | Course path (`HTPR` bend/rise) and lanes (`NALR`) | Done | `src/course.cpp` |
 | Road projection (33 slices, original depth table) | Done; integer port | `src/road.cpp`, `tests/road_test.cpp` |
@@ -33,7 +252,7 @@ Detailed evidence is in [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) and tes
 | Rider contact | Rider, car and pedestrian contact branches ported; pedestrian pairs never contact, as in `0x004368f0` (October 26) | `src/race.cpp` |
 | Combat | Original live AI attack selection, descriptor/frame hit gates, relationship reactions and animation queues; measured in the 2400-tick Napa field replay. Steal resolver gates/transfer measured in 31 original component cases (October 26); free-running steal capture remains open | `src/race.cpp` |
 | Language strings (`TEXT/*.DLL`) | All five languages, original table assembly and continuations | `src/pe_strings.cpp` |
-| Menu text | Disc TrueType fonts (Badloc, Futura); GDI hinting not reproduced | `src/text.cpp` |
+| Menu text | Disc TrueType fonts (Badloc, Futura) through pinned FreeType 2.13.3: Wine-GDI glyphs exact (smoothed menu text 8448/8448, 16-bit blend 491520/491520; 1-bit race text 8446/8448), DrawText word wrap, clipping and metrics. System faces Wingdings (focus and gap arrows) and Courier New Bold (standings) from the host, with Wine's VDMX/gasp/symbol rules: 667/667 glyphs exact on macOS; Wine's LGPL Wingdings built in for hosts without one | `src/text.cpp`, `cmake/freetype.cmake`, `cmake/wine_wingdings.cmake` |
 | Front end (menus, Thrash/Big Game flow, shop, Schmooze, restroom, results, credits) | Ported from the EXE screen tables and handlers; jukebox, sound mix and controls implemented; mano-a-mano disabled (plan 34); layout sweep of all 223 items, full pixel equality open on GDI text hinting. Native Display/Sound/Pause/Enhancements screens, visual-style presets, single widescreen setting (October 13) | `src/frontend.cpp` |
 | Career rules and save files | Prize, fines, repairs, shop, level-up and the original 0xa0-byte save format; seeded original-writer file round-trips byte-exact (`career-save-corpus`), driven-career saves round-trip (`career-test --corpus`, October 26) | `src/career.cpp` |
 | Settings | Registry values as a preference file | `src/settings.cpp` |
@@ -47,12 +266,363 @@ Detailed evidence is in [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) and tes
 | Disc import | ISO/folder reader, SHA-256 verification of 341 files, first-run picker/progress UI | `src/importer.cpp`, `src/import_ui.cpp` |
 | Android data packaging | Normal APK excludes game data; guarded developer assets are opt-in | `android/app/build.gradle` |
 | Audio decoding/mixing | All 72 effects and 14 RRA tracks decode; queued stereo mixer, resampling, pause and device reopening | `src/wav.cpp`, `src/mixer.cpp` |
-| Race sounds and soundtrack | Original effect slots, event codes at ported trigger points, engines with Doppler/pan/rpm, volume curve; RRA soundtrack cycling in menus; race MIDI (`RaceMusicPlayer`), sirens (slots 30/31) and car engines (slots 4/6) play; exact AWE/MIDI timbre open (October 26) | `src/sound.cpp` |
+| Race sounds and soundtrack | Original effect slots, event codes at ported trigger points, engines with Doppler/pan/rpm, volume curve; RRA soundtrack cycling in menus; race MIDI (`RaceMusicPlayer`, SBK generator semantics through `Sf1Synth`, October 31; reverb/chorus buses November 1), sirens (slots 30/31) and car engines (slots 4/6) play; exact AWE/MIDI timbre unmeasured (no EMU8000 oracle; effects algorithms are stand-ins), factory ROM open | `src/sound.cpp` |
 | Video | AVI scan, Cinepak and IMA: all 59 videos match FFmpeg RGB/audio; native playback via `--video`; frontend selection and hardware A/V sync open | `src/avi.cpp`, `src/cinepak.cpp`, `src/video_player.cpp` |
 | Flat polygon raster | Normalization matches 2,048 original calls; full flat path matches 64 indexed fixtures; scene integration open | `src/raster.cpp`, `src/polygon.cpp` |
 
 ## Timeline
 
+### November 8, 2026: crashed cop draws from the cop animation bank (Sentry ROAD-RASH-E)
+
+- Production web build `40829db` threw `vector::at` in `select_actor_view`
+  ~46 s into a race. Every crash animation path (`begin_crash`, crash
+  rider/bike advance, recovery, remount, half-static contact) used the rider
+  bank, while the renderer draws the cop with the cop bank: rider-bank crash
+  frames index past the cop's 30 view groups (157 of 159 frames fail).
+  `0x00405990` gives the cop bike and half the cop table via `0x00446060`
+  (param_5 2), so `Race::crash_bank` now selects bank 1 for the cop.
+- Remaining: cop crash numeric fields are not yet compared with an original
+  capture of a crashed cop.
+
+### November 4, 2026: dual-half ring traversal and physical-road selection (plans 10/17)
+
+- Recovered forward/back split and merge walker entry, cached 81-sample
+  windows, branch commitment/collapse, selected-half-first slice construction,
+  lane-edge offsets and snapshot restoration. Corrected static opposite-half
+  route identity and intersection/signal geometry on that physical roadway.
+- Ground interpolation now follows the original right-forward sub-slice link
+  at a split. This also restores the existing finish snapshot test without
+  changing its controls, fixture or assertions.
+- Original single-anchor `sim-napa-steal-farm` replay improved from the
+  tick-6719 RNG gap to tick-7873 body vertical velocity (7872 matching ticks).
+  Strict human acceptance remains 1431/1431 identical. Full integration gate passed 135/135 (428.01s); the November 5
+  resume build also passed. See VERIFICATION for the fresh gate result.
+- Broader plan acceptance remains open: arbitrary per-split route choices,
+  complete road-link topology, crossing-car half sampling, other-course and
+  human coverage. See [current handoff](agent-handoffs/split-ring-latest-20261104.md).
+
+
+### November 4, 2026: remount rejoins the half on the remount tick (plan 10)
+
+- The traffic-field replay diverged at tick 2279 on one node only: the
+  0x004463e0 shadow at 75067 in the original vs 75033 natively, while the
+  rider position matched. Golden archaeology: the original's node.28 jumps
+  75033 -> 75067 exactly when rider slot 3's crash flag clears 3 -> 0.
+  `Race::crash_recovery` ran `remount_crash_actor` (bike 0x2f4 = 0, body =
+  bike) but not the 0x004067d0 copy-back, and the bike node was not due
+  that tick; the non-live path was masked by `update_halves`.
+  `analysis/decompiled/00404560.c:37` calls `FUN_004067d0` in the remount
+  tail, gated on 0x2f4 == 0. The fix is one line: `live_standings(r)`
+  (the native 0x004067d0 image) in the remount branch, matching the
+  original call order. REA 6.4.0 was requested but its Ghidra headless
+  launch fails persistently in this sandbox; the project export is the
+  evidence (see REVERSE_ENGINEERING.md).
+- New `crash-test` block (live-schedule Race, forced crash state 3 with
+  the pickup animation past 41, bike moved on from the stale body, only
+  the half node due): fails pre-fix (`mirror 17920/32768`), passes
+  post-fix. `format-check` clean.
+- Scenario replays (`oracle-sim-test --driver=human`): traffic-field
+  2279 -> **4381/4381 identical** (full pass); steal-farm 3627 -> 4059;
+  steal-farm-l1 2837 -> 5697; contact/fight/steal otherwise unchanged.
+  No regressions: napa-field-l1/schema2/l5 2400/2400, city parked
+  captures unchanged, strict acceptance 1431/1431. Full Debug ctest:
+  127/135; the 8 failures (first-run-smoke x2, game-race-wiring, net x4,
+  server_health, net_presentation) fail identically on the untouched
+  baseline build (no displays / no TCP bind in this sandbox).
+  See [remount-mirror-20261104](agent-handoffs/remount-mirror-20261104.md).
+- Follow-up (same day): the projected-x draw-test trace stopped with a
+  finding, not a port. `0x00438610` is the only `+0xdc` dispatcher and
+  `0x00444630` writes the tested `+0x44/+0x48/+0x50/+0x54` words per node
+  per frame during the scene build (render-side projection, no sim-side
+  word to port). The slice-reach approximation stands; the faithful port
+  would drive loads from the native scene-build draw decision. Details in
+  REVERSE_ENGINEERING.md; `city-moving.tsv` is a scene capture, not a
+  replay golden.
+
+### November 3, 2026: City pedestrian RNG parity (plan 10)
+
+- The City RNG gap at tick 955 came from one pedestrian, not the AI. A
+  crosser ~10000 Q8 ahead of the parked camera thinks every 20 ticks and
+  draws in `0x00440dd0`. Two fixes in `src/race_pedestrians.cpp`:
+  - `load_pedestrian_looks` now loads a pedestrian's category-2 resources
+    only when its slice is in the frame's drawn reach (one slice behind the
+    ring camera up to camera + 0x1e00, as for static boxes; `0x00438610` →
+    `0x00440680`). Far pedestrians stay unloaded and walk at the unloaded
+    pace 4, as measured in a new original capture.
+  - `pedestrian_road_clear` (`0x00441500`/`0x00449ce0`) skips bikes without
+    a slice and uses a car's `+0x108` motion word, which is 0 for crossing
+    cars, instead of its speed.
+- Results (`police-test`, one RNG anchor): `city-cops-parked-20261026` RNG
+  954 → **4552** (capture end), ring-window riders and cop to 4552, and the
+  native arrest on tick 4552 as the original (now asserted). Two new captures
+  `city-parked-randlog-20261102` and `city-parked-randlog2-20261102` match
+  RNG and riders on all **2400** ticks (954 at the baseline).
+- `oracle/aweman_proxy.c`: `RR_ORACLE_ORDER_RANGE` widens the per-tick order
+  window (default 0x1000 unchanged).
+- Remaining: the projected-x part of the draw test is not ported. Other
+  City levels, moving-camera City races and the other courses have no
+  captures yet. Napa field captures are unchanged (contact 4096, fight-steal
+  896, fight-steal-l5 816, steal-bunch 1399, steal-farm 3627, steal-farm-l1
+  2837, steal-vary 941, traffic-field 2279; the Oct 28 traffic captures stay
+  4381/4381). See [city-rng-20261102](agent-handoffs/city-rng-20261102.md).
+
+### November 2, 2026: joystick codes in the Configure Input table
+
+- Joystick codes in a custom table now drive the race. `src/input.cpp`
+  ports `0x0044f880`: buttons 1..0x20, the hat (`0x21`–`0x24` at exactly
+  0/9000/18000/27000), stick directions `0x25`–`0x28` and pedals
+  `0x29`/`0x2a`, with the `0x00476c04` edges (0x6fff/0x8fff on rows 0, 2
+  and 9, 0x3fff/0xbffd elsewhere). `joystick_state` maps an SDL gamepad onto
+  the JOYINFOEX fields: left stick X/Y, triggers as the rudder R axis (left
+  pedal = left trigger), buttons 1–10 in XInput/winmm order, d-pad as hat.
+  This mapping is a native decision; the original saw whatever winmm
+  reported for the device.
+- The analog drive values are ported. Axis rows 0/2/9 write
+  `DAT_004b7e78`/`DAT_004b7e7c` (`0x0044fa00`); bound keys and buttons reset
+  them to full (`0x0044fa50`, in VK order for keys). While the table holds a
+  joystick code (`0x0044f7c0`), `Race::set_joystick_analog` makes accelerate
+  throttle to `+0x260` minus the cut (`0x0040ad10`) and steering target
+  steer − 0x20 / steer (`0x0040ad30`). Full deflection gives exactly the
+  digital result. Online races stay digital. With such a table the native
+  pad mapping is off, so a button does only its table action.
+- Capture takes joystick codes (`0x0040f6d0`/`0x0040f7a0`, polled once per
+  frame in the menu loop and the pause menu). Turn/Lean follow
+  `0x0040fc70`: the second half comes from the first half's device; hat
+  left, stick left and left pedal fill hat right, stick right and right
+  pedal. Native differences: a pad code counts only when the poll changes
+  to it, so the button that armed the row is not captured (the original's
+  `0x0040fc60` waits for nothing); Android Back cancels like Escape. An
+  armed row is now modal, as the original's capture loop is.
+- Saved settings carry `controls_codes=original`. Files without it predate
+  the November 1 code-space change and are migrated as SDL scancodes, so a
+  legacy 8, 9, 0 or Return capture stays a key. (A file written on November
+  1 with joystick codes and no marker is read the legacy way.)
+- Pause-menu rebinds now reach the running race; the race used to keep its
+  start-of-race copy of the table.
+- Remaining: no original capture with a joystick, so the gamepad mapping and
+  analog feel are unmeasured; table rows 11–18 (`DAT_0049e65c` 0xf/0x13) are
+  not ported; the `DAT_004c5ba3` flag set by a button poll has no known
+  reader; codes above `0x2a` (hand-edited files only) press without an
+  analog write, where the original reads an uninitialised value.
+
+### November 1, 2026: controls key labels and Wingdings arrow keys
+
+- `src/frontend.cpp`/`.hpp`: `key_name` builds the original `0x0040e7b0`
+  slot text for rows 0..8: `"\x1a<Keyboard> "` + key + `" "`, or
+  `"\x1a<Unassigned> "` for an unbound row (strings 280 and 384). Arrow keys
+  print bytes 1..4 as the original's codes `0x93..0x96` do; other keys keep
+  the layout-aware SDL name (plan 33b Task 4).
+- New `draw_arrow_label` ports `0x00420280`: shadowed Futura Bold 24 runs,
+  each followed by the Wingdings 18 arrow (byte − 0x1a) 4 pixels lower and a
+  16-pixel advance. Both the 1x and scaled button paths strip the `0x1a`
+  prefix as `0x0041ff80` does.
+- Remaining: no original capture shows filled labels, so this is a port of
+  the decompiled code, not a measured match.
+
+### November 1, 2026: Configure Input rows, key codes and Turn/Lean pairs
+
+- The row-to-action mapping was wrong. Row i sets control bit `1 << i`
+  (`0x00476c00`): accelerate, brake, left, lean down, nitro, punch, kick,
+  backhand, dismount, right, lean up. The port had rows 3–6 and 9 as right,
+  punch, kick, backhand and nitro, so "Nitro boost" punched and "Swing"
+  kicked. `src/input.cpp` `kActionBits`/`kDefaultKeys` fixed; the native
+  default keys (WASD/arrows, Z/X/C) are unchanged in effect.
+- The custom table held the original keyboard code in the high byte, but the
+  port read the low byte as an SDL scancode. "Keyboard defaults", the first
+  rebind (which loaded the original table) and any saved binding (the
+  loader replaced it with that table) left every key unbound in the race.
+  New `original_key_scancodes`/`original_key_code` map codes through the US
+  VK table `0x00465fe8` (keypad twins included). Capture stores codes;
+  keys the original cannot bind (F1, for example) are ignored as
+  `0x0040fb50` ignores them. Settings written by the old capture (SDL
+  scancode in the low byte) load as their original codes.
+- Turn and Lean take two keys (`0x0040fc70`): Left arrow fills Right itself;
+  otherwise a second, different key goes to row 9/10. `apply_rebind` clears a
+  conflicting row's pair partner (`0x0040fbf0`); new `apply_pair_rebind`.
+- The Keyboard defaults and Joystick defaults rows now run `0x0040fdf0`
+  (before, the handler was not dispatched). The first rebind from native
+  defaults seeds the table with the keys the labels showed.
+- Labels follow `0x0040e7b0` fully: Turn/Lean show both halves
+  ("<Keyboard> ← / →"), joystick codes print Joystick Button n, Hat and
+  stick arrows, and Pedal text.
+- Remaining: the joystick codes in a custom table drive nothing natively (the
+  SDL gamepad layer is the port's joystick path); the original's joystick
+  paired-capture rules are not ported. A legacy SDL capture of 8, 9, 0 or
+  Return (scancodes `0x25`–`0x28`) is read as a joystick code. Dismount
+  (row 8, bit `0x100`) has no reader in the original or the port.
+
+### November 1, 2026: reverb and chorus buses in the race-music renderer
+
+- `src/race_music.cpp`/`.hpp`: `Sf1Synth` now feeds two shared effects
+  buses. Each voice's send is the zone send (gens 15/16) plus the SF2
+  default modulators CC91/CC93 (+20% at 127), recomputed at every control
+  point. Channels power on with reverb depth 40 and chorus 0 (the GS
+  defaults; only KLOWN sends no CC91/93, so only KLOWN depends on this).
+  Reset-all-controllers keeps both depths (RP-015).
+- Effect modes: the game sends AWEMAN32 no effect-mode message
+  (`0x00434500`/`0x00433cf0` only open, load, free and close), so the
+  driver defaults apply: reverb "Hall 2" and chorus "Chorus 3". The
+  EMU8000 runs those as undocumented microcode. The port uses stand-ins
+  sized to the mode names: a Freeverb-tuned Schroeder/Moorer hall (8 damped
+  combs + 4 allpasses per side, scaled to the output rate, ~2.3 s RT60)
+  and a single-tap chorus (23 ms, ±3 ms triangle at 0.4 Hz, 10% feedback,
+  opposite phase per side).
+- The offline render now runs until the reverb tail falls below −96 dB
+  (`Sf1Synth::busy`). The live player's loop and stop paths are unchanged;
+  `reset()` clears the tails.
+- Tests: 7 new synthetic checks (exact dry tail with zero sends, the
+  reverb tail rings and decays, the send is linear in CC91, zone send 16
+  adds like CC91, power-on depth 40, chorus alters the held note without a
+  long tail, busy/reset). The dry voice-rule checks zero CC91/93 first. The
+  corpus renders still pass; SBKGRNG1..5 mono peaks 15–21k, unclipped.
+- Remaining: the effect algorithms, the mode defaults on AWEMAN32 (taken
+  from the AWE driver, not observed on Win95) and the wet levels are
+  unmeasured. Factory-ROM presets still need an owner-supplied ROM dump;
+  an EMU8000 capture (real AWE32 or an emulator with that ROM) is the only
+  route to a measured timbre.
+
+### October 31, 2026 (night): SBK generator semantics in the race-music renderer
+
+- `src/race_music.cpp`/`.hpp`: `read_sf1` now builds a generator table per
+  zone. The instrument global zone gives the defaults and the instrument
+  zone overrides them; preset generators fill only unset ones (key/velocity
+  ranges always copy, as in SF1). Values are converted from SBK units with
+  TiMidity's `sbkconv.c` rules, used as a reading reference and not vendored.
+  `Sf1Zone` carries the converted parameters.
+- Fixed facts (no oracle needed):
+  - `initialAttenuation` is a 0..127 level (127 = full; 101 = −19.8 dB). The
+    old centibel misread put every note 12.7 dB down.
+  - The root comes from `samplePitch` (55) plus its cents, overridden by 58,
+    with 44100 Hz samples. The two bass zones that set only 55 (4281/4782)
+    measure 42.8/47.9 semitones at 44100 Hz, which settles the 22050 Hz
+    question. With 55 = 7200 and no 58 the pitch is unchanged; the other
+    zones that set 55 move an octave from the old 22050/root-60 reading.
+  - Loops are the header plus gens 2/3 (+45/50 coarse) with the SF1 +1/+2
+    correction, clamped to end + 1, and play only when `sampleModes` is 1/3.
+- New `Sf1Synth` (a spec-derived voice engine, shared by the offline
+  `render_race_song` and the live `RaceMusicPlayer`):
+  - SF2 volume envelope (attack linear in amplitude, decay/release linear in
+    dB) and modulation envelope, with key scaling. Unset SBK sustains are
+    silent / zero level, so drum zones with only a decay die away.
+  - Mod and vib triangle LFOs to pitch, Fc and volume. RBJ low-pass from Fc
+    and Q (cB above DC), modulated by the mod envelope and the LFO.
+  - Constant-power pan; exclusive classes (the RRDRUMS hi-hats cut each
+    other); all matching zones sound; 32-voice cap with stealing.
+  - SF2 default modulators for the songs' controllers: velocity, CC7 and
+    CC11 on the concave 960 cB curve, CC10 pan, pitch bend times the RPN 0
+    range, CC1 vibrato, and CC120/121/123.
+  - Events fire at their exact frame in both paths. The live player used to
+    quantise them to 512-frame blocks. The offline render now runs the
+    release tails.
+  - Master gain −12 dB, because attenuation 127 is now full level: the five
+    AWE songs peak at 15–21k without clipping. The EMU8000 mix level is
+    unmeasured.
+  - Maths through `det_math` and a series sine (portability rule A11).
+- Tests: 50 synthetic SF1 checks in `music_test` (general fixture builder,
+  no disc bytes) cover each rule: attenuation, root/samplePitch/44100 Hz
+  pitch, loops/modes, global zones, the merge, unit conversions, envelope
+  stages, filter cut and env sweep, vibrato, tremolo, pan, exclusive class,
+  CC7 and the bend range. The corpus renders still pass.
+- Remaining: the timbre is spec-derived, not measured (Wine has no
+  EMU8000). Reverb/chorus sends (gens 15/16, CC91/93) were parsed but not
+  rendered (superseded November 1: effects buses added). The factory-ROM presets still use the
+  synthesized stand-ins (an owner-supplied ROM dump is needed). The SF2.01
+  velocity-to-Fc default modulator is left out, as SF2.04 does. TiMidity
+  quirks (drum keynote retune, root −60 correction, mod-env sustain tune
+  shift) are not copied.
+
+### October 31, 2026 (evening): system faces, footers and full-frame menus
+
+- System faces. `Face::wingdings` and `Face::courier_new_bold` load from the
+  host (`system_font_paths`: macOS Supplemental, `%WINDIR%\Fonts`,
+  msttcorefonts, Liberation Mono Bold). Without a host Wingdings the game uses
+  Wine's own `wingding.ttf` (wine-11.18, LGPL-2.1, compiled in by
+  `cmake/wine_wingdings.cmake`, licence in every package). New glyph rules
+  from Wine: VDMX sizing (`load_VDMX`), gasp gray ranges and the symbol cmap.
+  `glyphprobe … sys` measured 667/667 glyphs exact in mono and smoothed mode.
+- The menu focus arrow is the original's TextOut of Wingdings 18 `0xe8`
+  (black at +5,+6, yellow at +3,+4). The dashboard gap arrow is DrawText of
+  Wingdings 18 `0xe9`/`0xea` in the offset entry-10 rectangle. The native
+  stand-ins are gone. Standings rows use Courier New Bold 18 (Futura
+  fixed-pitch layout only where the host has neither Courier New Bold nor
+  Liberation Mono Bold).
+- Footers: the y=380 player and price lines use the `0x00420470` box (measured
+  width, dark fill, left-aligned Futura Regular 32 from x+10). The showroom
+  draws its stale course description whole (no separate Length footer). The
+  won screen names the rider with `0x0041c060` ("Cydney Bass"). A bare
+  penalty entry keeps the stale slot. Standings shows the won/lost row strip
+  the original never repaints. Captions of "*" are drawn. Controls key labels
+  are filled by the Controls row handler (`0x0040fd90`), not on entry.
+- Full frame vs the acceptance goldens: characters, restroom, jukebox,
+  controls, thrash, loading, olleys, showroom, panzer, schmooze, bulletin,
+  wrecked, busted, won, lost, penalty, standings and street are pixel-exact
+  (0 pixels). Graphics differs only in the port-only Display row (704);
+  main menu only in Mano-À-Mano, greyed because the test frontend has no
+  network transport (852).
+- Remaining: controls key-label text for arrow keys (Wingdings icons via
+  `0x00420280`) is not ported and has no capture; the built-in Wine Wingdings
+  and the Courier fallbacks are unprobed; Courier standings rows are
+  glyph-exact but have no original capture with rows; AWE/EMU8000 timbre.
+
+### October 31, 2026: exact menu text (FreeType 2.13.3, smoothed GDI glyphs)
+
+- The disc fonts now render through FreeType 2.13.3, the release Wine bundles,
+  built static from the pinned tarball (`cmake/freetype.cmake`, offline
+  `RR_FREETYPE_SOURCE_DIR` for the Flatpak, FTL notice in every package).
+  stb_truetype remains only for the import screen's system fonts.
+- Menu text in the goldens is anti-aliased: the game asks for
+  `DEFAULT_QUALITY`, the oracle prefix has grayscale font smoothing on, and
+  Wine smooths text on the 16-bit menu surface (never on 8-bit DIBs). New
+  `TextSurface::rgb565` renders 17-level glyphs and blends them like Wine's
+  16-bit DIB driver. The race HUD and overlays keep `indexed8` 1-bit glyphs.
+  Probes `tools/glyphprobe.c` (mono and `gray`) and `tools/blendprobe.c`
+  measured: smoothed glyphs 8448/8448, blend 491520/491520, 1-bit glyphs
+  8446/8448 (BADLOC 14 `Í`/`Ú` keep one accent row Wine drops), advances
+  8448/8448.
+- DrawText word wrap follows Wine's `TEXT_WordBreak`: a left-aligned line
+  keeps the space at a soft break, which widens the CALCRECT box. Text is
+  clipped to the DrawText rectangle. The Restroom title is laid out in the
+  unclamped title width while its banner widens to 0xe6 (`0x0041f770`).
+- Race HUD text (8-bit surface) uses the 1-bit model. Clipping to the
+  DrawText rectangle exposed an off-by-one in MiniDash. The speed readout
+  read its rectangle from mini-layout offset 21 (needle data, an empty rect);
+  record 20 is `{DT_RIGHT, 0, 436, 240, 480}`. The `race-cache` RGB hashes
+  were re-recorded because the HUD glyphs changed; all six no-HUD scene
+  hashes are unchanged.
+- Full frame vs goldens: characters, restroom and jukebox now differ only in
+  the focus arrow (119/83/83 pixels); graphics is 99.7% exact (the arrow
+  plus the port-only Display row); loading, Schmooze, wrecked, busted and
+  lost are exact (0 pixels). `frontend-test` pins these as full-frame
+  ceilings.
+- Remaining: the focus arrow is a Wingdings glyph (a system font, not on the
+  disc); screens with the y=380 player/price footers (thrash, bulletin,
+  showroom, panzer) and standings (New Courier, a system font) keep their
+  known layout gaps; AWE/EMU8000 music timbre.
+
+### October 31, 2026: exact menu pictures, dark fills and text colours
+
+- Menu pictures decode with pinned scalar libjpeg-turbo 3.1.4.1
+  (`cmake/jpeg_scalar.cmake`, adopted from the abandoned October 26
+  frontend-acceptance worktree): IFAST DCT plus the original's 5-bit
+  sample-range table. `frontend-test` now compares every named slot of the
+  original's decoded-image cache dumped by the acceptance runs: 226 dumps
+  (20 pictures, including the Postcard/City and Street/Klub composites) are
+  bit-exact. Composition moved to `compose_menu_picture` (`src/rri.cpp`).
+- `darken555` keeps 6-bit green even (the halved 555 value goes through the
+  same display table), and menu text colours are the RGB565 read-backs
+  (`#DEFFF7`, `#A5A2A5`, `#FF6531`, `#E7E384`). Full-frame exact vs goldens:
+  restroom 74% to 96%, jukebox 79% to 98%, graphics 73% to 97%, characters
+  89% to 95%. Pins raised to 0.88-0.95 masked exact.
+- GDI glyphs: `tools/glyphprobe.c` dumps 9856 Wine TextOut glyphs. Wine
+  renders through its bundled FreeType 2.13.3; a FreeType mono-hinted model
+  matches 99.1% of ASCII glyphs with Homebrew 2.14.3 (composites differ). The
+  renderer still uses stb coverage: pinning FreeType 2.13.3 in the build was
+  not done this session (fetching and building it needs owner approval in
+  this environment).
+- Licences: libjpeg-turbo/IJG notices ship in the macOS bundle and APK.
+- Remaining: hinted glyph renderer (FreeType 2.13.3 vendoring), AWE/EMU8000
+  music timbre (envelopes, filter, LFO, pan and effects sends from the SBK
+  generators; factory-ROM presets need an owner-supplied ROM).
 ### October 31, 2026: run-linux.sh and run-windows.bat (build and launch)
 
 - `run-linux.sh [--debug] [ASSETS_DIR] [args]` and `run-windows.bat` /
@@ -2806,3 +3376,151 @@ Evidence and build commands: [FORK_WORK.md](FORK_WORK.md).
 Windows 1.1.0 implementation and installer/upgrade verification: [FORK_WORK.md](FORK_WORK.md#windows-110).
 
 Windows startup-only controller discovery and measured frame-stall fix: [WINDOWS_FRAME_PACING.md](WINDOWS_FRAME_PACING.md).
+
+
+## November 11, 2026 — deterministic parity before multiplayer
+
+Multiplayer work is preserved separately in E:/road-rash and is on hold. The
+native Windows oracle captures only the owner's exact E:/RR installation,
+using its working AWEMAN32.DLL with temporary capture instrumentation and
+verified restoration. Human captures now prove execution of 0x434660's actual
+human-control branch with an invocation counter.
+
+City seed 1 now explicitly reproduces the first countdown tick and checks RNG
+742760408 on both sides before comparing spawn state. Three pedestrian draws
+between factory completion and this post-tick-1 capture are reproduced, not
+skipped or reseeded. Green closure and subsequent tick RNG remain strict.
+
+Recovered/fixed circular AI lookahead, unbuilt traffic links, the original's
+one-Q8 widening adjustment, explicit recycled-object initialization, and LIFO
+car-pool return order (ascending-position teardown traversal). The receipted
+Napa human 2400-tick capture now passes strict acceptance: every field present
+in that capture is accounted for. This is one scenario, not full parity.
+Expanded City pedestrian/crossing-signal comparison matches through tick 513;
+resource eviction at tick 514 remains open. See the current handoff for exact
+evidence and the uncommitted capture/replay implementation details.
+
+A fresh expanded Napa capture now also exposes graphics resource eviction at
+tick 901. That field was absent from the older passing capture; it remains
+an acceptance gap. Full Debug CTest passes (102 executed, 36 explicit skips).
+
+## 2026-11-02 — rr-netd health responder off the blocking path
+
+- `server/health_http.{hpp,cpp}` (`rr::netd::HealthHttp`) replaces the inline
+  `Health` class in `server/main.cpp`. The old one ran on the race event loop
+  and did a blocking `recv` with a 200 ms timeout on each accepted socket, up
+  to 8 per pass, so one stalled `/net/health` client could hold input sealing
+  for 200 ms and eight for 1.6 s. Production was shielded by Nginx buffering
+  the request, but the daemon itself was not.
+- Now every socket is non-blocking. A request may arrive over several polls,
+  partial writes resume on the next pass, a client is closed 2 s after
+  accept, at most 32 sockets wait at once (extra connections are closed) and
+  requests are capped at 2 KiB. `health_json` is built only when a health
+  request needs an answer, instead of on every 2 ms loop pass.
+- Same responses as before (200 for `GET /net/health` and `GET /health`, 404
+  otherwise), plus `Connection: close`. Deploy health checks are unchanged.
+- New test `server_health` (POSIX only; not built for Windows or the web).
+- Remaining: not yet deployed to `agnee`; the next `net-deploy.yml` run
+  carries it.
+
+
+## November 11, 2026 — upstream parity integration
+
+Merged upstream main through 20fb4c0 (23 commits), including dual-road ring
+traversal, City pedestrian RNG, scheduler cadence, remount, crossing-car and
+cop-animation fixes. The fork's modern Windows input, independent direction
+bindings, soundfont MIDI and presentation remain active. Local unfinished
+graphics-lifetime edits were preserved separately, not blindly reapplied.
+See agent-handoffs/upstream-parity-merge-20261111.md for conflict decisions,
+verification and remaining parity work. Multiplayer remains on hold.
+
+## November 11, 2026 — actor lifetimes and initial clocks
+
+After upstream integration, model pedestrian graphics eviction separately
+from retained animation banks, share road bend/rise/heading accumulation with
+traffic, and use measured tick-zero construction for initial controllers and
+pedestrians. Replay audits the first post-countdown RNG state and actual draw
+counts; capture explicitly records the installed counter and construction
+ticks. Full Debug gate passes. Expanded longer captures expose further mixed
+scan-order and crossing-car motion divergences; complete parity remains open.
+See [evidence and next failures](agent-handoffs/actor-lifetimes-clock-20261111.md).
+
+Released [3do-1.1.2](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.2)
+from clean15b46a1. The isolated1.1.1 update preserved600 asset/save/settings/
+soundfont files, and the installed main menu rendered correctly. Public
+installer download checksum verified. Parity remains incomplete as above.
+
+## November12 — full-race tooling and capture input correction
+
+Original runtime measurement confirms joystick mode was enabled, making raw
+right-steer masks depend on a stale zero analog axis. Capture injection now
+reproduces the original keyboard converter's axis side effects for both live
+generated commands and recorded-mask playback. Verified right axis32 and
+left axis0 through the original steering branches. Corrected Hiway driving
+stays within pavement bounds for3000 ticks,2589 on curved slices; this is
+driver validation, not full-track simulation acceptance.
+
+Trace validation streams one frame; indexed native replay bounds decoded
+frame memory while preserving startup/green anchors and validating the
+entire file before replay. New malformed-input and memory/lifetime tests pass.
+Local simulation fixes advance City to1251 and Napa to1259; those differences
+remain open. See [continuation](agent-handoffs/full-track-parity-20261112.md).
+
+
+## November12 resumed gameplay verification
+
+User resumed captures and excluded menu parity and widescreen-only investigations. Five completed Level1 recordings reverified143764 ticks with zero skips/divergences. New Canyon3301 human ticks also match including stored ground; fresh Canyon/Medly ground evaluator queries and City scene/actor components match. Recovered original4547e0 forward-neighbor lane-grid correction fixes four Medly panel mismatches. See [resumed handoff](agent-handoffs/gameplay-resumed-20261112.md) for exact evidence and unresolved gameplay checks. No new release yet.
+
+
+## November13 wreck and physical-road parity
+
+The unchanged Medly seed1 destroyed-bike recording now matches all13271ticks,
+including registered outcome5 and the final camera pullback. This is a wreck
+acceptance case, not a completed race. Changes recover actual result timing,
+car world-velocity contact, fatal fall thresholds, mutable scenery box memory,
+physical roadway masks, retained graph-node tracker bounds and cached actor
+road-half identity across unequal-arm merges. Billboard caches now retain the
+physical secondary half beyond a logical merge. Crash recovery uses the
+original signed ABS distance instead of ending early when the body is ahead.
+
+Focused race, traffic, crash, animation and track-ring checks pass as recorded
+in [the session handoff](agent-handoffs/gameplay-results-20261113.md). Fresh full
+native, five completed races, police and long Level5 regression gates are in
+progress; no new release or broader all-level parity is claimed yet. General
+reverse-link and repeated split-choice coverage remains to be validated.
+
+
+The first new full gate reverified all five finished races and the94929tick
+Level5 arrest recording. Native152/153passed; the sole failure found an
+allocation introduced by tracker-map copying. Tracker references now share
+copy-on-write storage, and the allocation/snapshot restoration test passes.
+The failed evidence is preserved. Clean-revision final gates and release1.1.20
+packaging are the remaining work for this batch.
+
+
+## Required original component coverage (November13)
+
+The broader final audit found three component tests returning success on absent
+fixtures and related silent optional comparisons. Captured real component data
+from the workingE:/RR installation; actor,vehicle,crash,police and building
+comparisons now run and pass. Missing fixtures with supplied assets fail.
+Earlier bare CTest totals did not prove this coverage. Details and supersession
+are in [component handoff](agent-handoffs/component-fixtures-20261113.md).
+The gameplay replay binary is unchanged; release1.1.20 publication waits for
+the corrected final gate and rebuilt installer provenance.
+
+
+## Release 1.1.20 completed
+
+Published [1.1.20](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.20)
+from clean code revision `14c861562476192456f4f0c4afdaa40f97559e56`.
+All five completed level 1 race recordings match 143,764 ticks; the separate Medly
+wreck matches 13,271 ticks, and the Highway level 5 recording matches 94,929 ticks
+through arrest. The final test/tooling changes leave that gameplay executable
+byte-identical. Corrected full native gate:153 pass, 0 failures, 0 CTest skips, 454.31s.
+All ten police cases and seven formerly bypassed component comparisons execute.
+
+Installer19-to20 update, without new asset arguments, preserves 600 files and
+launches 120 frames. Public installer download checksum verified. No original
+game process, capture resource or release task remains active. Evidence and
+superseded audit details are in VERIFICATION.md and the component handoff.

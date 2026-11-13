@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "terrain.hpp"
 #include "course.hpp"
 #include "golden.hpp"
@@ -114,11 +115,11 @@ int main(int argc, char** argv) {
             }
         }
     }
-    const auto golden_path = rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto golden_path = rr::golden::raster_fixture();
     if (std::filesystem::exists(golden_path)) {
         try {
             const auto golden = rr::golden::load(golden_path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.empty())
                 throw std::runtime_error("Wrong terrain oracle");
             const auto& fields = golden.frames.front();
@@ -177,7 +178,7 @@ int main(int argc, char** argv) {
             throw std::runtime_error("Missing requested seeded terrain oracle: " + seeded_path);
         if (available) {
             seeded = rr::golden::load(seeded_path);
-            if (seeded.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(seeded.exe) ||
                 seeded.frames.size() != 1)
                 throw std::runtime_error("Wrong seeded terrain oracle");
             const auto schema = seeded.frames.front().find("terrain.seeded.schema");
@@ -238,7 +239,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
         check(false, e.what());
     }
-    const auto dir = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH/DATA/COURSES";
+    const auto dir = std::filesystem::path(rr::test::assets_root()) / "DATA/COURSES";
     if (std::filesystem::exists(dir)) {
         size_t sections = 0;
         try {

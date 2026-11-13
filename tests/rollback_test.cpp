@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 34 Task 3 Step 3: rollback gives the same race as a straight run of
 // the sealed inputs. Needs the disc (77 without it). A sealed timeline with
 // late (repeat-last) substitutions and an AI hand-over is delivered to a
@@ -121,7 +122,7 @@ Result rolled(const rr::Assets& assets, const std::vector<uint8_t>& exe, int hum
 
 int main() {
     rr::test::Checks check;
-    const std::string root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string root = rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;

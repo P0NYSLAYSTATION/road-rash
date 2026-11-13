@@ -38,6 +38,25 @@ python tools/oracle_capture.py capture windows-napa-human-600 --install E:/RR --
 python tools/verify_sim.py --mode acceptance --binary build/debug/oracle-sim-test.exe --assets E:/RR --fixture analysis/oracle/windows-napa-human-600.tsv
 ```
 
+The receipted `analysis/oracle/napa-human-2400.tsv` capture now passes strict
+acceptance: 2400 ticks identical, including RNG and all captured fields. The
+original helper records actual human-control branch invocations at 0x434660;
+legacy captures without that proof remain ineligible for human acceptance.
+
+Both original and native initialize the MSVC RNG from the capture seed. Field
+replay executes tick 1 before auditing its POST-step RNG, then verifies the
+green PRE-step state and free-runs. City seed 1 has first-frame state
+742760408 on both sides; three countdown pedestrian draws account for the
+difference from factory completion. Acceptance never reanchors each tick.
+
+Expanded City pedestrian and signal comparisons currently stop at tick 514,
+where original graphics resource eviction remains unported. The old file
+named windows-napa-startup was actually City; its spawn divergence is fixed
+by circular AI lookahead. See `docs/agent-handoffs/windows-parity-first-20261111.md`
+and `docs/VERIFICATION.md` for current evidence and limitations.
+
+Historical early capture status (superseded by the evidence above):
+
 Completed native captures include 600 human-control Napa ticks and a fresh
 120-tick restoration test. The latter's receipt explicitly records phase
 `restored`, complete contiguous ticks and the compatible executable hash.

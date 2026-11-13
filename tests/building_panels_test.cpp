@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "building_panels.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -20,6 +21,11 @@ int main(int argc, char** argv) {
         if (nodes.size() != 2 || !nodes[0].flat_index || nodes[1].texture != &texture)
             throw std::runtime_error("Building facade/roof order");
         std::ifstream file(argc > 1 ? argv[1] : RR_SOURCE_DIR "/analysis/oracle/napa-building-fixtures.tsv");
+        if (!file) {
+            rr::Assets assets(rr::test::assets_root());
+            if (!assets.exists("ROADRASH.EXE")) return 77;
+            throw std::runtime_error("Required original building panel fixture missing");
+        }
         if (file) {
             std::map<std::string, int32_t> values;
             std::string line, key;
@@ -67,7 +73,7 @@ int main(int argc, char** argv) {
             std::cout << values.at("building.count") << " original building cases, " << count
                       << " nodes match\n";
             const auto depths =
-                rr::read_depth_table(rr::Assets(RR_SOURCE_DIR "/../cdrom/ROADRASH").read("ROADRASH.EXE"));
+                rr::read_depth_table(rr::Assets(rr::test::assets_root()).read("ROADRASH.EXE"));
             size_t shoulders = 0;
             for (int c = 0; c < values.at("building.count"); ++c) {
                 const std::string prefix = "building.shoulder." + std::to_string(c) + ".";

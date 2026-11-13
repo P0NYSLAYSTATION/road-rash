@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "race.hpp"
 #include <cstdlib>
 #include "track_ring.hpp"
@@ -76,6 +77,93 @@ int main() {
     check(race.position() == 0x3200, "start on the grid at sample 50 (0x00464218 slot 0)");
     check(race.lateral() == 16384 >> 8, "grid slot 0 lateral offset from the imported EXE table");
 
+    // Result timing and qualification are separate from a rider's crossing.
+    // Original416010 qualifies three offline places, one network place.
+    {
+        std::vector<rr::Opponent> opponents;
+        for (int slot = 1; slot <= 3; ++slot)
+            opponents.push_back({spec, 90, 65, 65, 1, slot});
+        rr::Race results(straight(200), straight(200), t, spec, 90, opponents);
+        auto& player = results.riders()[0];
+        player.bike.i32(0x2f0) = 10000;
+        player.finished = true;
+        player.finish_tick = 20;
+        results.riders()[1].finished = true;
+        results.riders()[1].finish_tick = 19;
+        check(results.place(0) == 2 && results.human_outcome(0).code == 3,
+              "rider-level finish reports second place with network semantics");
+        check(results.race_outcome() == 1, "finish line crossing keeps result pending while braking");
+        player.finish_controls_ended = true;
+        auto network_result = results;
+        network_result.set_net(true);
+        results.register_result(player, 0x7f);
+        check(results.race_outcome() == 2, "offline second place qualifies after the result handoff");
+        results.register_result(player, 5);
+        check(results.race_outcome() == 2, "a later wreck cannot overwrite a latched finish result");
+        network_result.register_result(network_result.riders()[0], 0x7f);
+        check(network_result.race_outcome() == 3, "network second place does not win");
+        player.result_code = 1; // independent fourth-place registration fixture
+        for (int i = 2; i <= 3; ++i) {
+            results.riders()[size_t(i)].finished = true;
+            results.riders()[size_t(i)].finish_tick = 20 - i;
+        }
+        results.register_result(player, 0x7f);
+        check(results.race_outcome() == 3, "offline fourth place finishes without qualifying");
+        auto wreck = std::make_unique<rr::Race>(straight(200), straight(200), t, spec, 90);
+        wreck->register_result(wreck->riders()[0], 5);
+        wreck->step(0);
+        check(wreck->camera_position() + 0x100 + 3 == uint32_t(wreck->riders()[0].half_mirror.position),
+              "registered wreck starts camera pullback on the result tick");
+    }
+
+    // The lookahead ring can choose a different initial half from the
+    // player's lateral crossing. 0x00439390 calls 0x004540e0 even when
+    // the player stays on half 0, committing both live walkers.
+    {
+        rr::Course course;
+        course.root = 20;
+        rr::CourseSection trunk, branch;
+        trunk.samples.resize(60, rr::PathSample{0, 0, 500, 500, 512, 512});
+        branch.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+        course.sections = {trunk, branch, branch, branch};
+        course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 160, 0, 60});
+        course.nodes.emplace(160, rr::CourseNode{160, 3});
+        course.nodes.emplace(40, rr::CourseNode{40, 1, 60, 80, 20, 0, 1});
+        course.nodes.emplace(60, rr::CourseNode{60, 0, 100, 40, 1, 300});
+        course.nodes.emplace(80, rr::CourseNode{80, 0, 100, 40, 2, 300});
+        course.nodes.emplace(100, rr::CourseNode{100, 2, 60, 80, 120, 0});
+        course.nodes.emplace(120, rr::CourseNode{120, 0, 140, 100, 3, 300});
+        course.nodes.emplace(140, rr::CourseNode{140, 4});
+        auto ring = std::make_unique<rr::TrackRing>(course, 0);
+        rr::Race crossing(rr::make_route(course, false), rr::make_route(course, true), t, spec, 90);
+        crossing.set_track_ring(ring.get());
+        check(ring->diagnostic_state().front_active == 1, "lookahead starts on the original primary half");
+        for (int i = 0; i < 1200 && crossing.position() < 60 * 256; ++i)
+            crossing.step(rr::control_accelerate);
+        check(crossing.position() >= 60 * 256 && crossing.riders()[0].route == 0 &&
+                  ring->diagnostic_state().front.node == 60,
+              "player staying on half zero commits the lookahead ring to that branch");
+
+        rr::AnimationFrame billboard;
+        crossing.set_static_frames([&](uint32_t, uint32_t, uint8_t, bool) { return &billboard; });
+        rr::RingStatics secondary;
+        secondary.physical_half = 1;
+        secondary.dual = true;
+        secondary.billboards = 1;
+        secondary.billboard[0] = {1, 70, 420};
+        crossing.ring_statics(365, 2, 299, secondary);
+        rr::RingStatics common;
+        common.physical_half = 0;
+        crossing.ring_statics(365, 3, 5, common);
+        rr::Rider retained;
+        retained.route = 1;
+        retained.sample = 365;
+        retained.slice_half = 1;
+        check(crossing.static_slice_state(retained).billboards == 1 &&
+                  crossing.static_slice_state(0, 365, uint8_t(0)).billboards == 0,
+              "common rebuild preserves cached secondary billboard beyond the logical merge");
+    }
+
     uint32_t last = race.position();
     bool monotonic = true;
     for (int i = 0; i < 600; ++i) {
@@ -107,6 +195,37 @@ int main() {
         s.step(rr::control_accelerate);
     }
     check(l.lateral() < s.lateral(), "steering left decreases lateral position");
+
+    // Joystick analog (0x0040ad30 / 0x0040ad10): full deflection (steer 0,
+    // throttle cut 0) matches the digital path; a half stick steers less and a
+    // throttle cut holds speed down.
+    {
+        rr::Race dig(straight(2000), straight(2000), t, spec, 90),
+            full(straight(2000), straight(2000), t, spec, 90),
+            half(straight(2000), straight(2000), t, spec, 90);
+        full.set_joystick_analog(true, 0, 0);
+        half.set_joystick_analog(true, 0, 16);
+        for (int i = 0; i < 300; ++i) {
+            dig.step(rr::control_accelerate);
+            full.step(rr::control_accelerate);
+            half.step(rr::control_accelerate);
+        }
+        for (int i = 0; i < 90; ++i) {
+            dig.step(rr::control_accelerate | rr::control_left);
+            full.step(rr::control_accelerate | rr::control_left);
+            half.step(rr::control_accelerate | rr::control_left);
+        }
+        check(full.bike().m == dig.bike().m, "full analog deflection equals digital");
+        check(half.lateral() > dig.lateral(), "half stick steers less");
+        rr::Race cut(straight(2000), straight(2000), t, spec, 90),
+            open(straight(2000), straight(2000), t, spec, 90);
+        cut.set_joystick_analog(true, cut.bike().i32(0x260) / 2, 0);
+        for (int i = 0; i < 300; ++i) {
+            cut.step(rr::control_accelerate);
+            open.step(rr::control_accelerate);
+        }
+        check(cut.bike().i32(0xec) < open.bike().i32(0xec), "throttle cut slows the bike");
+    }
 
     // A curve pushes the rider toward its outside (0x004395e0 adds -bend*distance to lateral velocity).
     rr::Race curve(straight(2000, 20), straight(2000, 20), t, spec, 90),
@@ -143,6 +262,47 @@ int main() {
         (void)road;
     }
     // AI riders cross the same line: the field orders by finish tick.
+    {
+        rr::Race live_finish(straight(2000), straight(2000), t, spec, 90);
+        live_finish.set_live_schedule(true);
+        const int32_t line = 100 * 256;
+        live_finish.set_finish_q8(line);
+        auto& rider = live_finish.riders()[0];
+        rider.bike.i32(0x1c) = line + 60;
+        rider.sample = rider.previous_sample = 100;
+        rider.half_mirror.position = line + 60;
+        rider.half_mirror.sample = 100;
+        rider.sched_next = 100;
+        rider.half_sched_next = 1;
+        live_finish.countdown_step();
+        check(rider.finished && rider.finish_tick == 1 && rider.bike.i32(0x1c) == line + 60,
+              "live half latches the overshot finish without a bike move or position clamp");
+        check((rider.half_object.u8(0xc0) & 0x10) && (rider.bike.u8(0xc0) & 0x10),
+              "finish latch marks both scheduled objects");
+        live_finish.step(0);
+        check(live_finish.ticks() == 2,
+              "live scheduler continues through the result delay when every rider has finished");
+    }
+    {
+        rr::Opponent opponent{test_spec(), 90, 0, 0, 0, 1};
+        auto second = opponent;
+        second.slot = 2;
+        rr::Race stopped(straight(2000), straight(2000), t, spec, 90, {opponent, second});
+        for (size_t i = 1; i < stopped.riders().size(); ++i) {
+            auto& r = stopped.riders()[i];
+            r.finished = true;
+            r.bike.u8(0xc0) |= 0x10;
+            r.bike.i32(0x1c) = 100 * 256 + 128;
+            r.bike.i32(0x174) = 7680;
+        }
+        stopped.riders()[1].bike.i32(0x28) = 0;
+        stopped.riders()[2].bike.i32(0x28) = 8192;
+        stopped.step(0);
+        check(stopped.riders()[1].bike.i32(0x28) != 0 || stopped.riders()[2].bike.i32(0x28) != 8192 ||
+                  stopped.riders()[1].bike.i32(0x1c) != 100 * 256 + 128 ||
+                  stopped.riders()[2].bike.i32(0x1c) != 100 * 256 + 128,
+              "finished bikes retain flag-driven collision separation");
+    }
     {
         rr::Opponent slowf{test_spec(), 90, 0, 0, 0, 1};
         rr::Race ff(straight(2000), straight(2000), t, spec, 90, {slowf});
@@ -688,7 +848,8 @@ int main() {
     // 0x00437750 type3+: marking selectors and timing belong to the half;
     // repeated contact with the same sample does not restart the animation.
     for (int type : {3, 4, 5})
-        for (int speed : {1000, 4000}) {
+        for (int speed : {1000, 4000})
+          for (bool physical : {false, true}) {
             rr::Race mark(straight(4000), straight(4000), t, spec, 90);
             auto& rider = mark.riders()[0];
             auto& bike = rider.bike;
@@ -707,7 +868,11 @@ int main() {
             slice.billboards = 1;
             slice.billboard[0] = {uint8_t(type), 128, 64};
             const auto& rs = mark.route()[rider.sample];
-            mark.ring_statics(int32_t(rider.sample), rs.section, rs.local, slice);
+            //A physical walker may enter a section before the flattened
+            //route does. Its marking must still collide in the live slot.
+            if (physical) slice.physical_half = 0;
+            mark.ring_statics(int32_t(rider.sample), rs.section + unsigned(physical),
+                              rs.local + unsigned(physical), slice);
             plain.step(0);
             mark.step(0);
             check(bike.i32(0x298) == (type - 2) * 60, "marking type sets its traction timer");
@@ -1001,7 +1166,7 @@ int main() {
     }
 
     // Original field from the executable (skips without the disc).
-    const std::string game = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string game = rr::test::assets_root();
     if (std::filesystem::exists(game + "/ROADRASH.EXE")) {
         rr::Assets assets(game);
         const auto exe = assets.read("ROADRASH.EXE");
@@ -1220,6 +1385,62 @@ int main() {
               "half object built from its table");
     }
 
+    {
+        //A prior sample crossing leaves +13c behind, but every mover copies
+        //its current slice to +40. A same-slice wall hit must not treat the
+        //older accumulator slice's absent facade as a new angled obstacle.
+        auto road = straight(1000);
+        for (size_t i = 0; i < road.size(); ++i) road[i].local = uint32_t(i);
+        rr::Race race(road, road, rr::PhysicsTables::synthetic(), test_spec(), 90);
+        std::array<rr::TerrainSlice, 2> terrain{};
+        for (auto& t : terrain) t.type = 0;
+        terrain[0].selectors = {255, 255};
+        terrain[1].selectors = {1, 1};
+        race.set_terrain_source([&](const rr::RouteSample& s) -> const rr::TerrainSlice& {
+            return terrain[s.local < 50 ? 0 : 1];
+        });
+        auto& r = race.riders()[0];
+        auto& b = r.bike;
+        r.sample = 50;
+        r.previous_sample = 49;
+        b.i32(0x1c) = 50 * 256 + 64;
+        b.i32(0x28) = -730 * 256;
+        b.i32(0xec) = 8000;
+        b.i32(0x160) = 74;
+        b.i32(0x18) = 1;
+        race.step(0);
+        check(b.i32(0xec) > 2500 && b.i32(0x2f4) == 0,
+              "wall response must use this mover's previous slice, not an older swept-motion slice");
+    }
+    // 0043a40b compares the unscaled height against dt*17920. The
+    // type-1 variant registers a wreck immediately; ordinary ground
+    // starts reason6 without destroying a healthy bike.
+    for (int ground_type : {0, 1}) {
+        for (int height : {17919, 17920}) {
+            auto road = straight(1000);
+            rr::Race fall(road, road, rr::PhysicsTables::synthetic(), test_spec(), 90);
+            rr::TerrainSlice terrain{};
+            terrain.type = uint8_t(ground_type);
+            fall.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+            auto& rider = fall.riders()[0];
+            auto& body = rider.bike;
+            body.i32(0x28) = body.i32(0x3c) = 0;
+            body.i32(0x20) = body.i32(0x34) = 0;
+            body.i32(0xf4) = height;
+            body.i32(0x11c) = 0;
+            body.i32(0x160) = 0;
+            body.i32(0x18) = 1;
+            body.i32(0xc4) = 4;
+            body.i32(0x2f0) = 1000;
+            fall.step(0);
+            const bool impact = height == 17920;
+            check((body.i32(0x2f4) != 0) == impact, "fall crash uses the original unscaled threshold");
+            check(fall.race_outcome() == (impact && ground_type == 1 ? 5 : 1),
+                  "only lethal ground registers a wreck at the fall threshold");
+            check((body.i32(0x2f0) == 0) == (impact && ground_type == 1),
+                  "ordinary high fall preserves condition; lethal ground destroys the bike");
+        }
+    }
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;
 }

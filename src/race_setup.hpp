@@ -69,13 +69,13 @@ struct RaceConfig {
     bool metric = false;
     bool solo = false;                      // freeze opponents + scheduler actors (oracle)
     bool live_schedule = true;              // live rider scheduler 0x00438170 (Race::set_live_schedule)
-    int pedestrian_setup_tick = 2;          // Race::set_pedestrian_setup_tick
+    int pedestrian_setup_tick = 0;          // original race construction precedes tick 1
     int32_t road_base_q8 = 0;               // Race ctor anchor (game 0; replay measured)
     bool track_ring = true;                 // ring-driven DZHR pedestrians (0x004552e0)
     bool optional_scene = false;            // plan 26 Task 3: game fallback keeps a null scene
     bool optional_traffic = false;          // finding 2 (2026-10-13): bad .CAR keeps null vehicles
     std::optional<uint32_t> ring_rng_state; // RNG state loaded just before ring setup
-    uint32_t ring_setup_tick = 1;           // TrafficSystem::set_setup_tick
+    uint32_t ring_setup_tick = 0;           // original initial controller construction tick
     // +0x1bc level speeds of rider rows 9..14 (Career::spare_levels, jittered at launch by
     // 0x004078f0 from the time-seeded stream); unset keeps personality 0's unjittered words.
     std::optional<std::array<std::array<int32_t, 5>, 6>> spare_levels;

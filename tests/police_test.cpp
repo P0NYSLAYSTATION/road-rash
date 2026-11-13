@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "police.hpp"
 #include "assets.hpp"
 #include "career.hpp"
@@ -15,7 +16,7 @@
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
-int main() {
+int main(int argc, char** argv) {
     try {
         rr::PoliceArrestInput in;
         in.found_cop = true;
@@ -87,10 +88,10 @@ int main() {
                     !rr::police_spawn_due(4096, 0, 0, true) && !rr::police_spawn_due(4096, 1, 0, false) &&
                     !rr::police_spawn_due(4096, 0, 0x10, false),
                 "Spawn boundaries");
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Police threshold tests passed; imported corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto config = rr::read_police_config(assets.read("ROADRASH.EXE"));
         require(config.bikes[0] == 4 && config.stats[3] == 171 && config.stats[12] == 6 &&
@@ -106,7 +107,34 @@ int main() {
                                 pursuit.personality[2 + size_t(personality) * 3],
                             "Target/current pursuit relationship");
                 }
-        std::ifstream file(RR_SOURCE_DIR "/analysis/oracle/napa-police-spawn.tsv");
+        {
+            const auto exe = assets.read("ROADRASH.EXE");
+            const rr::ActorAnimationLibrary library(exe, assets.read("DATA/GLOBAL.RSC"));
+            const rr::PoliceSpawnInput input;
+            const auto actor = rr::make_police_actor(config, rr::read_physics_tables(exe),
+                rr::read_bike_specs(assets.read("DATA/BIKESPEC.RSC")), library, input);
+            auto previous = actor;
+            previous.bike.i32(0x108) = 135;
+            previous.bike.i32(0x10c) = -38;
+            previous.bike.i32(0xec) = 12345;
+            previous.bike.i32(0x2f4) = 2;
+            previous.rider.i32(0x10c) = -99;
+            previous.rider.i32(0x1e8) = 0xffc0;
+            previous.rider.i32(0x1ec) = 123;
+            auto recycled_input = input;
+            recycled_input.previous_bike = &previous.bike;
+            recycled_input.previous_rider = &previous.rider;
+            const auto recycled = rr::make_police_actor(config, rr::read_physics_tables(exe),
+                rr::read_bike_specs(assets.read("DATA/BIKESPEC.RSC")), library, recycled_input);
+            require(recycled.bike.i32(0x108) == 135 && recycled.bike.i32(0x10c) == -38 &&
+                      recycled.rider.i32(0x10c) == -99 && recycled.bike.i32(0xec) == 0,
+                  "recycled police objects retain projected velocity while resetting scalar speed");
+            require(recycled.bike.i32(0x2f4) == 0 && recycled.rider.i32(0x1e8) == 192 &&
+                        recycled.rider.i32(0x1ec) == 0,
+                    "police constructor clears crash and attack state without clearing the retained byte");
+        }
+        std::ifstream file(argc > 1 ? argv[1] : RR_SOURCE_DIR "/analysis/oracle/napa-police-spawn.tsv");
+        if (!file) throw std::runtime_error("Required original police spawn fixture missing");
         if (file) {
             std::map<std::string, int64_t> values;
             std::string line, key;
@@ -165,7 +193,8 @@ int main() {
             }
             std::cout << "Original opening Napa police pursuit and stats match\n";
         }
-        std::ifstream arrest_file(RR_SOURCE_DIR "/analysis/oracle/napa-police-arrest.tsv");
+        std::ifstream arrest_file(argc > 2 ? argv[2] : RR_SOURCE_DIR "/analysis/oracle/napa-police-arrest.tsv");
+        if (!arrest_file) throw std::runtime_error("Required original arrest fixture missing");
         if (arrest_file) {
             std::map<std::string, int64_t> values;
             std::string line, key;
@@ -250,6 +279,47 @@ int main() {
             require(pursued, "Cop pursues the stopped player (state 4, target the player)");
             require(sirens > 0, "Cop posts siren events with its position");
         }
+        {
+            // Sentry ROAD-RASH-E: a crashed cop drew rider-bank crash frames
+            // against the 30 cop view groups and threw vector::at. 0x00405990
+            // gives the cop bike and half the cop table (0x00446060, param_5
+            // 2), so every crash frame must select within the cop bank.
+            const auto exe = assets.read("ROADRASH.EXE");
+            rr::RaceConfig config;
+            config.course = "NAPA";
+            config.level = 3;
+            config.character = 1;
+            config.bike_from_table = true;
+            config.career = false;
+            rr::RaceSetup setup = rr::make_race_setup(assets, exe, config);
+            auto& race = *setup.instance.race;
+            const rr::ActorAnimationLibrary library(exe, assets.read("DATA/GLOBAL.RSC"));
+            while (race.cop_index() < 0 && race.ticks() < 4200) race.step(0);
+            require(race.cop_index() > 0, "Cop spawns for the crash check");
+            const size_t index = size_t(race.cop_index());
+            auto& cop_bike = const_cast<rr::Bike&>(race.riders()[index].bike);
+            cop_bike.i32(0xec) = 6000;
+            cop_bike.i32(0x2f4) = 1;
+            const auto check = [&](const rr::ActorAnimationState& state) {
+                if (!state.selected) return;
+                const auto& s = *state.selected;
+                const auto& sequence = library.playback[1].at(size_t(s[0]));
+                require(bool(sequence), "Cop crash animation code lies in the cop bank");
+                for (int32_t yaw : {-0x7f0000, -0x200000, 0, 0x200000, 0x7f0000})
+                    (void)rr::select_actor_view(sequence->at(size_t(s[1])), library.views[1], yaw, 0);
+            };
+            int crashed_ticks = 0;
+            for (int t = 0; t < 1500 && race.cop_index() == int(index); ++t) {
+                race.step(0);
+                const auto& cop = race.riders()[index];
+                if (!cop.crash_active) continue;
+                ++crashed_ticks;
+                check(cop.crash_actor.animation);
+                check(cop.crash_bike_animation);
+            }
+            require(crashed_ticks > 0, "Forced cop crash runs the crash animations");
+            std::cout << "cop crash animations stay in the cop bank for " << crashed_ticks << " ticks\n";
+        }
         struct CopCapture {
             const char* course;
             const char* name;
@@ -281,19 +351,26 @@ int main() {
         //   single RNG-state gap at 4716 and full field/cop parity to 5030.
         //   Foot runs arrest on foot (4616 and 4544) with full RNG/field/cop
         //   parity to tick 4700.
-        // - CITY (20261026): RNG matches to tick 954, opponents and cop match
-        //   on every tick to the 4551 end; the original arrests at 4552
-        //   (outcome 4, measured) but no arrest tick is asserted while City
-        //   AI RNG stays open past 954.
+        // - CITY (20261026): RNG, the dumped (ring-window) opponents and the cop
+        //   match on every tick to the 4552 end, and the arrest falls on 4552
+        //   as in the original (outcome 4). The 20261102 RANDLOG run matches
+        //   RNG and opponents on all 2400 ticks. Both depend on far pedestrians
+        //   staying unloaded (0x00440680 loads on draw) and on the road-clear
+        //   scan's slice and +0x108 rules (0x00441500/0x00449ce0).
         //   See docs/VERIFICATION.md for measured spans and capture provenance.
-        // - CITY: to 234; tick 235 draws in the pedestrian think (0x004410b5), and rider
-        //   row 11 differs from tick 148 (City AI not at parity). The cop matches to the end.
+        if (std::getenv("RR_TEST_STRICT_POLICE")) {
+            std::cout << "Original police parity is required by the oracle-police-* strict replay suite\n";
+        } else {
         for (const CopCapture& scenario :
              {CopCapture{"NAPA", "napa-cops-parked-20261026", 4730, 0, 4730, 4552, 4730, 4730},
-              CopCapture{"CITY", "city-cops-parked-20261026", 4551, 0, 4551, 0, 954, 4551},
+              CopCapture{"CITY", "city-cops-parked-20261026", 4552, 0, 4552, 4552, 4552, 4552},
               CopCapture{"NAPA", "napa-cops-crashed-20261026", 5030, 4400, 5030, -1, 4715, 5030},
               CopCapture{"NAPA", "napa-cops-foot-20261026", 4700, 4460, 4700, 4616, 4700, 4700},
               CopCapture{"NAPA", "napa-cops-foot2-20261026", 4700, 4460, 4700, 4544, 4700, 4700},
+              // City parked again with a 0x3000 ORDER window, the second also with RANDLOG
+              // (no cop: end 2400).
+              CopCapture{"CITY", "city-parked-randlog-20261102", 0, 0, 2400, -1, 2400, 2400},
+              CopCapture{"CITY", "city-parked-randlog2-20261102", 0, 0, 2400, -1, 2400, 2400},
               // Two launches one second apart (no cop: end 1200): rows 9..14 differ, so
               // the overtake draws fall on different ticks (245.. vs 403..).
               CopCapture{"NAPA", "napa-randlog1-20261018", 0, 0, 1200, -1, 1200, 1200},
@@ -460,6 +537,8 @@ int main() {
             } else
                 std::cout << "skipped: " << scenario.name << " fixture absent\n";
         }
+        }
+
         {
             // Arrest while the rider walks (crash state 2, 0x00407f30): the half is the
             // walking body, so the cop must come within 512 of it.

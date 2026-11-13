@@ -1,9 +1,12 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "course.hpp"
 #include "exe_tables.hpp"
 #include "golden.hpp"
 #include "race_setup.hpp" // complete rr::RaceBounds (defined by the race-setup owner)
 #include <filesystem>
+#include <cstdlib>
+#include <algorithm>
 #include <iostream>
 #include <set>
 #include <string>
@@ -16,10 +19,82 @@ int main() {
             std::cerr << message << '\n';
         }
     };
-    rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+    //00444553: independent branches of the original secondary-road draw gate.
+    check(rr::secondary_road_visible(5, -1, false, -1, false, 1001, 1000),
+          "a common camera road retains both approaching split roads");
+    check(rr::secondary_road_visible(5, 1, true, 1, false, 1000, 1000) &&
+              !rr::secondary_road_visible(5, 1, true, 1, false, 1001, 1000),
+          "dual-camera separation culling is strict at the margin");
+    check(!rr::secondary_road_visible(5, 1, true, 0, true, 0, 1000) &&
+              rr::secondary_road_visible(6, 0, true, -1, true, 0, 1000) &&
+              !rr::secondary_road_visible(6, -1, true, 1, true, 0, 1000),
+          "merge events use the current signed countdown; other events use the camera countdown");
+
+    // Original 0x00453030 enters node.next as half0 and node.previous
+    // as half1. Whichever route is selected, its other slice must refer
+    // to the opposite section and carry that section's events.
+    {
+        rr::Course c;
+        c.root = 20;
+        rr::CourseSection trunk, left, right;
+        trunk.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+        left.samples.resize(300, rr::PathSample{1, 0, 250, 500, 256, 512});
+        right.samples.resize(325, rr::PathSample{3, 0, 500, 250, 512, 256});
+        right.samples[29].event_type = 3;
+        right.samples[29].zone_end = true;
+        right.samples[29].event_start = 10;
+        right.samples[29].event_end = 29;
+        c.sections = {trunk, left, right, trunk};
+        c.sections[2].forward_start = right.samples[0];
+        c.sections[2].forward_start->event_type = 5;
+        c.nodes.emplace(20, rr::CourseNode{20, 0, 40, 160, 0, 300});
+        c.nodes.emplace(40, rr::CourseNode{40, 1, 60, 80, 20});
+        c.nodes.emplace(60, rr::CourseNode{60, 0, 100, 40, 1, 300});
+        c.nodes.emplace(80, rr::CourseNode{80, 0, 100, 40, 2, 325});
+        c.nodes.emplace(100, rr::CourseNode{100, 2, 60, 80, 120});
+        c.nodes.emplace(120, rr::CourseNode{120, 0, 140, 100, 3, 300});
+        c.nodes.emplace(140, rr::CourseNode{140, 4});
+        c.nodes.emplace(160, rr::CourseNode{160, 3});
+        rr::mark_course_branches(c);
+        check(rr::shared_course_branch(c, 20, 60) && rr::shared_course_branch(c, 20, 80) &&
+                  rr::shared_course_branch(c, 60, 120),
+              "common roads share pace bands with either branch");
+        check(!rr::shared_course_branch(c, 60, 80) && rr::shared_course_branch(c, 60, 60),
+              "the parked pace band excludes opposite arms of the same split");
+        c.sections[3].events.push_back({100, 101, 6, {1, 0, 0}});
+        check(rr::graph_finish_distance(c, 20, 25, 0) == 700 * 256 - 25,
+              "finish graph follows the preferred branch and preserves the local fraction");
+        check(rr::graph_finish_distance(c, 80, 132, 0) == 425 * 256 - 132,
+              "a rider already on the alternate branch uses that branch's remaining length");
+        c.nodes.at(40).preferred = 1;
+        check(rr::graph_finish_distance(c, 20, 0, 0) == 725 * 256,
+              "finish traversal reads preferred byte18 independently of primary byte19");
+        c.nodes.at(40).preferred = 0;
+        check(rr::graph_finish_distance(c, 20, 0, 1) == INT32_MAX,
+              "a terminal without a level-matching finish returns the original sentinel");
+        for (bool second : {false, true}) {
+            const auto route = rr::make_route(c, second);
+            const auto& entry = route[300];
+            check(entry.dual && entry.other_node == (second ? 60u : 80u) &&
+                      entry.other_section == (second ? 1u : 2u) && entry.other.bend == (second ? 1 : 3),
+                  "Split annotation retains the opposite branch for both route choices");
+            const auto opposite = rr::route_half(entry, entry.half ^ 1);
+            check((second ? entry.path : entry.other).event_type == 5 &&
+                      c.sections[2].samples[0].event_type == 0,
+                  "forward entry applies a zero residual step without changing the component initializer");
+            check(!rr::shared_roadway(entry, opposite), "opposite split halves must fail the slice flag scan gate");
+            check(rr::shared_roadway(entry, route[299]) && rr::shared_roadway(route[299], opposite),
+                  "the adjoining common road must overlap either split half");
+            const auto& event = route[329];
+            check(second ? (event.path.zone_end && !event.other.zone_end)
+                         : (!event.path.zone_end && event.other.zone_end && event.other.event_type == 3),
+                  "Opposite-half intersection endpoint survives the route annotation");
+        }
+    }
+    rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!assets.exists("DATA/COURSES/NAPA.CRS")) {
         std::cout << "No imported course corpus\n";
-        return 0;
+        return failures ? 1 : 0;
     }
     size_t route_count = 0, dual_count = 0, event_count = 0;
     // Plan 17 prerequisites (docs/research/post-11a-2026-10-12/simulation-and-courses.md):
@@ -103,6 +178,9 @@ int main() {
             lengths.insert(route.size());
             for (int level = 1; level <= 5; ++level) {
                 const auto at = rr::finish_event_sample(course, route, level - 1);
+                if (std::find(combo.begin(), combo.end(), 1) == combo.end())
+                    check(rr::graph_finish_distance(course, course.root, 0, level - 1) == at * 256,
+                          ("Graph finish equals the preferred-route census for " + tag).c_str());
                 if (expect.finish[0])
                     check(at == expect.finish[level - 1], ("Level-tagged finish for " + tag).c_str());
                 else
@@ -236,7 +314,7 @@ int main() {
     if (std::filesystem::exists(path)) {
         try {
             const auto capture = rr::golden::load(path);
-            if (capture.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(capture.exe) ||
                 capture.frames.size() != 1)
                 throw std::runtime_error("Wrong course event oracle");
             const auto& fields = capture.frames.at(0);

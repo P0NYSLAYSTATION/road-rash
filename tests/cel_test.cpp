@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "cel.hpp"
 #include "resource.hpp"
 #include "golden.hpp"
@@ -87,8 +88,8 @@ int main(int argc, char** argv) {
         check(false, "truncated partial mip row accepted");
     } catch (const std::runtime_error&) {
     }
-    const auto data = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH/DATA";
-    const std::string golden_path = argc > 1 ? argv[1] : rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto data = std::filesystem::path(rr::test::assets_root()) / "DATA";
+    const std::string golden_path = argc > 1 ? argv[1] : rr::golden::raster_fixture();
     std::optional<rr::golden::File> golden;
     if (std::filesystem::exists(golden_path)) golden = rr::golden::load(golden_path);
     if (std::filesystem::exists(data)) {
@@ -112,8 +113,7 @@ int main(int argc, char** argv) {
                             } else
                                 ++legacy;
                             if (golden) {
-                                if (golden->exe !=
-                                        "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+                                if (!rr::golden::original_executable(golden->exe) ||
                                     golden->frames.empty())
                                     throw std::runtime_error("Wrong CEL golden");
                                 const std::array<std::string, 6> files = {"GLOBAL.RSC", "CANYN.CRS",

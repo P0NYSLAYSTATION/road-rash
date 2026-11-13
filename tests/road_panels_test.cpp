@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "road_panels.hpp"
 #include "road_materials.hpp"
 #include "assets.hpp"
@@ -18,20 +19,20 @@ int main() {
         return 1;
     in.visible = false;
     if (!rr::road_panels(in).empty()) return 1;
-    const auto path = rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto path = rr::golden::raster_fixture();
     if (!std::filesystem::exists(path)) {
         std::cout << "Synthetic panels pass; SKIP missing original panels oracle\n";
         return 0;
     }
     try {
         const auto golden = rr::golden::load(path);
-        if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+        if (!rr::golden::original_executable(golden.exe) ||
             golden.frames.empty())
             throw std::runtime_error("Wrong panel golden");
         const auto& fields = golden.frames.front();
         size_t checked = 0, pixel_count = 0;
         std::optional<rr::RoadMaterials> materials;
-        const auto root = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH";
+        const auto root = std::filesystem::path(rr::test::assets_root());
         if (std::filesystem::exists(root)) {
             rr::Assets assets(root.string());
             materials = rr::read_road_materials(assets.read("ROADRASH.EXE"), assets.read("DATA/GLOBAL.RSC"));

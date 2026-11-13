@@ -12,6 +12,10 @@ struct DepthTable {
     std::vector<int32_t> scale;
 };
 DepthTable read_depth_table(const std::vector<uint8_t>& exe);
+std::array<int32_t, 32> read_road_separation_limits(const std::vector<uint8_t>& exe);
+bool secondary_road_visible(uint8_t event, int32_t countdown, bool camera_dual,
+                            int32_t camera_countdown, bool camera_building,
+                            int32_t separation, int32_t limit);
 
 // Camera position relative to the road surface of the current slice.
 // Race start (0x0044b250) and the camera update (0x00437d80) use height >= 150.

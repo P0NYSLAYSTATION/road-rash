@@ -1,0 +1,82 @@
+[
+  {
+    "name": "napa-human-parked-runon",
+    "course": 4,
+    "seed": 1,
+    "ticks": 4730,
+    "knock": 0,
+    "until_outcome": false
+  },
+  {
+    "name": "city-human-parked-strict",
+    "course": 1,
+    "seed": 1,
+    "ticks": 6001,
+    "knock": 0,
+    "until_outcome": true
+  },
+  {
+    "name": "napa-human-crashed-4400",
+    "course": 4,
+    "seed": 1,
+    "ticks": 5030,
+    "knock": 4400,
+    "until_outcome": false
+  },
+  {
+    "name": "napa-human-foot-4460",
+    "course": 4,
+    "seed": 1,
+    "ticks": 4700,
+    "knock": 4460,
+    "until_outcome": false
+  },
+  {
+    "name": "napa-human-foot-4460-s2",
+    "course": 4,
+    "seed": 2,
+    "ticks": 4700,
+    "knock": 4460,
+    "until_outcome": false
+  },
+  {
+    "name": "city-human-parked-s2",
+    "course": 1,
+    "seed": 2,
+    "ticks": 6001,
+    "knock": 0,
+    "until_outcome": true
+  },
+  {
+    "name": "city-human-parked-s3",
+    "course": 1,
+    "seed": 3,
+    "ticks": 6001,
+    "knock": 0,
+    "until_outcome": true
+  },
+  {
+    "name": "napa-human-rng-s2",
+    "course": 4,
+    "seed": 2,
+    "ticks": 1200,
+    "knock": 0,
+    "until_outcome": false
+  },
+  {
+    "name": "napa-human-rng-s3",
+    "course": 4,
+    "seed": 3,
+    "ticks": 1200,
+    "knock": 0,
+    "until_outcome": false
+  },
+  {
+    "name": "napa-human-crash-300",
+    "course": 4,
+    "seed": 1,
+    "ticks": 700,
+    "knock": 300,
+    "until_outcome": false
+  }
+]

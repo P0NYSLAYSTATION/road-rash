@@ -316,6 +316,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                                        std::move(opponents), config.level, config.road_base_q8,
                                        assets.personalities, exe, seat0_pos, seat0_lat);
     race->set_player_bike(assets.bike_index);
+    if (config.track_ring) race->set_finish_course(assets.course.get());
     if (!config.net.humans.empty()) race->set_net(true);
     race->set_pedestrian_setup_tick(config.pedestrian_setup_tick);
     // 0x00407990 builds rows 9..14 from the 0x004c5f20 copies: base and
@@ -343,7 +344,12 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                 [scene](const RouteSample& s, uint8_t selector) {
                     return scene->pedestrian_look(s.section, s.local, selector);
                 },
-                exe);
+                exe, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector,
+                               const PedestrianLook& look) {
+                    return scene->pedestrian_graphics_valid(route, s, selector, look, true);
+                }, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector) {
+                    return scene->pedestrian_look(route, s, selector, true);
+                });
         } else {
             out.pedestrians = std::make_unique<PedestrianSystem>(
                 [scene](const RouteSample& s) -> const std::vector<DzhrActor>& {
@@ -352,8 +358,19 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
                 [scene](const RouteSample& s, uint8_t selector) {
                     return scene->pedestrian_look(s.section, s.local, selector);
                 },
-                exe);
+                exe, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector,
+                               const PedestrianLook& look) {
+                    return scene->pedestrian_graphics_valid(route, s, selector, look);
+                }, [scene](const std::vector<RouteSample>& route, size_t s, uint8_t selector) {
+                    return scene->pedestrian_look(route, s, selector);
+                });
         }
+        if (config.track_ring)
+            out.pedestrians->set_resident_sources(
+                [scene](uint16_t family, uint8_t selector) { return scene->pedestrian_family_look(family, selector); },
+                [scene](const std::vector<uint16_t>& history, const PedestrianLook& look) {
+                    return scene->pedestrian_family_graphics_valid(history, look);
+                });
         race->set_pedestrians(out.pedestrians.get());
         if (config.solo) race->set_freeze_actors(true);
     }
@@ -378,8 +395,12 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
         if (assets.scene) {
             auto* scene = assets.scene.get();
             Race* r = race.get();
+            r->set_road_separation_limits(read_road_separation_limits(exe));
             r->set_static_frames([scene](uint32_t section, uint32_t local, uint8_t selector, bool billboard) {
                 return scene->static_frame(section, local, selector, billboard);
+            });
+            r->set_static_boxes([scene](const AnimationFrame& frame, const std::vector<uint16_t>& history) {
+                return scene->static_collision_boxes(frame, history);
             });
             out.ring->set_static_sink(
                 [r](int32_t sample, uint32_t section, uint32_t local, const RingStatics& statics) {
@@ -417,6 +438,7 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
     }
     // 4b. Rider build draws (0x00405600 after the ring): lanes, name roll.
     race->build_draws();
+    if (out.pedestrians) out.pedestrians->reset_serial();
     // 5. Finish line + terrain source.
     race->set_finish_q8(int32_t(assets.bounds.finish_position_q8));
     if (config.live_schedule && !config.solo) race->set_live_schedule(true);
@@ -427,6 +449,9 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
         });
         race->set_rail_height_source(
             [scene](const RouteSample& sample) { return scene->rail_height(sample.section, sample.local); });
+        race->set_undrawn_selectors([scene](const RouteSample& sample) {
+            return scene->undrawn_selectors(sample.section, sample.local);
+        });
         // 5b. DZHR roadside solidity (plan 16 Task 2): solid billboards
         // collide through the class-1 hazard path; BORR spans stay test-only
         // until AI avoidance lands (the autopilot cannot dodge in-road spans).

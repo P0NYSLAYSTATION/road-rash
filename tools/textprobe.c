@@ -165,6 +165,10 @@ int main(int argc, char** argv) {
         DeleteObject(h);
     }
     DeleteDC(dc);
+    for (int i = 0; i < 4; ++i) {
+        snprintf(path, sizeof path, "%s%s", argv[1], files[i]);
+        RemoveFontResourceA(path);
+    }
     printf("DONE\n");
     return 0;
 }

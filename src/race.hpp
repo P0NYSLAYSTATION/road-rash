@@ -198,6 +198,8 @@ struct Rider {
     int slot = 0;                           // grid slot 0..7 (0x00464218); 0 is the player
     int rider_idx = 0;                      // 0x00463c78 row / personality index (0x00405990 param_6)
     size_t sample = 0, previous_sample = 0; // bike +0x140 / +0x13c
+    std::optional<uint8_t> slice_half, previous_slice_half; // retained physical sub-slice pointers
+    std::optional<size_t> wall_previous_sample; // +0x40, copied from +0x2c at the start of this mover
     bool ai = false;
     bool cop = false;    // the police rider (DAT_004642dc, 0x00406b80); never in places or finish order
     bool frozen = false; // solo oracle: think/move nulled, scanned but never stepped
@@ -247,6 +249,7 @@ struct Rider {
                 lat108 = 0, yaw = 0;
         size_t sample = 0;
         int route = 0;
+        std::optional<uint8_t> slice_half;
     };
     HalfMirror half_mirror;
     // Rider-half object image (0x00405990: 0x004387a0 from table 0x00463c10).
@@ -261,6 +264,9 @@ struct Rider {
     int32_t finish_distance = 0, place = 0, place_refresh = 0;
     AiState brain;
     bool finished = false;
+    // 00416010 outcome latch, distinct from crossing the finish line.
+    bool finish_controls_ended = false;
+    int result_code = 1; // original player-global result, latched by00416010
     int32_t finish_tick = -1;
     CrashActor crash_actor;
     ActorAnimationState crash_bike_animation;
@@ -337,6 +343,14 @@ class Race {
     bool same_collision_road(int first, size_t first_sample, int second, size_t second_sample) const;
 
     bool snapshot_authority() const { return snapshot_authority_; }
+    // 00476ce8: in-road BORR nodes, template00476cb8, no callbacks.
+    struct RoadsideNode {
+        bool active = false, pending_remove = false;
+        int32_t position = 0, lateral = 0, next_tick = 0, last_tick = 0;
+        int route = 0;
+        uint32_t order = 0;
+    };
+    const std::array<RoadsideNode, 20>& roadside_nodes() const { return roadside_nodes_; }
     // route_a/route_b: make_route(course,false/true). Identical up to the first split.
     // road_base_q8: absolute Q8 anchor of the route. The original sub-slice
     // +0xcc is absolute while RouteSample::offset accumulates from 0 at the
@@ -353,6 +367,9 @@ class Race {
     void set_terrain_source(std::function<const TerrainSlice&(const RouteSample&)> source) {
         terrain_source_ = std::move(source);
         attach_terrain_type();
+    }
+    void set_undrawn_selectors(std::function<std::array<uint8_t, 2>(const RouteSample&)> source) {
+        undrawn_selectors_ = std::move(source);
     }
     // Guard-rail height 0x0041c200 writes into sub-slice +0x3b when it draws a
     // CESR event-5 strip (category-6 group header); 0 when it has no group.
@@ -400,11 +417,9 @@ class Race {
     // Oracle solo captures (RR_ORACLE_SOLO) freeze every scheduler node but
     // the player's: pedestrians spawn from the ring but never think.
     void set_freeze_actors(bool v) { freeze_actors_ = v; }
-    // First +0xc next of the pedestrians the 0x004552e0 ring setup spawns.
-    // Measured 2 on the solo captures (unlinks on 2 + 60k) but 0 on
-    // napa-field-l1-20261017, whose setup pedestrians already moved in tick 1
-    // (+36 = one move with dt 1 + interval) while its intersection objects
-    // keep TrafficSystem::setup_tick 2 (torn down on tick 392 = 2 + 13*30).
+    // Initial actor construction is tick 0 in the native original capture.
+    // The override retains compatibility with older frozen solo fixtures.
+    // Teardown/first-run cadence alone does not establish the creation tick.
     void set_pedestrian_setup_tick(int32_t t) { setup_tick_ = t; }
     // Live rider scheduler (field races): every tick 0x00438170(0) walks the
     // position-sorted object list front to back and runs each bike and
@@ -441,6 +456,8 @@ class Race {
     // anchor: the human the spawn is placed from (plan 34 C4); -1 = seat 0.
     bool spawn_cop(int32_t slice_offset, int anchor_rider = -1);
     int cop_index() const { return !riders_.empty() && riders_.back().cop ? int(riders_.size()) - 1 : -1; }
+    int police_cycle() const { return police_ ? police_->cycle : 0; }
+    std::array<int32_t, 16> police_bend_words() const;
     // 0x00416010(4, 0xb4): the player was arrested (0x00407f30).
     bool busted() const { return busted_; }
     // Nitro setup 0x0040b0e0: copy six words from the player spec at +0x14c
@@ -482,6 +499,15 @@ class Race {
     void set_human_nitro(int seat, const NitroConfig&);
     // Rider colour remaps from the player's bike index (0x00446190).
     void set_player_bike(int bike);
+    // Joystick analog drive for the first human (0x00434660 with DAT_00476c98
+    // set): accelerate throttles to +0x260 - `throttle` (0x0040ad10, DAT_004b7e78)
+    // and steering targets `steer` - 0x20 left / `steer` right (0x0040ad30,
+    // DAT_004b7e7c). Off: the digital path. Online play stays digital.
+    void set_joystick_analog(bool active, int32_t throttle, int32_t steer) {
+        joy_active_ = active;
+        joy_throttle_ = throttle;
+        joy_steer_ = steer;
+    }
     // Plan 34: mano-a-mano rules inside the simulation (handicap 0x00442f60
     // every 0x39 ticks, applied in 0x004395e0). Off offline.
     void set_net(bool v) { net_ = v; }
@@ -494,6 +520,10 @@ class Race {
         int32_t tick = -1;
     };
     HumanOutcome human_outcome(int seat) const;
+    // 00416010 result registration. Crossing/zero condition can precede
+    // this event; a terminal result cannot be overwritten during run-on.
+    void register_result(Rider&, int code);
+    int race_outcome() const { return riders_[0].result_code; }
     bool all_humans_done() const;
     // Render/audio only: a detached copy with the followed rider in row zero.
     // Never step this copy or feed its state back to the authoritative race.
@@ -520,25 +550,30 @@ class Race {
         std::optional<std::array<int32_t, 4>> box; // first loaded BORR box (+0x68)
     };
     StaticSliceState static_slice_state(const Rider& r) const {
-        return static_slice_state(r.route, r.sample);
+        return static_slice_state(r.route, r.sample, r.slice_half);
     }
-    StaticSliceState static_slice_state(int route, size_t sample) const {
+    StaticSliceState static_slice_state(int route, size_t sample, std::optional<uint8_t> half = {}) const {
         StaticSliceState out;
-        const auto& table = statics_[route];
+        const int physical_half = !snapshot_authority_ && ring_ && sample < routes_[route]->size()
+                                      ? half.value_or((*routes_[route])[sample].half) : route;
+        const auto& table = statics_[physical_half];
         if (sample >= table.size() || !table[sample].built) return out;
         const auto& s = table[sample];
         out = {true,         s.boxes_ready,           s.borr_count, s.borr_count ? s.borr[0] : 0,
-               s.billboards, slice_ac(route, sample), std::nullopt};
-        if (s.boxes_ready && s.borr_frame && !s.borr_frame->boxes.empty()) out.box = s.borr_frame->boxes[0];
+               s.billboards, slice_ac(physical_half, sample), std::nullopt};
+        if (s.boxes_ready && s.borr_frame) {
+            const auto boxes = resolved_static_boxes(*s.borr_frame, s.borr_selector);
+            if (!boxes.empty()) out.box = boxes[0];
+        }
         return out;
     }
     const std::vector<RouteSample>& route_for(int road) const { return *routes_[road]; }
-    // Finish line 0x00454240/0x00406890/0x00437800: nonzero global finish
-    // DAT_004b6e58 (Q8 position) ends the race when the actor's +0x1c
-    // reaches it (with the +0x2c nonzero scheduler gate and +0xc0 bit 0x10
-    // latch). 0 keeps the legacy route-end rule for synthetic routes.
+    // Configured finish for UI and standalone fixtures. With a course graph,
+    // the live ring discovers DAT_004b6e58 only upon building its section;
+    // 00407410 uses graph distance before then. 0 keeps synthetic route-end semantics.
     void set_finish_q8(int32_t q8) { finish_q8_ = q8; }
     int32_t finish_q8() const { return finish_q8_; }
+    void set_finish_course(const Course* course) { finish_course_ = course; }
     // Course-load hazard table (plan 16 Task 2): one span list per route
     // sample per road (index by route_for(road)[sample]); empty by default.
     void set_hazards(std::vector<std::vector<RoadHazard>> road0, std::vector<std::vector<RoadHazard>> road1) {
@@ -561,7 +596,11 @@ class Race {
     // replaces the legacy hazard/DZHR spans in the sweep.
     using StaticFrames = std::function<const AnimationFrame*(uint32_t section, uint32_t local,
                                                              uint8_t selector, bool billboard)>;
+    void set_road_separation_limits(const std::array<int32_t, 32>& limits) { road_separation_limits_ = limits; }
     void set_static_frames(StaticFrames frames);
+    using StaticBoxes = std::function<std::vector<std::array<int32_t, 4>>(
+        const AnimationFrame&, const std::vector<uint16_t>&)>;
+    void set_static_boxes(StaticBoxes boxes) { static_boxes_ = std::move(boxes); }
     // Plan 34 Task 3: size the ring-terrain overlay (scene section lengths)
     // and record one ring slice's terrain for the simulation.
     void set_ground_layout(const std::vector<uint32_t>& section_sizes);
@@ -586,6 +625,7 @@ class Race {
     // Simulation oracle hooks (plan 10): read and write the MSVC rand state
     // (0x00455eb0) and dump every snapshotted field.
     uint32_t rng_state() const { return seed_; }
+    uint64_t rng_draw_count() const { return rng_draw_count_; } // oracle diagnostic; not gameplay state
     void set_rng_state(uint32_t s) { seed_ = s; }
     void set_ticks(int32_t t) { ticks_ = t; } // oracle: align with the capture's absolute tick
     RaceSnapshot snapshot() const;
@@ -617,12 +657,16 @@ class Race {
     }
 
   private:
+    int32_t known_finish_q8() const;
+    int32_t remaining_finish_distance(const Rider&, int32_t position) const;
+    PathSample slice_path(const RouteSample&, size_t sample) const;
     SliceEdges edges(const Rider&, size_t sample) const;
     void move_along(Rider&, int32_t distance, bool accumulate_sweep = true);
     void cross_sample(Rider&, int32_t delta);
     void accumulate(Rider&, uint32_t from, uint32_t to, size_t from_sample, size_t to_sample);
     void move(Rider&, bool player);
-    void vertical(Rider&);
+    void vertical(Rider&, Rider* half_owner = nullptr);
+    int32_t allocation_ground(const Rider&, const RouteSample& freshly_built) const;
     // 0x0043a610 on the sub-slice values of a route sample (absolute laterals).
     struct SubSliceView {
         int32_t e0 = 0, e4 = 0, e8 = 0, ec = 0;
@@ -679,14 +723,25 @@ class Race {
         int32_t position = 0, lateral = 0, speed = 0; // +0x1c, +0x28, +0x108
         uint32_t type = 0, order = 0;
         int32_t key = 0; // list key: +0x1c, or for live-scheduled riders the position at the last sort
-        int rank = -1;   // live-scheduled riders: ascending list rank
-        int rider = -1, pedestrian = -1, car = -1;
+        int rank = -1;   // ascending mixed-node order at the last sort
+        int rider = -1, pedestrian = -1, car = -1, roadside = -1;
         const RouteSample* sample = nullptr; // the object's slice (+0x2c)
+        int32_t slice_position = 0; // retained physical slot, which can differ from position
+        uint8_t roadway_mask = 0;
+        std::optional<uint8_t> slice_half;
     };
     void build_scan_list() const;
+    void contact_car_nodes(const ScanObject&, const ScanObject&);
     int scan_find(int rider, uint32_t type) const;
     int scan_next(int from, uint32_t mask, bool forward, int32_t window) const; // 0x00449ce0
     int32_t half_x(const Rider& r) const { return r.half_detached ? r.half_lateral : r.bike.i32(0x28); }
+    int32_t player_half_position() const {
+        const auto& p = riders_[0];
+        return p.crash_active    ? p.crash_actor.motion.i32(0x1c)
+               : live_schedule_  ? p.half_mirror.position
+               : p.half_detached ? p.half_position
+                                 : p.bike.i32(0x1c);
+    }
     void ai_state_follow(Rider&); // 0x00409ca0 (state 4; state 3 starts with it)
     void ai_state_shadow(Rider&); // 0x0040a560 (state 6)
     void ai_think(Rider&);
@@ -744,6 +799,7 @@ class Race {
     void load_pedestrian_looks();                       // 0x00440680 first-draw resource load
     void think_pedestrian(Pedestrian&);                 // 0x00440dd0
     void move_pedestrian(Pedestrian&);                  // 0x00440990
+    size_t pedestrian_sample(const Pedestrian&) const;
     int pedestrian_lane(const Pedestrian&) const;       // 0x0044a020(obj, 0)
     bool pedestrian_road_clear(const Pedestrian&, int factor, int delta) const; // 0x00441500
     bool pedestrian_arrived(const Pedestrian&) const;                           // 0x004414a0
@@ -758,8 +814,9 @@ class Race {
     bool box_draw_pending_ = false;
     int32_t box_draw_camera_ = 0;
     bool sweep_statics(Rider&, Rider* half_owner = nullptr); // 0x004373f0 against the live ring slice
-    void collide_car_statics();                              // 0x004368f0 runs 0x004373f0 for due cars too
+    void collide_car_statics(size_t only = size_t(-1));                              // 0x004368f0 runs 0x004373f0 for due cars too
     TrafficCar* static_car_ = nullptr; // the car whose sweep is running (0x0044efa0 callback)
+    Pedestrian* static_pedestrian_ = nullptr; //00440760 receives static/marking contacts too
     void hit_static(Rider&, int32_t lateral_units, const std::array<int32_t, 4>& box,
                     Rider* half_owner = nullptr);                      // 0x00437660
     void contact_half_static(Rider& body, Rider& owner, Rider& other); // 0x004046b0 crashed-half contact
@@ -778,11 +835,13 @@ class Race {
     uint32_t random();
     int name_roll_ = -1;
     size_t built_riders_ = SIZE_MAX; // build_draws: riders 0x00405600 has built so far (scan limit)
-    void spawn_brain(Rider& r, size_t built);
+    void spawn_brain(Rider& r, size_t built, bool retain_speeds = false);
     struct PoliceSetup {
         PoliceConfig config;
         std::vector<BikeSpec> specs;
         const ActorAnimationLibrary* library = nullptr;
+        std::optional<std::array<Bike, 2>> previous_objects;
+        uint8_t cycle = 0;
     };
     std::optional<PoliceSetup> police_;
     bool busted_ = false;
@@ -801,6 +860,7 @@ class Race {
     }
 
     std::function<const TerrainSlice&(const RouteSample&)> terrain_source_; // base terrain (no ring writes)
+    std::function<std::array<uint8_t, 2>(const RouteSample&)> undrawn_selectors_;
     // Plan 34 Task 3: ring terrain the simulation reads (0x00451910 slices),
     // per course (section, local), copy-on-write so snapshots restore it.
     struct RingGround {
@@ -816,8 +876,9 @@ class Race {
     std::vector<int32_t> car_scan_keys_; // list positions retained across this scheduler pass
     std::vector<int32_t> ped_scan_keys_;
     mutable std::vector<ScanObject> scan_; // reused by build_scan_list (no tick allocation after warm-up)
-    uint32_t spawn_order_ = 0;             // creation counter for pedestrians
-    bool countdown_started_ = false;       // first countdown tick seen (player dt 2)
+    mutable std::vector<ScanObject> scan_previous_;
+    uint32_t spawn_order_ = 0;       // creation counter for pedestrians
+    bool countdown_started_ = false; // first countdown tick seen (player dt 2)
     TrackRing* ring_ = nullptr;
     std::array<TrackRing*, 8> rings_{};                    // seat -> ring window (rings_[0] == ring_)
     std::array<int32_t, 8> seat_back_{}, seat_previous_{}; // seats >= 1: camera pull-back, last ring camera
@@ -833,10 +894,15 @@ class Race {
     bool outside_windows(int32_t position, int32_t front, int32_t back) const;
     bool ring_setup_ = false; // inside 0x004552e0: no player object yet
     bool freeze_actors_ = false;
-    int32_t setup_tick_ = 2; // set_pedestrian_setup_tick
+    int32_t setup_tick_ = 0; // original initial object construction tick
     std::function<uint32_t()> ring_random_;
     std::function<void(const RingActor&, uint32_t)> ring_sink_;
     const ActorAnimationLibrary* crash_library_ = nullptr;
+    // 0x00405990 calls 0x00446060(+0x70, param_5) on both the bike and its
+    // half, so the cop (param_5 = 2) crashes on the cop table, not the rider's.
+    const ActorAnimationBank& crash_bank(const Rider& r) const {
+        return crash_library_->playback[r.cop ? 1 : 0];
+    }
     const ActorAnimationLibrary* ride_library_ = nullptr;
     std::optional<std::array<int8_t, 8>> steal_codes_; // 0x00464538
     const std::array<std::array<std::array<int8_t, 4>, 2>, 2>* attack_codes_ = nullptr;
@@ -856,7 +922,7 @@ class Race {
                                               std::make_shared<const DzhrTable>()}; // DZHR solids per sample
     struct StaticSlice {
         bool built = false, boxes_ready = false;
-        uint8_t borr_count = 0;
+        uint8_t borr_count = 0, borr_selector = 0x3f;
         std::array<int32_t, 8> borr{}; // absolute laterals, units (+0x6c)
         const AnimationFrame* borr_frame = nullptr;
         std::array<const AnimationFrame*,8> authority_borr_frames{};
@@ -873,9 +939,14 @@ class Race {
     // it with the boxes, and the slot rebuild (0x00451cb0) never clears it.
     std::array<std::array<uint32_t, 128>, 2> slot_ac_{};
     uint32_t slice_ac(int road, size_t sample) const { return slot_ac_[size_t(road)][sample & 127]; }
-    CowVector<StaticSlice> statics_[2]; // mutable (ring builds), copy-on-write for snapshots
+    CowVector<StaticSlice> statics_[2]; // physical halves with a ring; copy-on-write for snapshots
     StaticFrames static_frames_;
+    StaticBoxes static_boxes_;
+    std::vector<std::array<int32_t, 4>> resolved_static_boxes(const AnimationFrame&, uint8_t selector) const;
+    std::optional<std::array<int32_t, 32>> road_separation_limits_;
     Rider static_actor_{}; // 0x004c3e90 static hazard object (rebuilt per hit)
+    std::array<RoadsideNode, 20> roadside_nodes_{};
+    uint32_t roadside_order_ = 0;
     std::vector<Rider> riders_;
     std::vector<int> human_riders_{0};   // seat -> rider index (plan 34)
     std::array<uint32_t, 8> controls_{}; // this tick's word per seat
@@ -896,13 +967,17 @@ class Race {
     int32_t ticks_ = 0;
     int level_ = 0;
     int last_target_ = -1;
-    bool demo_hold_ = false; // DAT_004753c8 (see set_demo_hold)
-    int32_t road_base_ = 0;  // absolute Q8 anchor (ctor param)
-    int32_t finish_q8_ = 0;  // global finish DAT_004b6e58 (Q8); 0 = route end (0x00454240/0x00406890)
+    bool demo_hold_ = false;                   // DAT_004753c8 (see set_demo_hold)
+    bool joy_active_ = false;                  // DAT_00476c98 (set_joystick_analog)
+    int32_t joy_throttle_ = 0, joy_steer_ = 0; // DAT_004b7e78 / DAT_004b7e7c
+    int32_t road_base_ = 0;                    // absolute Q8 anchor (ctor param)
+    int32_t finish_q8_ = 0; // configured target; live DAT_004b6e58 belongs to TrackRing
+    const Course* finish_course_ = nullptr; // immutable graph; actual finish discovered by the ring
     // 0x00465a10: per-level overtake eagerness, read once from the EXE; empty
     // image -> no table (the draw alone decides, as before).
     std::optional<std::array<int32_t, 5>> overtake_eagerness_;
     uint32_t seed_ = 1; // MSVC rand() state (0x00455eb0)
+    uint64_t rng_draw_count_ = 0;
     std::vector<SoundEventRecord> sound_events_;
     void sound(SoundEvent, const Bike&);
     uint32_t previous_camera_position_ = 0;

@@ -5,7 +5,6 @@ Each generation gets one distinct, identical inside/outside UDP port from the
 approved range. No fixed range publication, skipped checks or STUN mapping is
 needed. The server multiplexes peers on that port and advertises its public IP.
 """
-import fcntl
 import json
 import gzip
 import io
@@ -154,6 +153,7 @@ def deploy(path, run=command, reserve=reserve_port, publish=None):
 
 
 def main():
+    import fcntl  # Only the Linux deployment entry point needs flock.
     state=Path('/var/lib/road-rash-net-deploy')
     state.mkdir(mode=0o700, exist_ok=True)
     if state.is_symlink() or state.stat().st_uid!=0 or state.stat().st_mode & 0o077:

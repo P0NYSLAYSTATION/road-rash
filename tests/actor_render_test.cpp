@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "actor_render.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -6,18 +7,15 @@
 #include <iostream>
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Imported actor projection corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto depths = rr::read_depth_table(assets.read("ROADRASH.EXE"));
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-actor-animation-fixtures.tsv");
-        if (!file) {
-            std::cout << "Original actor projection fixture absent\n";
-            return 0;
-        }
+        if (!file) throw std::runtime_error("Required original actor_render fixture missing");
         std::map<std::string, int64_t> values;
         std::string line, key;
         int64_t value;

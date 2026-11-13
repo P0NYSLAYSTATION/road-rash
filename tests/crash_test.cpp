@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "crash.hpp"
 #include "actor_descriptors.hpp"
 #include "assets.hpp"
@@ -20,23 +21,39 @@ static std::vector<rr::RouteSample> knock_straight(size_t n) {
 static void test_knock_off_reasons();
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/GLOBAL.RSC")) {
             std::cout << "Imported crash corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto exe = assets.read("ROADRASH.EXE");
         const auto config = rr::read_crash_config(exe);
         const rr::ActorAnimationLibrary library(exe, assets.read("DATA/GLOBAL.RSC"));
+        // 00449c20 is signed ABS (CDQ), including a body ahead of the bike.
+        // Medly's destroyed bike must wait for the body to approach it.
+        for (int distance : {-1296, -80, -79, 79, 80, 1296}) {
+            rr::Bike bike;
+            bike.i32(0x1c) = 10000;
+            bike.i32(0x2f4) = 2;
+            bike.i32(0x2f0) = 0;
+            rr::CrashActor body;
+            body.motion.i32(0x1c) = 10000 + distance;
+            body.animation.animation = 37;
+            body.animation.loops = 1;
+            rr::CrashRecoveryInput input;
+            input.player = true;
+            const auto action = rr::recover_crash_actor(bike, body, library.playback[0],
+                                                         library.fallback, 100, input);
+            const bool within = distance > -80 && distance < 80;
+            if ((action == rr::CrashRecoveryAction::wrecked) != within)
+                throw std::runtime_error("wreck recovery requires absolute longitudinal distance below80");
+        }
         rr::CrashActor initialized;
         rr::init_crash_actor(initialized, config);
         if (initialized.motion.i32(0xc4) != 8) throw std::runtime_error("Imported rider behavior type");
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-crash-entry-fixtures.tsv");
-        if (!file) {
-            std::cout << "Original crash fixture absent\n";
-            return 0;
-        }
+        if (!file) throw std::runtime_error("Required original crash fixture missing");
         std::map<std::string, int64_t> values;
         std::string line, key;
         int64_t value;
@@ -44,7 +61,8 @@ int main(int argc, char** argv) {
             std::istringstream row(line);
             if (row >> key >> value) values[key] = value;
         }
-        std::ifstream walking_file(RR_SOURCE_DIR "/analysis/oracle/napa-crash-walking.tsv");
+        std::ifstream walking_file(argc > 2 ? argv[2] : RR_SOURCE_DIR "/analysis/oracle/napa-crash-walking.tsv");
+        if (!walking_file) throw std::runtime_error("Required original walking fixture missing");
         if (walking_file) {
             std::map<std::string, int64_t> walking;
             while (std::getline(walking_file, line)) {
@@ -383,6 +401,41 @@ int main(int argc, char** argv) {
             if (bike.i32(0xf4) != 11 + 0x100) throw std::runtime_error("bike impulse did not land on +0xf4");
         }
         std::cout << "contact crash impulse pair lands on the vertical velocity (+0xf4)\n";
+        // 0x00404560 tail calls 0x004067d0 on the remount: the half rejoins
+        // the bike on the remount tick itself, not on the next bike move
+        // (traffic-field 2279: original shadow 75067, native kept the stale
+        // crash-body 75033). Only the half node runs this tick, so a missing
+        // copy-back stays visible in the mirror.
+        {
+            std::vector<rr::Opponent> opponents;
+            opponents.push_back({specs.at(0), 90, 87, 70, 0, 1, 1, 0x3200 + 20 * 256, 0x8000});
+            rr::Race live(rr::make_route(course, false), rr::make_route(course, true), tables, specs.at(0),
+                          90, opponents);
+            live.set_crash_library(library, config);
+            live.set_live_schedule(true);
+            auto& ai = live.riders()[1];
+            const int32_t bike_pos = 200 * 256, body_pos = 190 * 256;
+            ai.sample = ai.previous_sample = 200;
+            ai.bike.i32(0x1c) = bike_pos;
+            ai.bike.i32(0x28) = 0x8000;
+            ai.bike.i32(0x2f4) = 3;
+            ai.crash_active = true;
+            ai.crash_timer = 0;
+            ai.crash_actor.motion.i32(0x1c) = body_pos;
+            ai.crash_actor.motion.i32(0x28) = 0x8000;
+            ai.crash_actor.sample = ai.crash_actor.previous_sample = 190;
+            ai.crash_actor.animation.animation = 2; // past 41: recover remounts at once
+            ai.sched_next = live.ticks() + 100;     // bike node not due: no 0x004060b0 copy
+            ai.half_sched_next = live.ticks();      // half node due: think_half remounts
+            live.step(0);
+            if (ai.bike.i32(0x2f4) != 0 || ai.crash_active)
+                throw std::runtime_error("Live remount did not clear on the half node");
+            if (ai.half_mirror.position != bike_pos || ai.half_mirror.lateral != 0x8000)
+                throw std::runtime_error("Live remount did not rejoin the half: mirror " +
+                                         std::to_string(ai.half_mirror.position) + "/" +
+                                         std::to_string(ai.half_mirror.lateral));
+            std::cout << "Live remount rejoins the half on the remount tick\n";
+        }
         test_knock_off_reasons();
         return 0;
     } catch (const std::exception& e) {

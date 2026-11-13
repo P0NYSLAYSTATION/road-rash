@@ -70,6 +70,112 @@ rr::Course window_course(uint32_t branch_length) {
     return c;
 }
 
+void family_requests() {
+    auto course = synthetic_course();
+    course.sections[0].family_events = {{0, 1, 0, 10}, {0, 1, 1, 20},
+                                        {150, 1, 0, 11}, {150, 1, 1, 21}};
+    rr::TrackRing ring(course, 0);
+    uint32_t draws = 0;
+    const rr::TrackRing::Random random = [&] { ++draws; return 0u; };
+    ring.setup(50 * 256, random, {});
+    check(ring.resident_family(0) == 10 && ring.resident_family(1) == 20,
+          "setup activates initial families synchronously");
+    for (int front = 131; front <= 150; ++front) {
+        ring.service_family_queue();
+        ring.advance(256, random, {});
+    }
+    check(ring.resident_family(0) == 10 && ring.resident_family(1) == 20,
+          "crossing an activation point queues work after this tick's service");
+    const auto snapshot = ring;
+    const auto before = draws;
+    ring.service_family_queue();
+    check(ring.resident_family(0) == 0 && ring.resident_family(1) == 20,
+          "active worker blocks only the slot being replaced");
+    ring.service_family_queue();
+    check(ring.resident_family(0) == 11 && ring.resident_family(1) == 20,
+          "completed activation precedes the next slot's prefetch");
+    ring.service_family_queue();
+    check(ring.resident_family(1) == 0, "prefetch occupies its queue entry before activation");
+    ring.service_family_queue();
+    check(ring.resident_family(1) == 21 && draws == before,
+          "queued resource work completes without consuming simulation RNG");
+    check(snapshot.resident_family(0) == 10 && snapshot.resident_family(1) == 20,
+          "a ring snapshot retains independent resource queue and residency");
+}
+
+void finish_discovery() {
+    auto course = window_course(400);
+    course.sections[3].events.push_back({100, 101, 6, {1, 0, 0}});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    check(ring.known_finish_q8() == 0, "finish global starts unknown outside its section");
+    for (int i = 130; i < 700; ++i) ring.advance(256, random, {});
+    check(ring.known_finish_q8() == 0, "entering the finish section does not discover an unbuilt slice");
+    ring.advance(256, random, {});
+    check(ring.known_finish_q8() == 800 * 256,
+          "first forward build in the finish section discovers its absolute coordinate");
+    const rr::TrackRing saved = ring;
+    ring.advance(-256, random, {});
+    check(ring.known_finish_q8() == saved.known_finish_q8(), "rewind preserves the discovered finish");
+    ring.setup(50 * 256, random, {});
+    check(ring.known_finish_q8() == 0, "new setup clears the previous race's discovered finish");
+}
+
+void split_shoulders() {
+    auto course = window_course(400);
+    for (size_t section : {1u, 2u})
+        for (auto& p : course.sections[section].samples) {
+            p.shoulder_left = p.shoulder_right = 224;
+            p.left = section == 1 ? 500 : 0;
+            p.right = section == 1 ? 0 : 500;
+            p.left_q8 = section == 1 ? 512 : 0;
+            p.right_q8 = section == 1 ? 0 : 512;
+            p.rise = section == 1 ? 1 : 3;
+        }
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(230 * 256, random, {}); // builds the split at300 within its128 slots
+    const auto initial_trackers = ring.tracker_window(course.root);
+    check(initial_trackers[0] && initial_trackers[1] && initial_trackers[0]->position == 196 * 256 &&
+              initial_trackers[1]->position == 273 * 256,
+          "original trackers start14 and91 slices ahead of the back boundary");
+    const auto left = ring.slice_shoulders(300 * 256, 0);
+    const auto right = ring.slice_shoulders(300 * 256, 1);
+    check(left && right && (*left)[1] == (*right)[0],
+          "the split's touching road edges have zero inner shoulders, not overlapping224-unit widths");
+    check(ring.retained_roadway_mask(300 * 256, 0) == 1 && ring.retained_roadway_mask(300 * 256, 1) == 2,
+          "physical split masks separate the two roadways");
+    const rr::TrackRing saved = ring;
+    ring.commit_branch(0);
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    check(ring.forward_closed(381 * 256, 1) && !ring.forward_closed(381 * 256, 0),
+          "discarded split half retains its self-link while the committed road continues");
+    const auto continued = ring.slice_location(382 * 256, 1);
+    check(continued && continued->first == 60 && continued->second == 82,
+          "a collapsed physical slot refers to the committed graph node even for a discarded-half lookup");
+    check(!ring.closed_upper(80, 381) && ring.closed_upper(80, 382) == 81,
+          "the forward tracker keeps the discarded arm's final local coordinate after reaching its self-link");
+    const auto discarded = ring.tracker_window(80);
+    check(discarded[0] && discarded[1] && discarded[0]->local == 24 * 256 && discarded[1]->local == 81 * 256,
+          "discarded-arm wake bounds retain the leading endpoint while the trailing clone advances");
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    const auto old_half = ring.retained_motion(381 * 256, 1);
+    const auto new_half = ring.retained_motion(381 * 256, 0);
+    check(old_half && new_half && old_half->second == 3 && new_half->second == 1,
+          "rebuilding a common half0 preserves an old physical half1's motion words");
+    check(ring.retained_roadway_mask(381 * 256, 0) == 3 && ring.retained_roadway_mask(381 * 256, 1) == 2,
+          "common half0 admits either branch while unused half1 retains its old mask");
+    check(saved.retained_roadway_mask(300 * 256, 0) == 1 && saved.retained_roadway_mask(300 * 256, 1) == 2,
+          "ring snapshots preserve the pre-collapse physical masks");
+    const auto expired = ring.tracker_window(80);
+    check(!expired[0] && !expired[1], "trailing self-link cleanup removes both discarded-node wake references");
+    check(saved.tracker_window(course.root)[0]->position == initial_trackers[0]->position,
+          "ring snapshots preserve graph-node tracker references");
+    check(saved.slice_shoulders(300 * 256, 0) == left,
+          "a copied ring preserves physical shoulder geometry when the live slot is reused");
+}
+
 void backward_iterators() {
     auto course = synthetic_course();
     auto& section = course.sections[0];
@@ -182,6 +288,9 @@ void window_walks() {
 } // namespace
 
 int main() {
+    family_requests();
+    finish_discovery();
+    split_shoulders();
     window_walks();
     backward_iterators();
     const rr::Course course = synthetic_course();
@@ -221,6 +330,166 @@ int main() {
     draws = 0;
     ring.advance(-0x100, random, sink);
     check(!ring.unsupported() && draws == 16, "backward crossing: wall steps and two BORR passes");
+    // The selected half is stepped and built first after the split;
+    // both section iterators remain live and the reverse edge rejoins
+    // the common road without consuming an invented entry draw.
+    {
+        const auto split_course = window_course(400);
+        rr::TrackRing split(split_course, 0);
+        split.setup(0x3200, random, {});
+        for (int i = 130; i < 300; ++i) split.advance(256, random, {});
+        auto state = split.diagnostic_state();
+        check(!split.unsupported() && state.front_dual && state.front_active == 1 && state.front.node == 80 &&
+                  state.front.position == 0 && state.front_other.node == 60,
+              "split enters both halves and selects the original primary");
+        std::vector<uint32_t> built;
+        split.set_slice_sink([&](uint32_t section, uint32_t, const rr::PathSample&, const rr::TerrainSlice&) {
+            built.push_back(section);
+        });
+        split.advance(256, random, {});
+        check(split.slice_event(300 * 256) == 2, "first split slice stores its boundary event");
+        state = split.diagnostic_state();
+        check(built == std::vector<uint32_t>{2, 1} && state.front.position == 256 &&
+                  state.front_other.position == 256,
+              "dual slice builds selected half first and steps both iterators");
+        // The next forward dual slice carries event5, not0. Rewind again
+        // so the existing reverse-boundary test keeps the same start.
+        split.advance(256, random, {});
+        check(split.slice_event(301 * 256) == 5, "interior split slice stores its window event");
+        split.advance(-256, random, {});
+        split.advance(-256, random, {});
+        split.advance(-256, random, {});
+        state = split.diagnostic_state();
+        check(!split.unsupported() && !state.front_dual && state.front.node == 20 &&
+                  state.front.position == 299 * 256,
+              "reversing through the split applies the residual on the common road");
+        for (int i = 299; i < 700; ++i) split.advance(256, random, {});
+        state = split.diagnostic_state();
+        check(!split.unsupported() && !state.front_dual && state.front.node == 120 &&
+                  state.front.position == 0,
+              "forward merge retains the selected branch and enters the outgoing road");
+        split.advance(-256, random, {});
+        state = split.diagnostic_state();
+        check(!split.unsupported() && state.front_dual && state.front_active == 0 && state.front.node == 60 &&
+                  state.front_other.node == 80 && state.front.position == 399 * 256 &&
+                  state.front_other.position == 399 * 256,
+              "backward merge enters both branch ends with the negative residual");
+    }
+    // 0x004540e0 commits both walkers. 0x00452fd0 keeps the chosen
+    // section outside the 81-sample window; 0x00453030 restores the
+    // cached opposite iterator on a later approach to either boundary.
+    {
+        const auto course = window_course(400);
+        rr::TrackRing committed(course, 0);
+        committed.setup(0x3200, random, {});
+        for (int i = 130; i < 300; ++i) committed.advance(256, random, {});
+        committed.commit_branch(1);
+        for (int i = 0; i < 82; ++i) committed.advance(256, random, {});
+        auto state = committed.diagnostic_state();
+        check(!state.front_dual && state.front.node == 80 && state.front.position == 82 * 256,
+              "committed split collapses to the chosen half after sample 81");
+        committed.advance(-256, random, {});
+        state = committed.diagnostic_state();
+        check(state.front_dual && state.front_active == 1 && state.front.position == 81 * 256 &&
+                  state.front_other.node == 60 && state.front_other.position == 80 * 256,
+              "backward split window restores its precomputed opposite iterator");
+        for (int i = 81; i < 319; ++i) committed.advance(256, random, {});
+        state = committed.diagnostic_state();
+        check(state.front_dual && state.front_active == 1 && state.front.node == 80 &&
+                  state.front.position == 319 * 256 && state.front_other.node == 60 &&
+                  state.front_other.position == 319 * 256,
+              "forward merge window restores both branch-relative iterator positions");
+    }
+    // Unequal arms are aligned by the physical merge window. The short
+    // arm's flattened route has already merged while its physical half
+    // still contains the last sixteen samples of that arm (Medly case).
+    {
+        auto unequal = window_course(400);
+        unequal.nodes.at(40).primary = 0;
+        unequal.nodes.at(20).previous = 160;
+        unequal.nodes.emplace(160, rr::CourseNode{160, 3});
+        unequal.nodes.at(80).length = 384;
+        unequal.sections[2].samples.resize(384);
+        unequal.sections[2].samples[383].rise = 37;
+        rr::TrackRing physical(unequal, 0);
+        physical.setup(50 * 256, random, {});
+        for (int i = 130; i < 690; ++i) physical.advance(256, random, {});
+        const auto logical = rr::make_route(unequal, true);
+        const auto retained = physical.retained_sample(684 * 256, 1);
+        check(logical[684].node == 120 && retained && retained->node == 80 &&
+                  retained->local == 383 && retained->path.rise == 37,
+              "physical short-arm terrain survives the flattened route merge");
+        check(physical.forward_slice(684 * 256, 1) == std::pair<int32_t, uint8_t>{685 * 256, 1},
+              "forward link keeps the physical second half inside the merge window");
+        const auto snapshot = physical;
+        physical.advance(128 * 256, random, {});
+        check(snapshot.retained_sample(684 * 256, 1)->path.rise == 37,
+              "snapshot retains physical terrain after ring reuse");
+    }
+    // NALR lane changes align the outer edges of the two halves to
+    // the old common road; rejoining on either side restores its centre.
+    {
+        auto course = window_course(400);
+        for (auto& p : course.sections[1].samples) {
+            p.left_q8 = 256;
+            p.left = 250;
+        }
+        for (auto& p : course.sections[2].samples) {
+            p.right_q8 = 256;
+            p.right = 250;
+        }
+        rr::TrackRing edges(course, 0);
+        edges.setup(0x3200, random, {});
+        for (int i = 130; i < 300; ++i) edges.advance(256, random, {});
+        auto state = edges.diagnostic_state();
+        check(state.front.offset == 250 && state.front_other.offset == -250,
+              "split aligns each half to its old outer lane edge");
+        edges.commit_branch(0);
+        for (int i = 300; i < 700; ++i) edges.advance(256, random, {});
+        state = edges.diagnostic_state();
+        check(!state.front_dual && state.front.node == 120 && state.front.offset == 0,
+              "merge restores the common centre while preserving half-zero outer edge");
+    }
+    // Snapshot restore must retain both live and cached section iterators
+    // and consume the same random stream on replay through a split.
+    {
+        const auto course = window_course(400);
+        rr::TrackRing snapshot(course, 0);
+        uint32_t seed = 1;
+        auto draw = [&] {
+            seed = seed * 214013u + 2531011u;
+            return (seed >> 16) & 32767u;
+        };
+        snapshot.setup(0x3200, draw, {});
+        for (int i = 130; i < 290; ++i) snapshot.advance(256, draw, {});
+        const auto saved = snapshot;
+        const uint32_t saved_seed = seed;
+        for (int i = 0; i < 120; ++i) snapshot.advance(256, draw, {});
+        const auto first = snapshot.diagnostic_state();
+        const auto first_seed = seed;
+        snapshot = saved;
+        seed = saved_seed;
+        for (int i = 0; i < 120; ++i) snapshot.advance(256, draw, {});
+        const auto replay = snapshot.diagnostic_state();
+        check(seed == first_seed && replay.front.node == first.front.node &&
+                  replay.front.position == first.front.position &&
+                  replay.front_other.node == first.front_other.node &&
+                  replay.front_other.position == first.front_other.position &&
+                  replay.front.terrain->position == first.front.terrain->position,
+              "restored dual walker and cached windows reproduce the random stream");
+    }
+    // 0x00452e10 result 3 leaves a terminal section intact. The outer
+    // traversal can subsequently walk back away from the endpoint.
+    {
+        rr::TrackRing terminal(course, 0);
+        terminal.setup(0x3200, random, {});
+        for (int i = 130; i < 300; ++i) terminal.advance(0x100, random, {});
+        check(!terminal.unsupported() && terminal.diagnostic_state().front.position == 299 * 256,
+              "terminal section result preserves the last valid iterator");
+        terminal.advance(-0x100, random, {});
+        check(!terminal.unsupported() && terminal.diagnostic_state().front.position == 298 * 256,
+              "terminal section can reverse without rebuilding its iterators");
+    }
     if (failures) return 1;
     std::cout << "track ring ok\n";
     return 0;

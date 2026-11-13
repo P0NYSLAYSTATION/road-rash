@@ -1,4 +1,6 @@
+#include "test_assets.hpp"
 #include <cstdlib>
+#include <algorithm>
 #include "pedestrians.hpp"
 #include "traffic.hpp"
 #include "track_ring.hpp"
@@ -11,7 +13,8 @@
 // 0x00440760. Skips without the disc corpus.
 namespace {
 struct Fixture {
-    rr::Assets assets{RR_SOURCE_DIR "/../cdrom/ROADRASH"};
+    rr::Assets assets{
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root())};
     std::vector<uint8_t> exe;
     rr::PhysicsTables physics;
     std::vector<rr::BikeSpec> specs;
@@ -36,7 +39,12 @@ struct Fixture {
             [this](const rr::RouteSample& s, uint8_t selector) {
                 return scene->pedestrian_look(s.section, s.local, selector);
             },
-            exe);
+            exe, [this](const std::vector<rr::RouteSample>& route, size_t s, uint8_t selector,
+                           const rr::PedestrianLook& look) {
+                return scene->pedestrian_graphics_valid(route, s, selector, look);
+            }, [this](const std::vector<rr::RouteSample>& route, size_t s, uint8_t selector) {
+                return scene->pedestrian_look(route, s, selector);
+            });
     }
     std::unique_ptr<rr::Race> race(int opponents) const {
         auto r = std::make_unique<rr::Race>(
@@ -51,6 +59,402 @@ struct Fixture {
 };
 void check(bool ok, const char* what) {
     if (!ok) throw std::runtime_error(what);
+}
+
+void family_buffer_tail() {
+    Fixture hiway("HIWAY");
+    // At forward cursor127 slot3 changes180->182. 182 writes112744
+    // bytes; selector3's cached RRAN starts146528, in the untouched tail.
+    const auto* tail = hiway.scene->pedestrian_look(0, 60, 195);
+    const auto* overwritten = hiway.scene->pedestrian_look(0, 60, 194);
+    check(tail && overwritten, "Hiway initial pedestrian graphics missing");
+    check(tail->graphics_offset == 146528 && overwritten->graphics_offset == 112172,
+          "Hiway RRAN offsets differ from the measured family-buffer layout");
+    // Query local122 (+33 view slices-28 bias) reaches event127.
+    check(hiway.scene->pedestrian_graphics_valid(0, 122, 195, *tail),
+          "a shorter family replacement must preserve the untouched RRAN tail");
+    check(!hiway.scene->pedestrian_graphics_valid(0, 122, 194, *overwritten),
+          "replacement bytes must invalidate an overwritten RRAN header");
+    const auto route = rr::make_route(hiway.course, false);
+    const auto* inherited = hiway.scene->pedestrian_look(route, 902, 194);
+    check(inherited && inherited == hiway.scene->pedestrian_look(0, 894, 194),
+          "a section without a slot3 load must retain the incoming family");
+    check(hiway.scene->pedestrian_graphics_valid(route, 902, 194, *inherited),
+          "inherited family graphics must remain valid across a section boundary");
+}
+
+void retained_road_slice() {
+    Fixture hiway("HIWAY");
+    auto race = hiway.race(0);
+    race->set_live_schedule(true);
+    race->set_ticks(642);
+    race->riders()[0].half_mirror.position = 25644;
+    race->riders()[0].frozen = true;
+    rr::TrackRing ring(hiway.course, 0);
+    race->set_track_ring(&ring);
+    auto pedestrians = hiway.pedestrians();
+    race->set_pedestrians(pedestrians.get());
+    auto& p = pedestrians->pool()[0];
+    pedestrians->apply_template(p.body.bike);
+    p.active = true;
+    p.side = 1;
+    p.last_tick = 598;
+    p.next_tick = 643;
+    p.anchor = 12800;
+    p.body.sample = p.body.previous_sample = 50;
+    p.body.bike.i32(0x1c) = 12911;
+    p.body.bike.i32(0x28) = -81920;
+    p.body.bike.u8(0xc0) |= 0x10;
+    race->countdown_step();
+    check(p.body.bike.i32(0x1c) == 12930 && p.body.bike.i32(0x128) == 4187616,
+          "last pedestrian move must read curvature from the reused physical road slot");
+    check(p.pending_remove, "the last move still precedes deferred window removal");
+}
+
+void retained_arrival_slice(const Fixture& f) {
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(1800, rr::PathSample{0, 0, 250, 250, 256, 256});
+    for (auto& path : section.samples) {
+        path.shoulder_left = path.shoulder_right = 250;
+        path.height_right = 11;
+    }
+    section.samples[1475].right = 750;
+    section.samples[1475].right_q8 = 768;
+    section.samples[1475].height_right = 55;
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 1800});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    std::vector<rr::RouteSample> road;
+    for (size_t i = 0; i < section.samples.size(); ++i)
+        road.push_back({section.samples[i], 20, 0, uint32_t(i)});
+    rr::Race race(road, road, f.physics, f.specs[0], 90, {});
+    race.set_live_schedule(true);
+    race.riders()[0].sched_next = race.riders()[0].half_sched_next = 1000;
+    race.riders()[0].bike.i32(0x1c) = race.riders()[0].half_mirror.position = 1396 * 256;
+    race.riders()[0].sample = race.riders()[0].half_mirror.sample = 1396;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [](const rr::RouteSample&, uint8_t) -> const rr::PedestrianLook* { return nullptr; }, f.exe);
+    race.set_pedestrians(&system);
+    rr::TrackRing ring(course, 0);
+    race.set_track_ring(&ring);
+    auto& p = system.pool()[0];
+    system.apply_template(p.body.bike);
+    p.active = true;
+    p.type = 5;
+    p.state = p.side = 1;
+    p.lane = 2;
+    p.body.sample = p.body.previous_sample = 1347;
+    p.body.bike.i32(0x1c) = p.anchor = 1347 * 256;
+    p.body.bike.i32(0x28) = 697 * 256;
+    p.next_tick = 1;
+    p.last_tick = 0;
+    race.countdown_step();
+    check(p.state == 1 && p.pace == 4 && p.side == 1,
+          "last out-of-window crossing checks the rebuilt slot1475 shoulder, not historical slot1347");
+    rr::TerrainSlice terrain;
+    terrain.type = 0;
+    terrain.selectors = {255, 255};
+    race.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+    p.pending_remove = false;
+    p.body.bike.u8(0xc0) |= 4;
+    p.state = 7;
+    p.next_tick = 2;
+    p.last_tick = 1;
+    p.body.bike.i32(0x28) = 900 * 256;
+    race.countdown_step();
+    check(p.body.sample == 1347 && p.body.bike.i32(0x24) == 55,
+          "ground height follows rebuilt physical slot1475 without rewriting the actor's historical sample");
+}
+
+void initial_pedestrian_overlap(const Fixture& f) {
+    auto race = f.race(0);
+    race->set_live_schedule(true);
+    race->set_demo_hold(true);
+    auto& rider = race->riders()[0];
+    rider.sched_next = rider.half_sched_next = 10000;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [](const rr::RouteSample&, uint8_t) -> const rr::PedestrianLook* { return nullptr; }, f.exe);
+    race->set_pedestrians(&system);
+    for (int i = 0; i < 2; ++i) {
+        auto& p = system.pool()[size_t(i)];
+        system.apply_template(p.body.bike);
+        p.active = true;
+        p.order = uint32_t(i);
+        p.type = i ? 4 : 0;
+        p.side = 3;
+        p.next_tick = 1;
+        p.last_tick = -60;
+        p.body.bike.u8(0xc0) |= 0x10;
+        p.body.bike.i32(0x1c) = p.anchor = i ? 13312 : 13307;
+        p.body.sample = p.body.previous_sample = size_t(p.anchor >> 8);
+        p.body.bike.i32(0x28) = p.anchor_lateral = i ? 81920 : 89600;
+    }
+    const auto rng = race->rng_state();
+    race->countdown_step();
+    // Original Hiway tick1: two already-overlapping pedestrians separate
+    // by (4096+4096-7680+2048)/2+3 =1283 each, before green.
+    check(system.pool()[0].body.bike.i32(0x28) == 90883 && system.pool()[1].body.bike.i32(0x28) == 80637,
+          "initial pedestrian overlap must separate during pre-green contacts");
+    check(system.pool()[0].anchor_lateral == 89600 && system.pool()[1].anchor_lateral == 81920,
+          "contact separation must preserve the allocation anchors");
+    check(race->rng_state() == rng, "unloaded pedestrian separation must consume no random draws");
+}
+
+void allocation_ground_snapshot(const Fixture& f) {
+    auto race = f.race(0);
+    auto system = f.pedestrians();
+    race->set_pedestrians(system.get());
+    rr::TerrainSlice sidewalk;
+    sidewalk.type = 0;
+    sidewalk.selectors = {255, 255};
+    sidewalk.side_heights = std::array{20, 20};
+    race->set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return sidewalk; });
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+    section.scenery_events.push_back({0x80000000u | (50u << 24) | (15u << 20) | (194u << 8), 1000});
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 300});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    race->set_track_ring(&ring);
+    const auto& p = system->pool()[0];
+    check(p.active && p.body.bike.i32(0x24) == 20 && p.body.bike.i32(0x38) == 20,
+          "allocation must evaluate ground before copying previous placement, without a movement tick");
+    check(p.body.bike.i32(0x20) == 0 && p.body.bike.i32(0x34) == 0,
+          "ground placement must preserve relative height and its initial snapshot");
+}
+
+void recycled_pedestrian(const Fixture& f) {
+    auto race = f.race(0);
+    auto system = f.pedestrians();
+    race->set_pedestrians(system.get());
+    auto& p = system->pool()[0];
+    p.body.bike.i32(0x108) = 73;
+    p.body.bike.i32(0x10c) = 160;
+    p.body.bike.i32(0x104) = 999;
+    p.body.bike.i32(0xec) = 999;
+    p.body.bike.i32(0x128) = 999;
+    p.body.bike.i32(0x18) = 48;
+    p.lane = -2;
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+    section.scenery_events.push_back({0x80000000u | (50u << 24) | (15u << 20) | (194u << 8), 0});
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 300});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    race->set_track_ring(&ring);
+    check(p.active && system->spawned() == 1, "synthetic ring must reuse the first pedestrian slot");
+    check(p.body.bike.i32(0x108) == 73 && p.body.bike.i32(0x10c) == 160 && p.lane == -2,
+          "recycled pedestrians retain previous velocities and crossing lane until movement");
+    check(p.body.bike.i32(0x104) == 0 && p.body.bike.i32(0xec) == 0 && p.body.bike.i32(0x128) == 0 &&
+              p.body.bike.i32(0x18) == 0,
+          "allocation still resets current velocity, speed, heading and elapsed time");
+    auto& later = system->pool()[1];
+    later.active = true;
+    later.body.bike.i32(0x10c) = -77;
+    system->recycle(p);
+    system->recycle(later);
+    rr::TrackRing next_ring(course, 0);
+    race->set_track_ring(&next_ring);
+    check(later.active && !p.active && later.body.bike.i32(0x10c) == -77,
+          "allocation reuses the most recently returned slot and its retained motion");
+    // Reversing storage order must not reverse the original ascending
+    // scheduler prepass's return order when two slots expire together.
+    race->set_live_schedule(true);
+    race->riders()[0].sched_next = race->riders()[0].half_sched_next = 1000;
+    p.active = later.active = true;
+    p.pending_remove = later.pending_remove = true;
+    p.body.bike.i32(0x1c) = 56 * 256;
+    later.body.bike.i32(0x1c) = 55 * 256;
+    p.body.sample = 56;
+    later.body.sample = 55;
+    p.lane = -1;
+    later.lane = 0;
+    race->countdown_step();
+    check(!p.active && !later.active, "marked pedestrians return during the scheduler prepass");
+    rr::TrackRing third_ring(course, 0);
+    race->set_track_ring(&third_ring);
+    check(p.active && !later.active && p.lane == -1,
+          "simultaneous returns reuse the last linked-list node, retaining its lane");
+}
+
+void pedestrian_statics(const Fixture& f) {
+    for (bool marking : {false, true})
+        for (bool overlaps : {false, true}) {
+            auto race = f.race(0);
+            race->set_live_schedule(true);
+            race->riders()[0].sched_next = race->riders()[0].half_sched_next = 1000;
+            rr::PedestrianLook look;
+            look.bank.resize(6);
+            rr::ActorAnimationFrame held;
+            held.duration = 127;
+            held.control = 1;
+            look.bank[1] = look.bank[2] = rr::ActorSequence{held};
+            static const std::vector<rr::DzhrActor> empty;
+            rr::PedestrianSystem system(
+                [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+                [&](const rr::RouteSample&, uint8_t) { return &look; }, f.exe);
+            race->set_pedestrians(&system);
+            auto& p = system.pool()[0];
+            system.apply_template(p.body.bike);
+            p.active = true;
+            p.look = &look;
+            p.type = 4;
+            p.next_tick = 1000;
+            p.body.sample = p.body.previous_sample = 55;
+            p.body.bike.i32(0x1c) = p.anchor = 55 * 256 + 128;
+            p.body.bike.i32(0x28) = p.anchor_lateral = overlaps ? 0 : 100000;
+            rr::AnimationFrame frame;
+            frame.boxes = {{-30000, -10000, 30000, 10000}};
+            race->set_static_frames([&](uint32_t, uint32_t, uint8_t, bool) { return &frame; });
+            rr::RingStatics slice;
+            if (marking) {
+                slice.billboards = 1;
+                slice.billboard[0] = {10, 128, 0};
+            } else {
+                slice.borr_count = 1;
+                slice.borr_selector = 1;
+            }
+            const auto& s = race->route()[55];
+            race->ring_statics(55, s.section, s.local, slice);
+            race->countdown_step(); // prepare collision boxes for the next step
+            p.last_tick = 1;
+            p.next_tick = 2;
+            race->countdown_step();
+            check(p.state == (overlaps ? 3 : 0),
+                  "pedestrian callback must receive overlapping scenery and marking contacts only");
+        }
+}
+
+void pedestrian_shoulders(const Fixture& f) {
+    std::vector<rr::RouteSample> road(400);
+    for (auto& s : road) {
+        s.path.left = s.path.right = 500;
+        s.path.left_q8 = s.path.right_q8 = 512;
+        s.path.shoulder_left = s.path.shoulder_right = 250;
+    }
+    rr::TerrainSlice terrain;
+    terrain.type = 0;
+    rr::Race race(road, road, f.physics, f.specs.at(0), 90);
+    race.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+    race.set_live_schedule(true);
+    race.riders()[0].sched_next = race.riders()[0].half_sched_next = 1000;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [](const rr::RouteSample&, uint8_t) -> const rr::PedestrianLook* { return nullptr; }, f.exe);
+    race.set_pedestrians(&system);
+    for (int side : {-1, 1}) {
+        auto& p = system.pool()[0];
+        p = rr::Pedestrian{};
+        system.apply_template(p.body.bike);
+        p.active = true;
+        p.type = 10;
+        p.state = 7;
+        p.body.sample = p.body.previous_sample = 55;
+        p.body.bike.i32(0x1c) = p.anchor = 55 * 256;
+        p.body.bike.i32(0x28) = side * 800 * 256;
+        p.next_tick = race.ticks() + 1;
+        race.countdown_step();
+        check(std::abs(p.body.bike.i32(0x28)) <= 750 * 256,
+              "pedestrian mover must clamp both shoulder boundaries before vertical settling");
+    }
+}
+
+void roadside_pool(const Fixture& f) {
+    auto race = f.race(0);
+    race->set_live_schedule(true);
+    rr::TrackRing ring(f.course, 0);
+    race->set_track_ring(&ring);
+    auto& rider = race->riders()[0];
+    rider.sched_next = rider.half_sched_next = 10000;
+    const int32_t sample = ((ring.front_q8() - 0x5000) >> 8) + 5;
+    const auto route = rr::make_route(f.course, false);
+    const auto& s = route[size_t(sample)];
+    rr::RingStatics slots;
+    slots.borr_count = 3;
+    slots.borr[0] = s.offset - s.path.left;
+    slots.borr[1] = s.offset;
+    slots.borr[2] = s.offset + s.path.right;
+    race->ring_statics(sample, s.section, s.local, slots);
+    auto count = [&] {
+        return std::count_if(race->roadside_nodes().begin(), race->roadside_nodes().end(),
+                              [](const auto& n) { return n.active; });
+    };
+    check(count() == 1, "only strict interior scenery slots create scheduler nodes");
+    check(race->roadside_nodes()[0].position == sample * 256 + 0x80,
+          "in-road scenery node uses the original mid-slice position");
+    for (int i = 0; i < 25; ++i) race->ring_statics(sample, s.section, s.local, slots);
+    check(count() == 20, "the original scenery scheduler pool has twenty slots");
+    const auto rng = race->rng_state();
+    race->countdown_step();
+    check(count() == 20 && race->roadside_nodes()[0].next_tick == 21,
+          "null scenery callbacks preserve their twenty-tick scheduling interval");
+    for (int i = 0; i < 128; ++i) ring.advance(256, [] { return 0u; }, {});
+    while (race->ticks() < 21) race->countdown_step();
+    check(count() == 20 && race->roadside_nodes()[0].pending_remove,
+          "expired scenery nodes remain linked through their last scheduled tick");
+    race->countdown_step();
+    check(count() == 0, "marked scenery nodes unlink on the following tick");
+    check(race->rng_state() == rng, "null scenery scheduler nodes must consume no random draws");
+}
+
+// Graphics residency is independent of the cached animation-table words.
+void graphics_replacement(const Fixture& f) {
+    auto race = f.race(0);
+    rr::TrackRing ring(f.course, 0);
+    race->set_track_ring(&ring);
+    rr::PedestrianLook old_look, new_look;
+    old_look.bank.resize(6);
+    new_look.bank.resize(6);
+    rr::ActorAnimationFrame held;
+    held.duration = 127;
+    held.control = 1;
+    old_look.bank[0] = rr::ActorSequence{held};
+    new_look.bank[5] = rr::ActorSequence{held};
+    bool replaced = false;
+    static const std::vector<rr::DzhrActor> empty;
+    rr::PedestrianSystem system(
+        [](const rr::RouteSample&) -> const std::vector<rr::DzhrActor>& { return empty; },
+        [&](const rr::RouteSample&, uint8_t) { return replaced ? &new_look : &old_look; }, f.exe);
+    race->set_pedestrians(&system);
+    auto& p = system.pool()[0];
+    p.active = true;
+    p.look = &old_look;
+    p.body.sample = size_t((ring.front_q8() - 0x5000) >> 8) + 40;
+    p.body.previous_sample = p.body.sample;
+    p.body.bike.i32(0x1c) = p.anchor = int32_t(p.body.sample * 256);
+    system.apply_template(p.body.bike);
+    p.body.bike.u8(0xc0) |= 0x10;
+    p.next_tick = 1;
+    race->countdown_step();
+    check(p.loaded() && p.has(0), "resident graphics start loaded");
+    replaced = true;
+    p.next_tick = 2;
+    race->countdown_step();
+    check(!p.loaded() && p.look == &old_look && p.has(0),
+          "eviction clears graphics validity while retaining the old bank words");
+    check(!p.pre_draw_resources[0] && p.pre_draw_resources[1],
+          "pre-draw checkpoint records eviction before any lazy reload");
+    p.body.sample = size_t((ring.front_q8() - 0x5000) >> 8) + 5;
+    p.body.previous_sample = p.body.sample;
+    p.body.bike.i32(0x1c) = p.anchor = int32_t(p.body.sample * 256);
+    p.next_tick = 1000;
+    race->countdown_step();
+    check(p.loaded() && p.look == &new_look && !p.has(0) && p.has(5),
+          "drawing an evicted actor reloads the replacement family");
+    check(!p.pre_draw_resources[0], "lazy reload does not rewrite the pre-draw checkpoint");
 }
 
 // The scheduler reads the ring camera before the player driver updates it.
@@ -250,13 +654,24 @@ void staged_hit(const Fixture& f, int32_t speed, int expected_state, bool bump) 
 
 int main(int argc, char** argv) {
     try {
-        rr::Assets probe(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets probe(
+            (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root()));
         if (!probe.exists("DATA/COURSES/CITY.CRS")) {
             std::cout << "No imported course corpus\n";
             return 0;
         }
         if (!SDL_Init(0)) std::cerr << SDL_GetError() << '\n';
+        family_buffer_tail();
+        retained_road_slice();
         Fixture city("CITY");
+        recycled_pedestrian(city);
+        allocation_ground_snapshot(city);
+        pedestrian_statics(city);
+        pedestrian_shoulders(city);
+        roadside_pool(city);
+        initial_pedestrian_overlap(city);
+        retained_arrival_slice(city);
+        graphics_replacement(city);
         scheduler_camera(city);
         // DZHR actor records survive placement (0x00451fc0 gate, level 1).
         size_t pedestrians = 0, cops = 0, looks = 0;

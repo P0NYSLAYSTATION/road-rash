@@ -25,6 +25,7 @@ add_custom_target(rr-build-provenance
         --manifest "${CMAKE_BINARY_DIR}/build-info.json"
         --version-header "${CMAKE_BINARY_DIR}/generated/rr_build_version.h"
         --config "$<CONFIG>" --compiler "${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}"
+        --cache "${CMAKE_BINARY_DIR}/CMakeCache.txt"
     BYPRODUCTS "${CMAKE_BINARY_DIR}/generated/rr_build_info.hpp" "${CMAKE_BINARY_DIR}/generated/rr_build_version.h"
     VERBATIM)
 option(RR_DEV_ASSETS "Allow developer-only packaged Android game assets" OFF)
@@ -82,11 +83,16 @@ else()
         include(cmake/sdl3_static.cmake)
     endif()
 endif()
+include(cmake/jpeg_scalar.cmake)
+include(cmake/freetype.cmake)
+include(cmake/wine_wingdings.cmake)
 add_library(rr-resource STATIC src/resource.cpp src/course.cpp src/road.cpp src/assets.cpp src/framebuffer.cpp src/bike.cpp src/race.cpp src/input.cpp src/bob.cpp src/session.cpp src/iso9660.cpp src/sha256.cpp src/importer.cpp src/import_job.cpp src/wav.cpp src/mixer.cpp src/ima_adpcm.cpp src/avi.cpp src/cinepak.cpp src/video_player.cpp src/raster.cpp src/terrain.cpp src/scene.cpp src/polygon.cpp src/texture.cpp src/cel.cpp src/world_renderer.cpp src/render_threads.cpp src/road_panels.cpp src/road_materials.cpp src/exe_tables.cpp src/pe_strings.cpp src/career.cpp src/text.cpp src/settings.cpp src/rri.cpp src/frontend.cpp src/sound.cpp src/explode.cpp src/rider_sprites.cpp src/mmpx.cpp src/upscale_cache.cpp src/atomic_file.cpp src/display.cpp src/native_strings.cpp src/native_screens.cpp src/view_state.cpp src/texture_perspective.cpp src/framebuffer_rgb.cpp src/raster_rgb.cpp src/fog.cpp src/post_chain.cpp src/upscale_import.cpp src/race_actions.cpp src/race_overlay.cpp src/race_helpers.cpp src/game_types.cpp src/race_screen.cpp)
 target_sources(rr-resource PRIVATE src/native_controllers.cpp src/port_config.cpp src/audio_3do.cpp src/midi_synth.cpp src/presentation.cpp)
-target_link_libraries(rr-resource PUBLIC SDL3::SDL3 Threads::Threads)
+target_link_libraries(rr-resource PUBLIC SDL3::SDL3 Threads::Threads PRIVATE rr-jpeg rr-freetype)
+target_include_directories(rr-resource BEFORE PRIVATE "${RR_JPEG_SOURCE}/src" "${RR_JPEG_BINARY}"
+    "${RR_FREETYPE_BINARY}/include" "${RR_FREETYPE_SOURCE}/include")
 if(WIN32)
-    target_link_libraries(rr-resource PUBLIC shell32 ole32 d3d9 dinput8 dxguid) # SHGetKnownFolderPath (plan 33b)
+    target_link_libraries(rr-resource PUBLIC shell32 ole32 d3d9 dinput8 dxguid gdi32 user32) # SHGetKnownFolderPath (plan 33b)
 endif()
 if(EMSCRIPTEN AND RR_WEB_BROWSER)
     target_compile_definitions(rr-resource PUBLIC RR_WEB_BROWSER=1)
@@ -98,8 +104,9 @@ if(EMSCRIPTEN AND RR_WEB_BROWSER)
         -sEXPORTED_FUNCTIONS=_main,_malloc,_free -lidbfs.js)
 endif()
 
-target_sources(rr-resource PRIVATE src/family.cpp src/terrain_panels.cpp src/building_panels.cpp src/terrain_ground.cpp src/course_scene.cpp src/hud.cpp src/animation.cpp src/actor_animation.cpp src/actor_descriptors.cpp src/actor_render.cpp src/actor_nodes.cpp src/crash.cpp src/police.cpp src/scenery.cpp src/traffic.cpp src/pedestrians.cpp src/race_pedestrians.cpp src/race_schedule.cpp src/race_music.cpp src/race_setup.cpp src/track_ring.cpp src/race_state.cpp src/net/rollback.cpp src/det_math.cpp src/utf8_path.cpp src/system_fonts.cpp src/platform_files.cpp src/platform_linux.cpp src/file_browser.cpp)
+target_sources(rr-resource PRIVATE src/family.cpp src/terrain_panels.cpp src/building_panels.cpp src/terrain_ground.cpp src/course_scene.cpp src/hud.cpp src/animation.cpp src/actor_animation.cpp src/actor_descriptors.cpp src/actor_render.cpp src/actor_nodes.cpp src/crash.cpp src/police.cpp src/scenery.cpp src/traffic.cpp src/pedestrians.cpp src/race_pedestrians.cpp src/race_schedule.cpp src/race_music.cpp src/race_setup.cpp src/track_ring.cpp src/race_state.cpp src/net/rollback.cpp src/det_math.cpp src/utf8_path.cpp src/system_fonts.cpp "${RR_WINGDINGS_CPP}" src/platform_files.cpp src/platform_linux.cpp src/file_browser.cpp)
 set_target_properties(rr-resource PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_sources(rr-resource PRIVATE src/track_ring_trackers.cpp)
 target_include_directories(rr-resource PUBLIC src)
 target_include_directories(rr-resource SYSTEM PRIVATE third_party)   # plan 30 Task 3: vendor headers out of warnings
 if(RR_FUZZ)
@@ -148,6 +155,10 @@ else()
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/third_party/SDL-LICENSE.txt"
                 "${CMAKE_SOURCE_DIR}/third_party/LICENSE"
+                "${CMAKE_SOURCE_DIR}/third_party/JPEG-LICENSE.md"
+                "${CMAKE_SOURCE_DIR}/third_party/JPEG-README.ijg"
+                "${CMAKE_SOURCE_DIR}/third_party/FreeType-FTL.txt"
+                "${CMAKE_SOURCE_DIR}/third_party/Wine-Wingdings-LGPL.txt"
                 "${CMAKE_SOURCE_DIR}/macos/README.txt"
                 "$<TARGET_BUNDLE_DIR:rr-game>/Contents/Resources"
             COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:rr-game>"
@@ -163,6 +174,11 @@ else()
     include(CTest)
     add_compile_definitions(RR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     if(BUILD_TESTING)
+        set(RR_TEST_ASSETS_DIR "$ENV{RR_ASSETS}" CACHE PATH "Local legitimate PC assets used by tests")
+        if(NOT RR_TEST_ASSETS_DIR)
+            set(RR_TEST_ASSETS_DIR "${CMAKE_SOURCE_DIR}/../cdrom/ROADRASH" CACHE PATH "Local legitimate PC assets used by tests" FORCE)
+        endif()
+        add_compile_definitions(RR_TEST_ASSETS_DIR="${RR_TEST_ASSETS_DIR}")
         if(NOT EMSCRIPTEN)
         # Plan 33b: also proves a GUI-subsystem rr-game.exe reaches CTest's stdout.
         add_test(NAME game-version COMMAND rr-game --version)
@@ -176,7 +192,7 @@ else()
         add_test(NAME first-run-smoke-unicode COMMAND rr-game --first-run-smoke)
         set_tests_properties(first-run-smoke-unicode PROPERTIES
             ENVIRONMENT "RR_PREF_OVERRIDE=${CMAKE_BINARY_DIR}/first-run-TÃ«st ãƒ‡ã‚£ãƒ¬ã‚¯ãƒˆãƒª")
-        add_test(NAME game-race-wiring COMMAND rr-game --assets ${CMAKE_SOURCE_DIR}/../cdrom/ROADRASH --race --print-wiring)
+        add_test(NAME game-race-wiring COMMAND rr-game --assets "${RR_TEST_ASSETS_DIR}" --race --print-wiring)
         set_tests_properties(game-race-wiring PROPERTIES PASS_REGULAR_EXPRESSION "terrain=1 .*ring=1 .*ride_library=1 .*nitro=1 .*finish=1 .*personalities=1" SKIP_RETURN_CODE 77)
         endif()
         add_executable(oracle-patch-test oracle/patch_test.c)
@@ -193,35 +209,72 @@ else()
             rr_web_hostfs(oracle-sim-test)
         endif()        # Diagnostic gate accepts only a pinned trace hash + exact divergence.
         # Strict fidelity is a separate verify-sim target; never invert all failures.
+        # Native Windows has fresh receipted human captures from E:/RR. Use
+        # strict acceptance for those, keeping historical diagnostics elsewhere.
+        if(WIN32 AND EXISTS "${RR_TEST_ASSETS_DIR}/ROADRASH.EXE")
+            set(RR_CTEST_SIM_MODE acceptance)
+            set(RR_CTEST_SIM_DRIVER human)
+            set(RR_SIM_BASELINE_DEFAULT napa-human-2400.tsv)
+            set(RR_SIM_FIELD_DEFAULT napa-expanded-human-2400.tsv)
+            set(RR_SIM_SCHEMA2_DEFAULT city-clock-motion-2400.tsv)
+            set(RR_SIM_L5_DEFAULT hiway-l5-ground-motion-2400-s1.tsv)
+            set(RR_SAVE_DEFAULT save-seed-native.tsv-save.rrs)
+        else()
+            set(RR_CTEST_SIM_MODE diagnostic)
+            set(RR_CTEST_SIM_DRIVER demo)
+            set(RR_SIM_BASELINE_DEFAULT sim-napa-solo.tsv)
+            set(RR_SIM_FIELD_DEFAULT napa-field-l1-20261017.tsv)
+            set(RR_SIM_SCHEMA2_DEFAULT napa-field-l1-schema2-20261018.tsv)
+            set(RR_SIM_L5_DEFAULT napa-field-l5-20261018.tsv)
+            set(RR_SAVE_DEFAULT save-seed-20261026.rrs)
+        endif()
+        set(RR_TEST_SIM_BASELINE "${CMAKE_SOURCE_DIR}/analysis/oracle/${RR_SIM_BASELINE_DEFAULT}" CACHE FILEPATH "Original baseline simulation capture")
+        set(RR_TEST_SIM_FIELD "${CMAKE_SOURCE_DIR}/analysis/oracle/${RR_SIM_FIELD_DEFAULT}" CACHE FILEPATH "Original expanded live-field capture")
+        set(RR_TEST_SIM_SCHEMA2 "${CMAKE_SOURCE_DIR}/analysis/oracle/${RR_SIM_SCHEMA2_DEFAULT}" CACHE FILEPATH "Original car/AI/animation field capture")
+        set(RR_TEST_SIM_LEVEL5 "${CMAKE_SOURCE_DIR}/analysis/oracle/${RR_SIM_L5_DEFAULT}" CACHE FILEPATH "Original level-5 live-field capture")
+        set(RR_TEST_SAVE_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/${RR_SAVE_DEFAULT}" CACHE FILEPATH "Original seeded save-writer fixture")
         add_test(NAME oracle-sim COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode diagnostic
+            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode ${RR_CTEST_SIM_MODE} --driver ${RR_CTEST_SIM_DRIVER}
+            --fixture "${RR_TEST_SIM_BASELINE}" --timeout 600
             --binary "$<TARGET_FILE:oracle-sim-test>"
             --report "${CMAKE_BINARY_DIR}/oracle-diagnostic.json")
         # verify_sim exits 77 when the git-ignored fixture is absent (CI hosts).
         set_tests_properties(oracle-sim PROPERTIES SKIP_RETURN_CODE 77)
         # Live-field capture (plan 10 Tasks 6/7): full2400 tick replay; skipped without the git-ignored capture.
         add_test(NAME oracle-sim-field COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode diagnostic
+            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode ${RR_CTEST_SIM_MODE} --driver ${RR_CTEST_SIM_DRIVER}
             --binary "$<TARGET_FILE:oracle-sim-test>"
-            --fixture "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-field-l1-20261017.tsv"
+            --fixture "${RR_TEST_SIM_FIELD}" --timeout 600
             --report "${CMAKE_BINARY_DIR}/oracle-field-diagnostic.json")
         set_tests_properties(oracle-sim-field PROPERTIES SKIP_RETURN_CODE 77)
         # Corrected car metadata plus every AI animation/relationship word.
         add_test(NAME oracle-sim-field-schema2 COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode diagnostic
+            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode ${RR_CTEST_SIM_MODE} --driver ${RR_CTEST_SIM_DRIVER}
             --binary "$<TARGET_FILE:oracle-sim-test>"
-            --fixture "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-field-l1-schema2-20261018.tsv"
+            --fixture "${RR_TEST_SIM_SCHEMA2}" --timeout 600
             --report "${CMAKE_BINARY_DIR}/oracle-field-schema2-diagnostic.json")
         set_tests_properties(oracle-sim-field-schema2 PROPERTIES SKIP_RETURN_CODE 77)
         # Level-5 live field (plan 10 Task 6 scenario `napa-field-l5`): the same
         # 2400-tick free run with RR_ORACLE_LEVEL=5 selected through the
         # original level setter, so level brain/bike/grid tables are exercised.
         add_test(NAME oracle-sim-field-l5 COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode diagnostic
+            "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode ${RR_CTEST_SIM_MODE} --driver ${RR_CTEST_SIM_DRIVER}
             --binary "$<TARGET_FILE:oracle-sim-test>"
-            --fixture "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-field-l5-20261018.tsv"
+            --fixture "${RR_TEST_SIM_LEVEL5}" --timeout 600
             --report "${CMAKE_BINARY_DIR}/oracle-field-l5-diagnostic.json")
         set_tests_properties(oracle-sim-field-l5 PROPERTIES SKIP_RETURN_CODE 77)
+        # A wreck ends after recovery, not when damage first reaches zero.
+        # Required on the supplied native Windows asset/capture configuration.
+        if(WIN32 AND EXISTS "${RR_TEST_ASSETS_DIR}/ROADRASH.EXE")
+            set(RR_TEST_SIM_WRECK "${CMAKE_SOURCE_DIR}/analysis/oracle/medly-finish-keyboard-l1-s1.tsv"
+                CACHE FILEPATH "Original complete human wreck recording")
+            add_test(NAME oracle-sim-wreck COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode acceptance --driver human
+                  --binary "$<TARGET_FILE:oracle-sim-test>" --assets "${RR_TEST_ASSETS_DIR}"
+                  --fixture "${RR_TEST_SIM_WRECK}" --timeout 600
+                --report "${CMAKE_BINARY_DIR}/oracle-wreck-acceptance.json")
+            set_tests_properties(oracle-sim-wreck PROPERTIES LABELS "sim;disc;fixture")
+        endif()
         # Level-5 live field re-capture with the w2c/we8 proxy (per-tick car
         # +0x2c/+0xe8 branch diagnostics) is verified manually, not as a CTest:
         # now 2400/2400 identical with 13 golden-only diagnostic keys, and a
@@ -244,20 +297,26 @@ else()
         if(EMSCRIPTEN)
             rr_web_hostfs(oracle-road-test)
         endif()
-        add_test(NAME oracle-road COMMAND oracle-road-test)
+        set(RR_TEST_ROAD_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-attract.tsv" CACHE FILEPATH "Original road projection capture")
+        set(RR_TEST_SCENE_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/city-scene.tsv" CACHE FILEPATH "Original composed scene capture")
+        set(RR_TEST_CANYN_TERRAIN_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/pch-tunnel-20261016.tsv" CACHE FILEPATH "Original Canyn tunnel/terrain capture")
+        set(RR_TEST_MEDLY_TERRAIN_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/medly-jump.tsv" CACHE FILEPATH "Original Medly street/building capture")
+        add_test(NAME oracle-road COMMAND oracle-road-test "${RR_TEST_ROAD_FIXTURE}")
         set_tests_properties(oracle-road PROPERTIES SKIP_RETURN_CODE 77)
         add_executable(oracle-scene-test tests/oracle_scene_test.cpp)
         target_link_libraries(oracle-scene-test PRIVATE rr-resource)
         if(EMSCRIPTEN)
             rr_web_hostfs(oracle-scene-test)
         endif()
-        add_test(NAME oracle-scene COMMAND oracle-scene-test)
+        add_test(NAME oracle-scene COMMAND oracle-scene-test "${RR_TEST_SCENE_FIXTURE}")
         set_tests_properties(oracle-scene PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME oracle-scene-native-actors COMMAND oracle-scene-test --native-actors "${RR_TEST_SCENE_FIXTURE}")
+        set_tests_properties(oracle-scene-native-actors PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture;slow")
         # Native terrain construction vs the original CANYN tunnel capture (skips without it).
-        add_test(NAME oracle-terrain COMMAND oracle-scene-test --native-terrain ${CMAKE_SOURCE_DIR}/analysis/oracle/pch-tunnel-20261016.tsv)
+        add_test(NAME oracle-terrain COMMAND oracle-scene-test --native-terrain "${RR_TEST_CANYN_TERRAIN_FIXTURE}")
         set_tests_properties(oracle-terrain PROPERTIES SKIP_RETURN_CODE 77)
         # MEDLY side streets and building ends (0x0040ba10, 0x0040c450, 0x0040cbb0).
-        add_test(NAME oracle-terrain-medly COMMAND oracle-scene-test --native-terrain --nodes-only ${CMAKE_SOURCE_DIR}/analysis/oracle/medly-jump.tsv)
+        add_test(NAME oracle-terrain-medly COMMAND oracle-scene-test --native-terrain "${RR_TEST_MEDLY_TERRAIN_FIXTURE}")
         set_tests_properties(oracle-terrain-medly PROPERTIES SKIP_RETURN_CODE 77)
         add_executable(oracle-raster-test tests/oracle_raster_test.cpp)
         target_link_libraries(oracle-raster-test PRIVATE rr-resource)
@@ -347,14 +406,30 @@ else()
             rr_web_hostfs(road-test)
         endif()
         add_test(NAME road-projection COMMAND road-test)
+        set(RR_TEST_ACTOR_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-actor-animation-fixtures.tsv" CACHE FILEPATH "Original actor component capture")
+        set(RR_TEST_CRASH_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-crash-entry-fixtures.tsv" CACHE FILEPATH "Original crash component capture")
+        set(RR_TEST_WALK_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-crash-walking.tsv" CACHE FILEPATH "Original walking component capture")
+        set(RR_TEST_POLICE_SPAWN_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-police-spawn.tsv" CACHE FILEPATH "Original police constructor capture")
+        set(RR_TEST_POLICE_ARREST_FIXTURE "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-police-arrest.tsv" CACHE FILEPATH "Original police arrest capture")
+        set(RR_ORIGINAL_COMPONENT_TESTS actor_animation actor_descriptors actor_render actor_traffic building_panels)
         foreach(t framebuffer assets bike race race_schedule car_contact frozen_state input bob session golden sha256 iso9660 importer import_job wav mixer ima_adpcm avi cinepak raster view terrain scene polygon texture cel family course course_scene hud animation actor_animation actor_descriptors actor_render actor_nodes crash police scenery building_panels terrain_ground world_renderer road_panels road_materials exe_tables pe_strings career text frontend settings sound music traffic actor_traffic sim_fields mmpx upscale_cache race_setup pedestrian track_ring display native_screens render_threads rgba_cache atomic_file texture_edge check det_math fp_contract wide_math importer_case utf8_path system_fonts platform_files file_browser platform_linux)
             add_executable(${t}-test tests/${t}_test.cpp)
             target_link_libraries(${t}-test PRIVATE rr-resource SDL3::SDL3)
             if(EMSCRIPTEN)
                 rr_web_hostfs(${t}-test)
             endif()
-            add_test(NAME ${t} COMMAND ${t}-test)
+            if(t IN_LIST RR_ORIGINAL_COMPONENT_TESTS)
+                add_test(NAME ${t} COMMAND ${t}-test "${RR_TEST_ACTOR_FIXTURE}")
+            elseif(t STREQUAL "crash")
+                add_test(NAME ${t} COMMAND ${t}-test "${RR_TEST_CRASH_FIXTURE}" "${RR_TEST_WALK_FIXTURE}")
+            elseif(t STREQUAL "police")
+                add_test(NAME ${t} COMMAND ${t}-test "${RR_TEST_POLICE_SPAWN_FIXTURE}" "${RR_TEST_POLICE_ARREST_FIXTURE}")
+            else()
+                add_test(NAME ${t} COMMAND ${t}-test)
+            endif()
         endforeach()
+        set_tests_properties(${RR_ORIGINAL_COMPONENT_TESTS} crash police PROPERTIES
+            SKIP_RETURN_CODE 77 LABELS "disc;fixture;sim")
         add_executable(race_soak-test tests/race_soak_test.cpp)
         target_link_libraries(race_soak-test PRIVATE rr-resource SDL3::SDL3)
         if(EMSCRIPTEN)
@@ -367,9 +442,14 @@ else()
         set_tests_properties(pe-strings-corpus PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME career-corpus COMMAND career-test --corpus)
         set_tests_properties(career-corpus PROPERTIES SKIP_RETURN_CODE 77)
-        add_test(NAME career-save-corpus COMMAND career-test --save-corpus)
+        add_test(NAME career-save-corpus COMMAND career-test --save-corpus "${RR_TEST_SAVE_FIXTURE}")
         set_tests_properties(career-save-corpus PROPERTIES SKIP_RETURN_CODE 77)
         set_tests_properties(text PROPERTIES SKIP_RETURN_CODE 77)
+        if(WIN32)
+            add_test(NAME text-system-mono COMMAND text-test "${RR_TEST_ASSETS_DIR}" --system-mono)
+            add_test(NAME text-system-rgb565 COMMAND text-test "${RR_TEST_ASSETS_DIR}" --system-rgb565)
+            set_tests_properties(text-system-mono text-system-rgb565 PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture")
+        endif()
         set_tests_properties(frontend PROPERTIES SKIP_RETURN_CODE 77)
         set_tests_properties(native_screens PROPERTIES SKIP_RETURN_CODE 77)
         set_tests_properties(sound PROPERTIES SKIP_RETURN_CODE 77)
@@ -500,7 +580,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT EMSCRIPTEN)
   endif()
   add_test(NAME native-3do-mixer COMMAND fork-audio-test mixer)
   add_test(NAME builtin-midi COMMAND fork-audio-test midi)
-  add_test(NAME builtin-race-midi COMMAND fork-audio-test race-midi "${CMAKE_SOURCE_DIR}/../cdrom/ROADRASH")
+  add_test(NAME builtin-race-midi COMMAND fork-audio-test race-midi "${RR_TEST_ASSETS_DIR}")
   set_tests_properties(builtin-race-midi PROPERTIES SKIP_RETURN_CODE 77)
   add_test(NAME directx9-main-window COMMAND fork-audio-test dx9)
   set_tests_properties(native-3do-mixer PROPERTIES LABELS "unit")
@@ -515,4 +595,64 @@ if(WIN32 AND BUILD_TESTING)
     add_test(NAME integer-framebuffer COMMAND modern-port-test scaling)
     add_test(NAME direct-tcp-network COMMAND modern-port-test network)
     set_tests_properties(native-windows-controllers direct-tcp-network PROPERTIES LABELS "unit")
+endif()
+
+if(BUILD_TESTING AND NOT ANDROID AND NOT EMSCRIPTEN)
+    set(RR_TEST_MEDIA_ASSETS "$ENV{RR_TEST_MEDIA_ASSETS}" CACHE PATH "Explicit local PC-disc movie corpus for tests")
+    set(RR_TEST_TEXT_PROBES "$ENV{RR_TEST_TEXT_PROBES}" CACHE PATH "Receipted native GDI text probe directory")
+    set(RR_TEST_FRONTEND_REFERENCE "$ENV{RR_TEST_FRONTEND_REFERENCE}" CACHE PATH "Completed native original frontend capture run; required when configured")
+    set(RR_TEST_MOVING_FIXTURE "$ENV{RR_TEST_MOVING_FIXTURE}" CACHE FILEPATH "Original moving scene and framebuffer capture")
+    set(RR_TEST_RASTER_FIXTURE "$ENV{RR_TEST_RASTER_FIXTURE}" CACHE FILEPATH "Original raster, material and CEL component capture")
+    set(RR_TEST_DRIVEN_SAVE_REFERENCE "$ENV{RR_TEST_DRIVEN_SAVE_REFERENCE}" CACHE PATH "Original driven career RRS and memory payload; separate from menu pixels")
+    if(RR_TEST_DRIVEN_SAVE_REFERENCE AND TEST career-save-corpus)
+        set_property(TEST career-save-corpus APPEND PROPERTY ENVIRONMENT "RR_TEST_DRIVEN_SAVE_REFERENCE=${RR_TEST_DRIVEN_SAVE_REFERENCE}")
+    endif()
+    if(WIN32 AND EXISTS "${CMAKE_SOURCE_DIR}/analysis/oracle/ground-evaluator-split-fixtures.tsv")
+        set(RR_GROUND_DEFAULT "${CMAKE_SOURCE_DIR}/analysis/oracle/ground-evaluator-split-fixtures.tsv")
+    else()
+        set(RR_GROUND_DEFAULT "")
+    endif()
+    set(RR_TEST_GROUND_FIXTURE "${RR_GROUND_DEFAULT}" CACHE FILEPATH "Original terrain evaluator component fixture")
+    if(RR_TEST_GROUND_FIXTURE)
+        set_property(TEST terrain_ground APPEND PROPERTY ENVIRONMENT "RR_TEST_GROUND_FIXTURE=${RR_TEST_GROUND_FIXTURE}")
+    endif()
+    # Replace the historical prefix-only police probes with complete-state,
+    # single-anchor acceptance when the original installation is supplied.
+    # Missing local fixtures fail these gates; they cannot become skips.
+    if(TARGET oracle-sim-test AND TEST police AND
+       ((WIN32 AND EXISTS "${RR_TEST_ASSETS_DIR}/ROADRASH.EXE") OR
+        EXISTS "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-human-parked-runon.tsv"))
+        file(READ "${CMAKE_SOURCE_DIR}/oracle/scenarios/police-cases.json" RR_POLICE_CASES)
+        string(JSON RR_POLICE_COUNT LENGTH "${RR_POLICE_CASES}")
+        math(EXPR RR_POLICE_LAST "${RR_POLICE_COUNT} - 1")
+        foreach(index RANGE 0 ${RR_POLICE_LAST})
+            string(JSON scenario GET "${RR_POLICE_CASES}" ${index} name)
+            add_test(NAME "oracle-police-${scenario}" COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode acceptance --driver human
+                --binary "$<TARGET_FILE:oracle-sim-test>" --assets "${RR_TEST_ASSETS_DIR}"
+                --fixture "${CMAKE_SOURCE_DIR}/analysis/oracle/${scenario}.tsv" --timeout 600
+                --report "${CMAKE_BINARY_DIR}/${scenario}-acceptance.json")
+            set_tests_properties("oracle-police-${scenario}" PROPERTIES LABELS "disc;fixture;sim")
+        endforeach()
+        set_property(TEST police APPEND PROPERTY ENVIRONMENT "RR_TEST_STRICT_POLICE=1")
+    endif()
+    get_property(RR_CONFIGURED_TESTS DIRECTORY PROPERTY TESTS)
+    foreach(test IN LISTS RR_CONFIGURED_TESTS)
+        set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_ASSETS=${RR_TEST_ASSETS_DIR}")
+        if(RR_TEST_MEDIA_ASSETS)
+            set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_TEST_MEDIA_ASSETS=${RR_TEST_MEDIA_ASSETS}")
+        endif()
+        if(RR_TEST_TEXT_PROBES)
+            set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_TEST_TEXT_PROBES=${RR_TEST_TEXT_PROBES}")
+        endif()
+        if(RR_TEST_FRONTEND_REFERENCE)
+            set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_TEST_FRONTEND_REFERENCE=${RR_TEST_FRONTEND_REFERENCE}")
+        endif()
+        if(RR_TEST_RASTER_FIXTURE)
+            set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_TEST_RASTER_FIXTURE=${RR_TEST_RASTER_FIXTURE}")
+        endif()
+        if(RR_TEST_MOVING_FIXTURE)
+            set_property(TEST "${test}" APPEND PROPERTY ENVIRONMENT "RR_TEST_MOVING_FIXTURE=${RR_TEST_MOVING_FIXTURE}")
+        endif()
+    endforeach()
 endif()

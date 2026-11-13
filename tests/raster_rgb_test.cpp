@@ -1,3 +1,5 @@
+#include "test_assets.hpp"
+#include "moving_frames.hpp"
 // Plan 21 Task 4: full-colour raster with bilinear/trilinear filtering.
 // - Equivalence: render_nodes_rgb with nearest + all-off equals to_rgba of
 //   the indexed render, at scales 1 and 2, over golden + synthetic lists.
@@ -36,7 +38,7 @@ int main(int argc, char** argv) {
             std::cerr << "FAIL " << what << "\n";
         }
     };
-    std::string assets_root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    std::string assets_root = rr::test::assets_root();
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--assets" && i + 1 < argc) assets_root = argv[++i];
@@ -109,12 +111,13 @@ int main(int argc, char** argv) {
         if (!(std::abs(r - 128) <= 2 && std::abs(g - 128) <= 2 && std::abs(b - 128) <= 2))
             std::cerr << "centre=" << r << "," << g << "," << b << "\n";
     }
-    const std::string tsv = rr::golden::oracle_dir() + "/napa-moving.tsv";
+    const std::string tsv = rr::test::moving_fixture(rr::golden::oracle_dir() + "/napa-moving.tsv");
     if (!std::filesystem::exists(tsv) || !assets.exists("DATA/GLOBAL.RSC")) {
         std::cout << "skip: no moving capture or disc\n";
         return 77;
     }
     const auto golden = rr::golden::load(tsv);
+    const auto selected = rr::test::moving_scene_files(golden.frames);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
     const int course = int(golden.frames.at(0).at("course"));
     const auto lib = rr::testlib::load_texture_library(assets, course_files[course]);
@@ -127,7 +130,7 @@ int main(int argc, char** argv) {
         for (const auto& f : golden.frames) {
             if (!f.count("scene.file")) continue;
             const long file = f.at("scene.file");
-            if (file != 0 && file != 60 && file != 120) continue;
+            if (!selected.count(file)) continue;
             const auto dump = rr::scene::load(stem + "-scene" + std::to_string(file) + ".raw");
             std::vector<rr::DrawNode> nodes;
             std::vector<std::unique_ptr<rr::CelTexture>> dynamic;
@@ -174,7 +177,7 @@ int main(int argc, char** argv) {
             ++frames;
         }
     }
-    check(frames > 0, "golden frames compared");
+    check(frames == 10, "five moving frames compared at both scales");
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;
 }

@@ -13,7 +13,9 @@ RUNTIME = ['rr-game.exe', 'libfluidsynth-3.dll', 'sndfile.dll', 'SDL3.dll']
 NOTICES = ['SDL-LICENSE.txt', 'LICENSE', 'libdatachannel-LICENSE.txt',
            'libjuice-LICENSE.txt', 'usrsctp-LICENSE.md', 'plog-LICENSE.txt',
            'OpenSSL-LICENSE.txt', 'README.md', 'fluidsynth-COPYING.txt',
-           'libsndfile-COPYING.txt', 'FFmpeg-LICENSE.txt', '7zip-LICENSE.txt', 'Python-LICENSE.txt', 'PyInstaller-LICENSE.txt']
+           'libsndfile-COPYING.txt', 'FFmpeg-LICENSE.txt', '7zip-LICENSE.txt', 'Python-LICENSE.txt', 'PyInstaller-LICENSE.txt',
+           'FreeType-FTL.txt', 'JPEG-LICENSE.md', 'JPEG-README.ijg',
+           'Wine-Wingdings-LGPL.txt', 'wine-fonts/README.md', 'wine-fonts/wingding.sfd']
 
 def main():
     parser = argparse.ArgumentParser()
@@ -59,6 +61,7 @@ def main():
     licenses = stage / 'licenses'
     licenses.mkdir(exist_ok=True)
     for name in NOTICES:
+        (licenses / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / 'third_party' / name, licenses / name)
     info = subprocess.check_output([str(build / 'rr-game.exe'), '--build-info'], text=True)
     json.loads(info)
@@ -76,6 +79,13 @@ A missing or invalid 3DO bank automatically retains PC audio.
 Source and build instructions: https://github.com/P0NYSLAYSTATION/road-rash
 Fidelity details: docs/FORK_AUDIO.md in that repository.
 BUILD_INFO.json identifies the source revision used for this executable.
+
+This software is based in part on the work of the FreeType Team and the
+Independent JPEG Group. It includes unmodified FreeType 2.13.3 (FTL),
+libjpeg-turbo 3.1.4.1, and Wine 11.18's LGPL Wingdings fallback font.
+The font's FontForge source and license are in licenses/wine-fonts/ and
+licenses/Wine-Wingdings-LGPL.txt. Replace third_party/wine-fonts/wingding.ttf
+and rebuild to use a modified font.
 
 FluidSynth 2.6.2 and libsndfile 1.2.2 use replaceable dynamic libraries (LGPL).
 Licenses and source notices are in licenses/. Offline import tools bundle

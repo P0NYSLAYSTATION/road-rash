@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include <cstdlib>
 #include "bike.hpp"
@@ -355,8 +356,9 @@ static int replay_main(int argc, char** argv) {
         std::cout << "SKIP missing " << file << '\n';
         return rr::golden::skip;
     }
-    const auto g = rr::golden::load(file);
-    if (g.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" && g.exe != "b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563")
+    const auto g = rr::golden::load_indexed(file);
+    if (g.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" &&
+        g.exe != "b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563")
         throw std::runtime_error("different executable");
     if (g.frames.empty()) throw std::runtime_error("no frames");
     const auto& h = g.frames.at(0);
@@ -373,7 +375,7 @@ static int replay_main(int argc, char** argv) {
     if (course_entry < 1 || course_entry > 5) throw std::runtime_error("course out of range");
     const int level = int(get("level"));
     const std::string assets_root =
-        args.size() > 1 ? args[1] : std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+        args.size() > 1 ? args[1] : rr::test::assets_root();
     if (!std::filesystem::exists(assets_root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;
@@ -483,7 +485,9 @@ static int replay_main(int argc, char** argv) {
     // The field capture's setup pedestrians first run at tick 1 (frame-0
     // positions +36, one tick-1 move with dt 1 + interval), where the solo
     // captures measured next = 2 (see Race::set_pedestrian_setup_tick).
-    if (!solo) config.pedestrian_setup_tick = 0;
+    config.pedestrian_setup_tick =
+        h.count("pedestrian.setup_tick") ? int(h.at("pedestrian.setup_tick")) : (solo ? 2 : 0);
+    if (h.count("traffic.setup_tick")) config.ring_setup_tick = uint32_t(h.at("traffic.setup_tick"));
     // Track ring (plan 10 Task 5): the original builds it inside the setup
     // stream, srand(seed) + ring.pre_draws (9 on the Napa solo captures:
     // the 9,098 ring-probe measured before 0x00453b60's window walks were
@@ -691,6 +695,8 @@ static int replay_main(int argc, char** argv) {
         }
         if (green == 0 || green >= g.frames.size())
             throw std::runtime_error("no green frame: player state never moves");
+        g.frames.pin(green);
+        g.frames.pin(green - 1);
         const auto& fg = g.frames.at(green);
         const auto& fp = g.frames.at(green - 1);
         auto frg = fg.find("rng");
@@ -709,7 +715,11 @@ static int replay_main(int argc, char** argv) {
                 proven = false;
                 break;
             }
-            if (fc != f.end() && fc->second != 0) {
+            // Frame 0 is post-step: its own countdown setup may consume
+            // draws. Only subsequent hold steps must consume none for the
+            // preceding POST-step state to prove the green PRE-step anchor.
+            // FieldReplay separately reproduces/checks frame 0's RNG.
+            if (i > 0 && fc != f.end() && fc->second != 0) {
                 proven = false;
                 break;
             }

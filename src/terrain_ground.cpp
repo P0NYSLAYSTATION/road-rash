@@ -26,6 +26,8 @@ int32_t terrain_height(const TerrainSlice& t, const PathSample& path, const Terr
                        const PathSample& np, int32_t lateral, uint8_t fraction, int32_t centre,
                        int32_t offset) {
     const int32_t x = lateral >> 8, left = -path.left, right = path.right;
+    const auto heights = t.side_heights.value_or(std::array{path.height_left, path.height_right});
+    const auto next_heights = next.side_heights.value_or(std::array{np.height_left, np.height_right});
     if (left <= x && x <= right) return 0;
     if (t.type == 1) {
         // 0x00439b10 case 1 on 0x00454240's wall values (wall_profile).
@@ -50,12 +52,12 @@ int32_t terrain_height(const TerrainSlice& t, const PathSample& path, const Terr
     }
     if (t.type == 3) {
         // Case 3: tunnel sidewalks, empty pair-B heights become 16 (0x00454240).
-        const bool empty = path.height_left == 0;
-        return x <= left ? (empty ? 16 : path.height_left) : (empty ? 16 : path.height_right);
+        const bool empty = heights[0] == 0;
+        return x <= left ? (empty ? 16 : heights[0]) : (empty ? 16 : heights[1]);
     }
     const bool side = x > right;
     const int32_t shoulder = side ? right + path.shoulder_right : left - path.shoulder_left;
-    const int32_t height = side ? path.height_right : path.height_left;
+    const int32_t height = heights[side];
     if (t.type == 0) {
         if (path.marking_flags & 32) return 0;
         if ((side ? x >= shoulder : x <= shoulder) && !(path.marking_flags & 24) && t.selectors[side] != 255)
@@ -79,12 +81,70 @@ int32_t terrain_height(const TerrainSlice& t, const PathSample& path, const Terr
     if (side ? outer < x : x < outer) return blend(t.points[4 + side][1], next.points[4 + side][1], fraction);
     const int32_t inner_height =
         band ? blend(t.points[(band - 1) * 2 + side][1], next.points[(band - 1) * 2 + side][1], fraction)
-             : blend(height, side ? np.height_right : np.height_left, fraction);
+             : blend(height, next_heights[side], fraction);
     const int32_t outer_height =
         blend(t.points[band * 2 + side][1], next.points[band * 2 + side][1], fraction);
     const int32_t span = sub(outer, inner);
     if (!span) throw std::runtime_error("Degenerate terrain ground segment");
     return add(mul(sub(outer_height, inner_height), sub(x, inner)) / span, inner_height);
+}
+void adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& right, PathSample& rp,
+                          int32_t separation, int32_t countdown, int32_t threshold) {
+    if (countdown > 0) {
+        if (left.type == 4 || countdown > 2) {
+            if (lp.height_right != 0)
+                left.side_heights = std::array{lp.height_left, int32_t(0)};
+            if (rp.height_left != 0)
+                right.side_heights = std::array{int32_t(0), rp.height_right};
+            lp.height_right = rp.height_left = 0;
+        }
+        if (left.type == 4)
+            for (int band = 0; band < 3; ++band)
+                left.points[band * 2 + 1][1] = right.points[band * 2][1] = 0;
+        int32_t factor = std::max(0, mul(sub(threshold, countdown), 65536) / threshold);
+        int32_t a = lp.shoulder_right, b = rp.shoulder_left;
+        if (add(a, b) > separation) {
+            a = b = separation / 2;
+            factor = std::max(factor, 32768);
+        }
+        lp.shoulder_right = mul(a, factor) >> 16;
+        rp.shoulder_left = mul(b, factor) >> 16;
+        return;
+    }
+    if (left.type != 4) return;
+    using Point = std::array<int32_t, 2>;
+    std::array<Point, 4> a{}, b{};
+    a[0] = {add(lp.right, lp.shoulder_right), 0};
+    b[0] = {add(sub(sub(0, rp.left), rp.shoulder_left), separation), 0};
+    for (int band = 0; band < 3; ++band) {
+        a[band + 1] = left.points[band * 2 + 1];
+        b[band + 1] = right.points[band * 2];
+        b[band + 1][0] = add(b[band + 1][0], separation);
+    }
+    int i = 1, j = 1;
+    bool joined = false;
+    for (int pass = 0; pass < 3 && !joined; ++pass) {
+        if (a[i][0] < b[j][0] && i < 3) ++i;
+        joined = a[i][0] >= b[j][0];
+        if (!joined && j < 3) ++j;
+    }
+    if (!joined) joined = b[j][0] <= a[i][0];
+    if (joined) {
+        // 00454c30 chooses a midpoint and samples the left segment there.
+        // The arithmetic wraps before the16.16 slope division and multiply.
+        const auto& start = a[i - 1];
+        const int32_t span = sub(a[i][0], start[0]);
+        const int32_t slope = mul(sub(a[i][1], start[1]), 65536) / span;
+        const int32_t x = add(start[0], b[j - 1][0]) / 2;
+        const int32_t y = countdown == 0 ? 0 : add(start[1], mul(sub(x, start[0]), slope) >> 16);
+        for (int n = i; n < 4; ++n) a[n] = {x, y};
+        for (int n = j; n < 4; ++n) b[n] = {x, y};
+    }
+    for (int band = 0; band < 3; ++band) {
+        left.points[band * 2 + 1] = a[band + 1];
+        right.points[band * 2] = b[band + 1];
+        right.points[band * 2][0] = sub(right.points[band * 2][0], separation);
+    }
 }
 WallProfile wall_profile(const TerrainSlice& t, const PathSample& path, bool tunnel) {
     WallProfile w;

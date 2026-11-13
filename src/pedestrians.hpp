@@ -16,12 +16,15 @@ namespace rr {
 struct Pedestrian {
     bool active = false;
     bool pending_remove = false; // 0x00437c10 mark; 0x00437df0 unlinks on the next tick
+    uint64_t free_order = 0; // original pool returns and allocates at the list tail
     Rider body; // object image (+0x1c position, +0x28 lateral, motion words) and route bookkeeping
     const PedestrianLook* look =
         nullptr; // 0x00440b80: null when category-2 resources 0/1 are missing (+0x1e0 stays 0)
-    ActorAnimationState animation; // block +0x70
-    uint8_t selector = 0;          // +0x1dc family selector
-    int type = 0;                  // +0x1e4: 4..7 cross (4 faces back, no pace), 10 performs, others stand
+    bool graphics_evicted = false;            // +0x1e0 can clear while old animation-table pointers remain
+    std::array<bool, 3> pre_draw_resources{}; // checkpoint before the frame's lazy resource load
+    ActorAnimationState animation;            // block +0x70
+    uint8_t selector = 0;                     // +0x1dc family selector
+    int type = 0;           // +0x1e4: 4..7 cross (4 faces back, no pace), 10 performs, others stand
     int state = 0;          // +0x1e8: 0 wait, 1 cross, 2 knocked down, 3 hit/hesitate, 4/5 recover, 7 perform
     int side = 1;           // +0x1ec: 1 walks toward larger lateral, 3 toward smaller (index into 0x0046df30)
     int32_t heading = 0;    // +0x1f0
@@ -33,7 +36,8 @@ struct Pedestrian {
     int32_t anchor = 0;     // +0x1c8: spawn position; 0x00440990 keeps within 0x1ff of it
     int32_t last_tick = 0, next_tick = 0; // scheduler +0x10 / +0xc
     uint16_t serial = 0;                  // +0x1c4 short, DAT_004c1278
-    bool loaded() const { return look != nullptr; }
+    int32_t anchor_lateral = 0;           // +0x1d4: allocation-time lateral copied from +0x28
+    bool loaded() const { return look != nullptr && !graphics_evicted; }
     bool has(int code) const {
         return look && size_t(code) < look->bank.size() && look->bank[size_t(code)].has_value();
     }
@@ -45,20 +49,50 @@ class PedestrianSystem {
     static constexpr size_t pool_size = 15; // 0x00438b70(0x468, 0xf)
     using ActorSource = std::function<const std::vector<DzhrActor>&(const RouteSample&)>;
     using LookSource = std::function<const PedestrianLook*(const RouteSample&, uint8_t selector)>;
+    using GraphicsValid = std::function<bool(const std::vector<RouteSample>&, size_t, uint8_t,
+                                              const PedestrianLook&)>;
+    using RouteLookSource =
+        std::function<const PedestrianLook*(const std::vector<RouteSample>&, size_t, uint8_t)>;
     // template is 0x0046dde0 (100 bytes) from the executable.
-    PedestrianSystem(ActorSource actors, LookSource looks, std::vector<uint8_t> exe);
+    PedestrianSystem(ActorSource actors, LookSource looks, std::vector<uint8_t> exe, GraphicsValid valid = {},
+                       RouteLookSource route_looks = {});
     void reset(); // new race: empty pool, every DZHR record armed again
+    using ResidentLookSource = std::function<const PedestrianLook*(uint16_t, uint8_t)>;
+    using ResidentGraphicsValid = std::function<bool(const std::vector<uint16_t>&, const PedestrianLook&)>;
+    void set_resident_sources(ResidentLookSource looks, ResidentGraphicsValid valid) {
+        resident_looks_ = std::move(looks);
+        resident_valid_ = std::move(valid);
+    }
+    bool has_resident_sources() const { return bool(resident_looks_); }
+    const PedestrianLook* resident_look(uint16_t family, uint8_t selector) const {
+        return family ? resident_looks_(family, selector) : nullptr;
+    }
+    bool resident_graphics_valid(const std::vector<uint16_t>& history, const PedestrianLook& look) const {
+        return resident_valid_(history, look);
+    }
     std::vector<Pedestrian>& pool() { return pool_; }
     const std::vector<Pedestrian>& pool() const { return pool_; }
     const std::vector<DzhrActor>& actors(const RouteSample& s) const { return actors_(s); }
     const PedestrianLook* look(const RouteSample& s, uint8_t selector) const { return looks_(s, selector); }
+    const PedestrianLook* look(const std::vector<RouteSample>& route, size_t s, uint8_t selector) const {
+        return route_looks_ ? route_looks_(route, s, selector) : looks_(route[s], selector);
+    }
+    bool graphics_valid(const std::vector<RouteSample>& route, size_t s, uint8_t selector,
+                           const PedestrianLook& loaded) const {
+        return graphics_valid_ ? graphics_valid_(route, s, selector, loaded) : look(route, s, selector) == &loaded;
+    }
     // 0x004520d0 marks a fired record with |= 0x3f00; the course data here is
     // shared and const, so the mark lives in this set (section, local, index).
     bool consume(uint32_t section, uint32_t local, size_t index);
     // Copies template 0x0046dde0 into a fresh object image (0x00438930 / 0x004387a0).
     void apply_template(Bike&) const;
+    void recycle(Pedestrian& p) {
+        p.active = p.pending_remove = false;
+        p.free_order = ++free_order_;
+    }
     int32_t spawned() const { return spawned_; }
     uint16_t next_serial() { return serial_++; }
+    void reset_serial() { serial_ = 0; } // 0x00442a3d -> 0x0044f460, after initial ring setup
     // Ring slices whose DZHR records have been walked (0x00454240 -> 0x004520d0).
     bool filled = false;
     int32_t built_back = 0, built_front = 0;
@@ -67,10 +101,15 @@ class PedestrianSystem {
   private:
     ActorSource actors_;
     LookSource looks_;
+    GraphicsValid graphics_valid_;
+    RouteLookSource route_looks_;
+    ResidentLookSource resident_looks_;
+    ResidentGraphicsValid resident_valid_;
     std::array<int32_t, 25> template_{};
     std::vector<Pedestrian> pool_;
     std::set<std::tuple<uint32_t, uint32_t, size_t>> consumed_;
     uint16_t serial_ = 0;
+    uint64_t free_order_ = 0;
 };
 
 // Native draw node for one pedestrian through the actor billboard path

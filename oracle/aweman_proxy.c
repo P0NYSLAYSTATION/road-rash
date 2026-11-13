@@ -23,14 +23,44 @@ int rr_patch_call(uint8_t* site, uint32_t expected_target, void* hook) {
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "drive_progress.h"
 
 static FILE* g_out;
+static int g_fixture_error;
+static FILE* fixture_open(const char* path) {
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        g_fixture_error = 1;
+        if (g_out) fprintf(g_out, "# required fixture asset missing: %s\n", path);
+    }
+    return file;
+}
 static char g_scenario[256] = "unnamed";
 static int g_capture_course;
+static int g_frontend_probe;
+static int g_frontend_trace;
+static RRDriveProgress g_drive_progress;
+static uint32_t g_recovery_tick;
+static int32_t g_recovery_position, g_recovery_lateral;
+static int g_recovering;
 /* Display level 1..5 selected through the original level popup setter
  * (0x004453f0); 0 leaves the bootstrapped startup level (display 1) alone. */
 static int g_capture_level;
 static int g_groups;
+static int g_ground_fixture;
+static int g_ground_trace;
+static DWORD WINAPI fixture_exit_thread(LPVOID code) {
+    ExitProcess((UINT)(uintptr_t)code);
+    return 0;
+}
+static BOOL defer_fixture_exit(UINT code) {
+    // A thread created during attach starts after DLL initialization releases
+    // the loader lock. Component-only captures must not leave a menu running.
+    HANDLE thread = CreateThread(NULL, 0, fixture_exit_thread, (LPVOID)(uintptr_t)code, 0, NULL);
+    if (!thread) return FALSE;
+    CloseHandle(thread);
+    return TRUE;
+}
 static int g_drive;
 static int readable(uintptr_t p, size_t size);
 
@@ -49,22 +79,34 @@ static FILE* g_record;
 static FILE* g_input;
 static int g_input_exhausted_tick = -1;
 static uint32_t g_sim_frames;
+static uint32_t g_player_human_calls;
+static int32_t g_initial_traffic_tick = -1;
+static int32_t g_initial_pedestrian_tick = -1;
 static int g_quit_after = -1;
+static int g_until_finish;
 static int32_t g_first_tick = -1;
 static int g_solo;
 static int g_human;
 /* RR_ORACLE_KNOCK=<tick>: knock the player off through the original crash
  * entry 0x00403d60 (reason 1, default vectors) before that tick runs. */
 static int g_knock_tick;
+static int g_knock_initial_tick, g_knock_applied_tick;
 /* RR_ORACLE_ORDER=1: per tick, the scheduler-ring order of nodes
  * within 0x1000 of the player (ord.<k> address, .t type, .p position, .l
  * lateral, .s slice, .v +0x108) and the
  * player half's address, +0x108 and +0x2c: the 0x00449e90 walk order; also
- * the race-end timer DAT_004753c4 and outcome DAT_004c5d7c (4 = arrest). */
+ * the race-end timer DAT_004753c4 and outcome DAT_004c5d7c (4 = arrest).
+ * RR_ORACLE_ORDER_RANGE=<q8> widens the window (default 0x1000). */
 static int g_order;
+static int32_t g_order_range = 0x1000;
 static int g_police_probe;
+static FILE* g_police_fields;
 static int g_terrain_seeded;
 static int g_terrain_trace;
+static int g_slice_probe = -1;
+/* Explicit render-only boundary fixture; never enabled for simulation replay. */
+static int g_view_pose = -1, g_view_pose_applied, g_view_pose_row_ok;
+static int g_ai_probe_tick = -1;
 static void capture_terrain_seeded_and_exit(void);
 static void palette_hook_install(void);
 static uint32_t g_frame;
@@ -115,14 +157,15 @@ static void sim_freeze_others(void) {
 // Test-only bootstrap through the original race setup. Avoid waiting for the
 // interactive intro/menu during capture; never modify the installed executable.
 static uint32_t __fastcall hook_menu_video(int screen) {
-    if (g_capture_course) return 1;
+    if (g_capture_course || g_frontend_probe) return 1;
     return ((uint32_t(__fastcall*)(int))0x00449150)(screen);
 }
 static void __fastcall hook_menu_enter(int screen) {
     // Course entries 1..5 perform the original menu exit themselves. Entering
     // credits first would leave its timer running after race setup freed the
     // menu surfaces, making subsequent oracle frames fault in that timer.
-    ((void(__fastcall*)(int))0x00421df0)(g_capture_course ? g_capture_course : screen);
+    ((void(__fastcall*)(int))0x00421df0)(g_capture_course ? g_capture_course
+                                                          : (g_frontend_probe && screen == 7 ? 9 : screen));
     if (g_sim && g_seed >= 0 && !g_race_started) {
         // Pin the stream before race setup (rider building consumes rand):
         // identical runs then build identical grids. Only the first entry
@@ -175,12 +218,100 @@ static uint32_t __cdecl hook_controls(void) {
     if (!g_drive) return ((uint32_t(__cdecl*)(void))0x0044f800)();
     uint32_t controls = 1;          // original accelerate bit
     if (g_drive == 3) return 1 | 4; // plan 11a Task 3 Step 5: accelerate + hold left (crest hunting)
+    if (g_drive == 4 || g_drive == 5) {
+        //Conservative human inputs for sustained captures, without touching
+        //simulation state: predict lateral drift and limit speed in curves.
+        const uintptr_t rider = (uint32_t)RD32(0x004642d8);
+        if (!readable(rider, 0x144)) return controls;
+        uintptr_t slice = (uint32_t)RD32(rider + 0x2c);
+        if (!readable(slice, 0xe8)) slice = (uint32_t)RD32(rider + 0x140);
+        if (!readable(slice, 0xe8)) return controls;
+        const int32_t left = (int32_t)RD32(slice + 0xe0), right = (int32_t)RD32(slice + 0xe4);
+        int64_t centre = ((int64_t)left + right) * 128;
+        if (g_drive == 5 && right - left >= 120) {
+            // Ordinary human controls: prefer the forward lane, rather than
+            // riding the centre line into oncoming traffic. +cc is the road
+            // origin even when its two sides have different widths.
+            int32_t lane = (int32_t)RD32(slice + 0xcc) + 125;
+            if (lane < left + 60) lane = left + 60;
+            if (lane > right - 60) lane = right - 60;
+            centre = (int64_t)lane * 256;
+        }
+        const int64_t predicted = (int32_t)RD32(rider + 0x28) +
+                                  (int64_t)(int32_t)RD32(rider + 0x10c) * 8;
+        const int32_t bend = (int32_t)RD32(slice + 0xb4);
+        // +b4 is16.16. Preserve mode4's old conservative threshold so every
+        // accepted control stream remains reproducible; mode5 uses six units.
+        int32_t target = abs(bend) >= (g_drive == 5 ? 6 * 65536 : 6) ? 4000 : 6000;
+        if (llabs(centre - predicted) > 100 * 256) target = 2500;
+        const int32_t speed = (int32_t)RD32(rider + 0xec);
+        controls = speed < target - 200 ? 1 : speed > target + 200 ? 2 : 0;
+        if (centre - predicted > 10 * 256) controls |= 0x200;
+        if (centre - predicted < -10 * 256) controls |= 4;
+        if (g_drive == 5) {
+            const uintptr_t cop = (uint32_t)RD32(0x004642dc);
+            if (readable(cop, 0x144) &&
+                llabs((int64_t)(int32_t)RD32(cop + 0x1c) - (int32_t)RD32(rider + 0x1c)) < 3 * 256 &&
+                llabs((int64_t)(int32_t)RD32(cop + 0x28) - (int32_t)RD32(rider + 0x28)) < 180 * 256)
+                controls |= 0x40; // original kick bit; no game-state writes
+        }
+        const uint32_t tick = RD32(0x004b7ecc);
+        int32_t margin = (right - left) / 4;
+        if (margin > 60) margin = 60;
+        if (margin < 0) margin = 0;
+        const int32_t position = (int32_t)RD32(rider + 0x1c);
+        const int can_drive = g_race_started && RD32(0x004753c0) == 0 &&
+                              RD32(rider + 0x2f4) == 0 && RD32(0x004c5d7c) <= 1;
+        if (!can_drive) g_recovering = 0;
+        if (rr_drive_stalled(&g_drive_progress, tick, position, can_drive)) {
+            const int32_t lateral = (int32_t)RD32(rider + 0x28);
+            const int64_t room_left = (int64_t)lateral - (int64_t)(left + margin) * 256;
+            const int64_t room_right = (int64_t)(right - margin) * 256 - lateral;
+            int direction = room_right >= room_left ? 1 : -1;
+            // Try the other side on a repeated obstruction if it has room.
+            if ((g_drive_progress.stalls & 1) == 0 &&
+                (direction > 0 ? room_left : room_right) > 150 * 256) direction = -direction;
+            g_recovery_lateral = lateral + direction * 180 * 256;
+            g_recovery_tick = tick;
+            g_recovery_position = position;
+            g_recovering = 1;
+            if (g_out) {
+                fprintf(g_out, "# driver stalled after 300 ticks: tick=%u position=%d recovery=%s\n",
+                        tick, position, direction > 0 ? "right" : "left");
+                fflush(g_out);
+            }
+        }
+        if (g_recovering) {
+            const int64_t distance = (int64_t)position - g_recovery_position;
+            if (tick < g_recovery_tick || tick - g_recovery_tick >= 150 || llabs(distance) >= 512) {
+                if (g_out) {
+                    fprintf(g_out, "# driver recovery ended: tick=%u movement=%lld\n", tick,
+                            (long long)distance);
+                    fflush(g_out);
+                }
+                g_recovering = 0;
+            } else {
+                int64_t target_lateral = g_recovery_lateral;
+                if (target_lateral < (int64_t)(left + margin) * 256) target_lateral = (int64_t)(left + margin) * 256;
+                if (target_lateral > (int64_t)(right - margin) * 256) target_lateral = (int64_t)(right - margin) * 256;
+                controls = tick - g_recovery_tick < 12 ? 2 : 1;
+                if (target_lateral - predicted > 8 * 256) controls |= 0x200;
+                if (target_lateral - predicted < -8 * 256) controls |= 4;
+            }
+        }
+        return controls;
+    }
     if (g_drive == 2) {
         const uintptr_t rider = *(uint32_t*)0x004642d8;
         if (readable(rider, 0x144)) {
-            const uintptr_t slice = *(uint32_t*)(rider + 0x140);
-            if (readable(slice, 0xd0)) {
-                const int32_t x = (*(int32_t*)(rider + 0x28) >> 8) - *(int32_t*)(slice + 0xcc);
+            uintptr_t slice = *(uint32_t*)(rider + 0x2c);
+            if (!readable(slice, 0xe8)) slice = *(uint32_t*)(rider + 0x140);
+            if (readable(slice, 0xe8)) {
+                // +cc is the roadway reference origin. Unequal lane widths
+                // put the pavement midpoint elsewhere; e0/e4 are its edges.
+                const int32_t centre = (int32_t)(((int64_t)(int32_t)RD32(slice + 0xe0) +
+                                                (int32_t)RD32(slice + 0xe4)) / 2);
+                const int32_t x = (*(int32_t*)(rider + 0x28) >> 8) - centre;
                 if (x < -60)
                     controls |= 0x200;
                 else if (x > 60)
@@ -189,6 +320,18 @@ static uint32_t __cdecl hook_controls(void) {
         }
     }
     return controls;
+}
+
+static void capture_keyboard_axes(uint32_t controls) {
+    // 44fa80 normally calls 44fa50 before returning each keyboard action.
+    // Raw mask injection bypassed this: with joystick mode enabled, right
+    // steering read a stale zero axis in 40ad78, producing no steering.
+    typedef void (__fastcall *key_axis_fn)(int);
+    const key_axis_fn key_axis = (key_axis_fn)0x0044fa50;
+    if (controls & 1) key_axis(0);
+    if (controls & 2) key_axis(1);
+    if (controls & 4) key_axis(2);
+    else if (controls & 0x200) key_axis(9);
 }
 
 /* Live CRT rand state (plan 10 task 1): 0x00455eb0 advances the MSVC seed at
@@ -205,23 +348,36 @@ static uint32_t* sim_rand_state(void) {
  * reimplementation that counts calls and records the tick-1 caller. */
 static uint8_t g_rand_orig[5];
 static uint32_t g_rand_calls, g_step_start_calls;
+static int g_rand_counter_installed;
 static uint32_t g_tick1_caller;
 static int32_t g_randtrace_tick = -1;
 static uint32_t g_randtrace_callers[64];
 static int g_randtrace_count;
 static int g_randlog_all;
-static uint32_t g_randlog_tick[32768];
-static uint32_t g_randlog_caller[32768];
+#define RR_RANDLOG_CAPACITY 1048576
+static uint32_t g_randlog_tick[RR_RANDLOG_CAPACITY];
+static uint32_t g_randlog_caller[RR_RANDLOG_CAPACITY];
 static int g_randlog_count;
 static int g_randlog_flushed;
+static int g_randlog_overflow;
+static uint64_t g_randlog_written;
 static void dump_randlog(void) {
     char key[64];
+    if (g_randlog_overflow) {
+        fputs("# RNG caller log overflow: capture rejected\n", g_out);
+        fflush(g_out);
+        ExitProcess(86);
+    }
     while (g_randlog_flushed < g_randlog_count) {
-        snprintf(key, sizeof key, "randlog.%d", g_randlog_flushed);
+        snprintf(key, sizeof key, "randlog.%llu", (unsigned long long)g_randlog_written);
         rr_log(key, (long long)g_randlog_tick[g_randlog_flushed] * 4294967296ll +
                         g_randlog_caller[g_randlog_flushed]);
         ++g_randlog_flushed;
+        ++g_randlog_written;
     }
+    // Entries above are now in the trace, whose FILE is flushed at this
+    // tick's end. Reuse RAM; keep numbering continuous across the race.
+    g_randlog_count = g_randlog_flushed = 0;
 }
 static uint32_t sim_rand_step(void) {
     uint32_t* st = sim_rand_state();
@@ -236,10 +392,14 @@ static uint32_t __cdecl hook_rand_count(void) {
     if (g_first_tick < 0 && !g_tick1_caller) g_tick1_caller = (uint32_t)(uintptr_t)caller;
     if (g_randtrace_tick >= 0 && RD32(0x004b7ecc) == g_randtrace_tick && g_randtrace_count < 64)
         g_randtrace_callers[g_randtrace_count++] = (uint32_t)(uintptr_t)caller;
-    if (g_randlog_all && g_race_started && g_randlog_count < 32768) {
-        g_randlog_tick[g_randlog_count] = (uint32_t)RD32(0x004b7ecc);
-        g_randlog_caller[g_randlog_count] = (uint32_t)(uintptr_t)caller;
-        ++g_randlog_count;
+    if (g_randlog_all && g_race_started) {
+        if (g_randlog_count < RR_RANDLOG_CAPACITY) {
+            g_randlog_tick[g_randlog_count] = (uint32_t)RD32(0x004b7ecc);
+            g_randlog_caller[g_randlog_count] = (uint32_t)(uintptr_t)caller;
+            ++g_randlog_count;
+        } else {
+            g_randlog_overflow = 1;
+        }
     }
     return sim_rand_step();
 }
@@ -255,9 +415,15 @@ static void sim_patch_rand_entry(void) {
     memcpy(site + 1, &rel, 4);
     VirtualProtect(site, 5, old, &old);
     FlushInstructionCache(GetCurrentProcess(), site, 5);
+    g_rand_counter_installed = 1;
 }
 
 static long long sim_field_value(uintptr_t base, uint32_t offset, uint8_t width, uint8_t is_signed) {
+    if (width == 2) {
+        if (!readable(base + offset, 2)) return -1;
+        uint16_t v = *(volatile uint16_t*)(base + offset);
+        return is_signed ? (long long)(int16_t)v : (long long)v;
+    }
     if (width == 1) {
         if (!readable(base + offset, 1)) return -1;
         uint8_t v = *(volatile uint8_t*)(base + offset);
@@ -286,6 +452,13 @@ static void dump_terrain_walker(const char* name, uintptr_t outer) {
     rr_log(key, active);
     snprintf(key, sizeof key, "ring.walk.%s.position", name);
     rr_log(key, section && readable(section + 8, 4) ? RD32(section + 8) : -1);
+    if (section && readable(section + 0x10, 0x1c)) {
+        static const uint32_t lane_offsets[] = {8, 0xc, 0x14, 0x18};
+        for (unsigned i = 0; i < sizeof lane_offsets / sizeof lane_offsets[0]; ++i) {
+            snprintf(key, sizeof key, "ring.walk.%s.lane.%x", name, lane_offsets[i]);
+            rr_log(key, RD32(section + 0x10 + lane_offsets[i]));
+        }
+    }
     snprintf(key, sizeof key, "ring.walk.%s.terrain.available", name);
     rr_log(key, available);
     if (!available) return;
@@ -318,11 +491,28 @@ static void dump_sim_tick(void) {
         rr_log("character", -1);
         rr_log("seed", g_seed);
         rr_log("solo", g_solo);
+        if (g_knock_initial_tick) rr_log("input.knock_tick", g_knock_initial_tick);
         rr_log("ring.car_schema", 2); // byte offsets corrected from decompiler element indices
+        rr_log("rng.counter_enabled", g_rand_counter_installed);
+        rr_log("input.joystick", RD8(0x00476c98));
+        rr_log("input.steer_axis", (int32_t)RD32(0x004b7e7c));
+        rr_log("input.keyboard_axes", g_drive || g_input ? 1 : 0);
+        if (g_until_finish) rr_log("capture.until_finish", 1);
+        if (g_initial_traffic_tick >= 0) rr_log("traffic.setup_tick", g_initial_traffic_tick);
+        if (g_initial_pedestrian_tick >= 0) rr_log("pedestrian.setup_tick", g_initial_pedestrian_tick);
         if (g_terrain_trace) rr_log("ring.terrain.schema", 1);
         if (g_tick1_caller) rr_log("tick1_caller", (long long)g_tick1_caller);
     } else {
         fprintf(g_out, "frame\t%u\n", g_sim_frames);
+    }
+    if (g_police_fields) {
+        char fields[4096];
+        size_t size;
+        rewind(g_police_fields);
+        while ((size = fread(fields, 1, sizeof fields, g_police_fields)) != 0)
+            fwrite(fields, 1, size, g_out);
+        fclose(g_police_fields);
+        g_police_fields = NULL;
     }
     rr_log("tick", tick);
     uint32_t* rst = sim_rand_state();
@@ -334,11 +524,30 @@ static void dump_sim_tick(void) {
             rr_log(key, (long long)g_randtrace_callers[i]);
         }
     rr_log("controls", (long long)(uint32_t)RD32(0x004b7ed0));
+    if (g_record) {
+        fprintf(g_record, "%x\n", (uint32_t)RD32(0x004b7ed0));
+        fflush(g_record); // the replay reader consumes one hexadecimal word per tick
+    }
+    if ((g_drive == 2 || g_drive == 4 || g_drive == 5 || g_input) && getenv("RR_ORACLE_DRIVER_TRACE")) {
+        const uintptr_t bike = (uint32_t)RD32(0x004642d8);
+        if (readable(bike, 0x144)) {
+            const uintptr_t active = (uint32_t)RD32(bike + 0x2c);
+            const uintptr_t retained = (uint32_t)RD32(bike + 0x140);
+            const uintptr_t slice = readable(active, 0xe8) ? active : retained;
+            if (readable(slice, 0xe8))
+                fprintf(g_out, "# driver tick=%d control=%u joystick=%u axis=%d lateral=%d origin=%d left=%d right=%d bend=%d active=%u retained=%u render=%u\n",
+                    tick, RD32(0x004b7ed0), RD8(0x00476c98), (int32_t)RD32(0x004b7e7c),
+                    (int32_t)RD32(bike + 0x28), (int32_t)RD32(slice + 0xcc),
+                    (int32_t)RD32(slice + 0xe0), (int32_t)RD32(slice + 0xe4),
+                    (int32_t)RD32(slice + 0xb4), (uint32_t)active, (uint32_t)retained, g_frame);
+        }
+    }
     /* Player-control branch proof (plan 10 Task 5 Step 2a): DAT_004753c8
      * sampled every tick. 0 = human (0x00434660 consumes the control word),
      * 1 = attract-demo AI branch. Read-only; the offline probe elsewhere
      * already save/restores this byte. */
     rr_log("player.demo_hold", (long long)RD8(0x004753c8));
+    if(g_sim&&g_human){rr_log("player.think",0x00434660);rr_log("player.think_count",g_player_human_calls);}
     /* Ring cursors for the +0x5100 offset and zone-density timing check
      * (plan 24 Task 1 Step 2/5): front 0x004b6e50, back 0x0049f240,
      * camera 0x004b6e5c. */
@@ -349,13 +558,21 @@ static void dump_sim_tick(void) {
     rr_log("nitro.charges", (long long)(int32_t)RD32(0x00465a34));
     rr_log("ring.back", (long long)(int32_t)RD32(0x0049f240));
     rr_log("ring.camera", (long long)(int32_t)RD32(0x004b6e5c));
+    rr_log("traffic.cruise", (int8_t)RD8(0x004b7e8c));
+    rr_log("traffic.rate", RD32(0x004b7e84));
+    rr_log("race.outcome", (long long)(int32_t)RD32(0x004c5d7c));
+    if (g_knock_initial_tick) rr_log("input.knock_applied", g_knock_applied_tick);
     if (g_order) { /* race-end timer (0x00416010/0x00442e10) and outcome code; 4 = arrest */
         rr_log("race.end_timer", (long long)(int32_t)RD32(0x004753c4));
-        rr_log("race.outcome", (long long)(int32_t)RD32(0x004c5d7c));
     }
     if (g_terrain_trace) {
         dump_terrain_walker("back", 0x0049ea20);
         dump_terrain_walker("front", 0x0049ee30);
+        for (int i = 0; i < 4; ++i) {
+            snprintf(key, sizeof key, "family.slot.%d", i);
+            rr_log(key, RD32(0x004b7f10 + 4 * i));
+        }
+        rr_log("family.depth", RD32(0x00476cd8));
     }
     const uintptr_t player = (uint32_t)RD32(0x004642d8);
     int rider_index = 1, node_index = 0;
@@ -378,10 +595,80 @@ static void dump_sim_tick(void) {
         int addr_index = 0;
         for (int guard = 0; node && node != end && guard < 512; ++guard) {
             if (!readable(node, 0xe4)) break;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && g_slice_probe >= 0 &&
+                readable(node, 0x180) && (RD32(node + 0xc4) == 4 || RD32(node + 0xc4) == 0x10) &&
+                abs((int32_t)RD32(node + 0x1c) - g_slice_probe * 256) < 768) {
+                uintptr_t sl = (uint32_t)RD32(node + 0x2c);
+                fprintf(g_out, "# collision-state actor=%u type=%u flags=%u last=%d pos=%d lat=%d height=%d halfwidth=%d halflength=%d halfheight=%d slice=%u roadway=%u\n",
+                        (unsigned)node, RD32(node + 0xc4), RD8(node + 0xc0), RD32(node + 0x10),
+                        RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x20), RD32(node + 0x174),
+                        RD32(node + 0x178), RD32(node + 0x17c), (unsigned)sl,
+                        sl && readable(sl, 0x37) ? RD8(sl + 0x36) : 0);
+            }
+            const uintptr_t ground_slice = readable(node, 0x144) ? (uint32_t)RD32(node + 0x140) : 0;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x30c) && RD32(node + 0xc4) == 4) {
+                const uintptr_t virtual_node = (uint32_t)RD32(node + 0x304);
+                if (readable(virtual_node, 0x20)) {
+                    const uintptr_t t0 = (uint32_t)RD32(virtual_node + 0x18), t1 = (uint32_t)RD32(virtual_node + 0x1c);
+                    fprintf(g_out, "# parked-trackers actor=%u position=%d virtual=%u local=%d tracker0=%u/%d tracker1=%u/%d\n",
+                            (unsigned)node, RD32(node + 0x1c), (unsigned)virtual_node, RD32(node + 0x308),
+                            (unsigned)t0, readable(t0, 8) ? RD32(t0 + 4) : -1,
+                            (unsigned)t1, readable(t1, 8) ? RD32(t1 + 4) : -1);
+                }
+            }
+            const int ground_trace = g_ground_trace && node == player && readable(ground_slice, 0x14a) &&
+                (((int32_t)RD32(node + 0x28) >> 8) < RD32(ground_slice + 0xe0) ||
+                 ((int32_t)RD32(node + 0x28) >> 8) > RD32(ground_slice + 0xe4));
+            if (ground_trace || (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) &&
+                RD32(node + 0xc4) == 4 && g_slice_probe >= 0 &&
+                ((int32_t)RD32(node + 0x1c) >> 8) == g_slice_probe)) {
+                uintptr_t sl = (uint32_t)RD32(node + 0x140);
+                fprintf(g_out, "# ground-actor tick=%d actor=%u pos=%d lateral=%d ground=%d previous=%d swept=%d road_move=%d\n", tick,
+                        (unsigned)node, RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x24),
+                        RD32(node + 0x38), RD32(node + 0x138), RD32(node + 0x12c));
+                if (sl && readable(sl, 0x64)) {
+                    fprintf(g_out, "# static-input actor=%u slice=%u billboards=%u flags=%u\n",
+                            (unsigned)node, (unsigned)sl, RD8(sl + 0x3d), RD8(sl + 0x64));
+                    for (int i = 0; i < RD8(sl + 0x3d) && i < 2; ++i) {
+                        uintptr_t bb = sl + 0x40 + i * 16;
+                        fprintf(g_out, "# static-billboard index=%d selector=%u flags=%u type=%u boxes=%u word4=%u word8=%u wordc=%u\n",
+                                i, RD8(bb), RD8(bb + 1), RD8(bb + 2), RD8(bb + 3), RD32(bb + 4), RD32(bb + 8), RD32(bb + 12));
+                    }
+                }
+                for (int k = 0; k < 2 && sl && readable(sl, 0x14a); ++k) {
+                    fprintf(g_out, "# ground-slice side=%d slice=%u node=%u local=%d type=%u flags=%u centre=%d edges=%d/%d shoulders=%d/%d heights=%d/%d selectors=%u/%u points=",
+                            k, (unsigned)sl, RD32(sl), RD32(sl + 4), RD8(sl + 0x3c), RD8(sl + 0x37),
+                            RD32(sl + 0xcc), RD32(sl + 0xe0), RD32(sl + 0xe4), RD32(sl + 0xe8), RD32(sl + 0xec),
+                            RD32(sl + 0x140), RD32(sl + 0x144),
+                            RD8(sl + 0x148), RD8(sl + 0x149));
+                    for (int p = 0; p < 12; ++p) fprintf(g_out, "%s%d", p ? "," : "", RD32(sl + 0xf0 + p * 4));
+                    fputc('\n', g_out);
+                    sl = (uint32_t)RD32(sl + 0xc);
+                }
+            }
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) && RD32(node + 0xc4) == 0x20) {
+                fprintf(g_out, "# ped-motion tick=%d actor=%u pos=%d previous_pos=%d heading=%d",
+                        tick, (unsigned)node, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x134), (int32_t)RD32(node + 0x128));
+                for (int k = 0; k < 2; ++k) {
+                    uintptr_t sl = (uint32_t)RD32(node + 0x13c + k * 4);
+                    if (sl && readable(sl, 0xbc))
+                        fprintf(g_out, " %s=%u,node%u,local%d,half%u,bend%d,rise%d",
+                                k ? "current" : "previous", (unsigned)sl, RD32(sl), (int32_t)RD32(sl + 4),
+                                RD8(sl + 0x36), (int32_t)RD32(sl + 0xb4), (int32_t)RD32(sl + 0xb8));
+                }
+                fputc('\n', g_out);
+            }
+            if (g_ai_probe_tick >= 0 && tick >= g_ai_probe_tick - 20 && tick <= g_ai_probe_tick + 1 &&
+                readable(node, 0x31c) && RD32(node + 0xc4) == 4 && !RD8(node + 0x300))
+                fprintf(g_out, "# parked-state tick=%d actor=%u pos=%d dt=%d pace=%d wait=%d live-distance=%d live-ticks=%d node=%u local_q8=%d next=%d last=%d\n",
+                        tick, (unsigned)node, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x18),
+                        (int32_t)RD32(node + 0x314), (int32_t)RD32(node + 0x318), (int32_t)RD32(node + 0x310),
+                        (int32_t)RD32(node + 0x30c), RD32(node + 0x304), (int32_t)RD32(node + 0x308),
+                        (int32_t)RD32(node + 0xc), (int32_t)RD32(node + 0x10));
             if (g_order && g_sim_frames > 0 && player && readable(player, 0x300)) {
                 const uint32_t type = (uint32_t)sim_field_value(node, 0xc4, 4, 0);
                 const int32_t d = (int32_t)RD32(node + 0x1c) - (int32_t)RD32(player + 0x1c);
-                if (d > -0x1000 && d < 0x1000) {
+                if (d > -g_order_range && d < g_order_range) {
                     snprintf(key, sizeof key, "ord.%d", guard);
                     rr_log(key, (long long)node);
                     snprintf(key, sizeof key, "ord.%d.t", guard);
@@ -436,7 +723,9 @@ static void dump_sim_tick(void) {
                         snprintf(key, sizeof key, "nodeaddr.%d.bike_c0", addr_index);
                         rr_log(key, sim_field_value(node, 0xc0, 1, 0));
                     }
-                    const uintptr_t slice = (uint32_t)sim_field_value(node, 0x2c, 4, 0);
+                    /* +0x2c may be cleared by visibility; +0x140 retains the
+                     * physics slice needed to diagnose initial AI targets. */
+                    const uintptr_t slice = (uint32_t)sim_field_value(node, 0x140, 4, 0);
                     uintptr_t next = (slice && readable(slice + 0x10, 4)) ? (uint32_t)RD32(slice + 0x10) : 0;
                     snprintf(key, sizeof key, "nodeaddr.%d.grid.next", addr_index);
                     rr_log(key, (long long)next);
@@ -566,6 +855,30 @@ static void dump_sim_tick(void) {
                     }
                 }
                 for (unsigned f = 0; f < RR_SIM_RIDER_FIELD_COUNT; ++f) {
+                    if (f == 0 && g_slice_probe >= 0 &&
+                        sim_field_value(node, 0xc4, 4, 0) == 4 &&
+                        ((int32_t)sim_field_value(node, 0x1c, 4, 1) >> 8) == g_slice_probe) {
+                        const uintptr_t sl = (uint32_t)sim_field_value(node, 0x2c, 4, 0);
+                        if (sl && readable(sl, 0x164))
+                            fprintf(g_out, "# rider-slice tick=%d slot=%d pos=%d lateral=%d slice=%u type=%u flags=%u halves=%u centre=%d edges=%d/%d shoulders=%d/%d bases=%d/%d\n",
+                                tick, slot, (int32_t)RD32(node + 0x1c), (int32_t)RD32(node + 0x28),
+                                (uint32_t)sl, RD8(sl + 0x3c), RD8(sl + 0x37), RD8(sl + 0x36),
+                                (int32_t)RD32(sl + 0xcc), (int32_t)RD32(sl + 0xe0), (int32_t)RD32(sl + 0xe4),
+                                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec),
+                                (int32_t)RD32(sl + 0x14c), (int32_t)RD32(sl + 0x158));
+                        if (sl && readable(sl, 0x64))
+                            for (int n = 0; n < RD8(sl + 0x3d) && n < 2; ++n) {
+                                uintptr_t entry = sl + 0x40 + n * 16;
+                                uintptr_t boxes = (uint32_t)RD32(entry + 4);
+                                fprintf(g_out, "# slice-billboard tick=%d slot=%d n=%d selector=%u flags=%u type=%u count=%u lateral=%d boxes=%u",
+                                        tick, slot, n, RD8(entry), RD8(entry + 1), RD8(entry + 2), RD8(entry + 3),
+                                        (int32_t)RD32(entry + 8), (unsigned)boxes);
+                                if (RD8(entry + 3) && boxes && readable(boxes, 16))
+                                    fprintf(g_out, " first=%d/%d/%d/%d", (int32_t)RD32(boxes),
+                                            (int32_t)RD32(boxes + 4), (int32_t)RD32(boxes + 8), (int32_t)RD32(boxes + 12));
+                                fputc('\n', g_out);
+                            }
+                    }
                     const uint32_t off = rr_sim_rider_fields[f].offset;
                     /* Only bike-half words are mapped (see REVERSE_ENGINEERING.md).
                      * The slice pointer is process-specific: keep it as debug-only
@@ -587,6 +900,8 @@ static void dump_sim_tick(void) {
                 /* Rider-half raw window: the brain lives at *(bike+0x2fc)
                  * (weapon +0x1d4, invuln +0x1d0, AI words, lookahead +0x1dc..+0x1f0).
                  * Values are compared across runs; pointers are stable in practice. */
+                snprintf(key, sizeof key, "rider.%d.terrain_ground", slot);
+                rr_log(key, sim_field_value(node, 0x24, 4, 1));
                 const uintptr_t rh = readable(node + 0x2fc, 4) ? (uint32_t)*(uint32_t*)(node + 0x2fc) : 0;
                 /* Stamina lives in the rider-table row *(half+0x1e0)
                  * (0x004050c0: +0x38 maximum, +0x3c current). */
@@ -660,6 +975,50 @@ static void dump_sim_tick(void) {
                     rr_log(key, sim_field_value(node, extra[e], 4, 1));
                 }
             } else {
+                if (sim_field_value(node, 0xc4, 4, 0) == 0x20) {
+                    static const uint32_t offsets[] = {0x1c, 0x20, 0x24, 0x28, 0x30, 0x34, 0x38, 0x3c,
+                        0xf4, 0x18, 0xc, 0x10, 0x14,
+                        0x104, 0x108, 0x10c, 0x128, 0x1c4, 0x1c8, 0x1d4, 0x1dc, 0x1e0,
+                        0x1e4, 0x1e8, 0x1ec, 0x1f4, 0x1f8, 0x1fc, 0x208, 0x21c};
+                    for (unsigned i = 0; i < sizeof offsets / sizeof offsets[0]; ++i) {
+                        snprintf(key, sizeof key, "ped.%x.%x", node, offsets[i]);
+                        rr_log(key, sim_field_value(node, offsets[i], offsets[i] == 0x1c4 ? 2 :
+                            offsets[i] == 0x1fc ? 1 : 4, 1));
+                    }
+                    if (g_ai_probe_tick >= 0 && (int32_t)RD32(0x004b7ecc) >= g_ai_probe_tick - 20 &&
+                        (int32_t)RD32(0x004b7ecc) <= g_ai_probe_tick + 1) {
+                        const uintptr_t slice = (uint32_t)RD32(node + 0x140);
+                        if (g_slice_probe >= 0 && RD32(0x004b7ecc) == (uint32_t)g_ai_probe_tick &&
+                            (uint16_t)RD32(node + 0x1c4) == 26) {
+                            const int delta = (g_slice_probe - (RD32(node + 0x1c) >> 8)) * 256;
+                            const uintptr_t target = ((uintptr_t(__fastcall*)(uintptr_t, int))0x449910)(slice, delta);
+                            const uintptr_t boxes = readable(target, 0xb0) ? (uint32_t)RD32(target + 0x68) : 0;
+                            if (readable(boxes, 16))
+                                fprintf(g_out, "# scenery-target sample=%d source=%d base=%d count=%u boxes=%u bounds=%d/%d/%d/%d\n",
+                                    g_slice_probe, RD32(node + 0x1c) >> 8, RD32(target + 0x6c), RD8(target + 0x60),
+                                    RD8(target + 0x61), RD32(boxes), RD32(boxes + 4), RD32(boxes + 8), RD32(boxes + 12));
+                        }
+                        if (readable(slice, 0xb0) && RD8(slice + 0x60) && RD8(slice + 0x61)) {
+                            const uintptr_t boxes = (uint32_t)RD32(slice + 0x68);
+                            if (readable(boxes, 16))
+                                fprintf(g_out, "# ped-static-box tick=%u serial=%u base=%d box=%d/%d/%d/%d\n",
+                                    RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD32(slice + 0x6c),
+                                    RD32(boxes), RD32(boxes + 4), RD32(boxes + 8), RD32(boxes + 12));
+                        }
+                        fprintf(g_out, "# ped-contact-shape tick=%u serial=%u flags=%u width=%d length=%d height=%d callback=%x speed=%d slice=%u count=%u boxes=%u ac=%x\n",
+                                RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD8(node + 0xc0),
+                                RD32(node + 0x174), RD32(node + 0x178), RD32(node + 0x17c), RD32(node + 0x1a4),
+                                RD32(node + 0xec), (unsigned)slice, readable(slice, 0xb0) ? RD8(slice + 0x60) : 0,
+                                readable(slice, 0xb0) ? RD8(slice + 0x61) : 0,
+                                readable(slice, 0xb0) ? RD32(slice + 0xac) : 0);
+                        const uintptr_t graphics = (uint32_t)RD32(node + 0x74);
+                        const unsigned family_slot = RD8(node + 0x1dc) >> 6;
+                        fprintf(g_out, "# ped-resource tick=%u serial=%u selector=%u graphics=%u header=%08x family=%u root=%u loaded=%u\n",
+                                RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD8(node + 0x1dc), (unsigned)graphics,
+                                graphics && readable(graphics, 4) ? RD32(graphics) : 0,
+                                RD32(0x004b7f10 + family_slot * 4), RD32(0x0049e550 + family_slot * 4), RD8(node + 0x1e0));
+                    }
+                }
                 snprintf(key, sizeof key, "node.%d.think", node_index);
                 rr_log(key, sim_field_value(node, 0xdc, 4, 0));
                 snprintf(key, sizeof key, "node.%d.position", node_index);
@@ -695,6 +1054,23 @@ static void dump_sim_tick(void) {
                         rr_log(key,
                                sim_field_value(node, rr_sim_car_fields[f].offset, rr_sim_car_fields[f].width,
                                                rr_sim_car_fields[f].is_signed));
+                    }
+                    static const uint32_t motion_words[] = {0x104, 0x10c, 0x110, 0x114, 0x118,
+                                                           0x128, 0x12c, 0x158, 0x15c};
+                    for (unsigned i = 0; i < sizeof motion_words / sizeof motion_words[0]; ++i) {
+                        snprintf(key, sizeof key, "ring.%x.motion_%x", node, motion_words[i]);
+                        rr_log(key, sim_field_value(node, motion_words[i], 4, 1));
+                    }
+                    const uintptr_t signal = (uint32_t)sim_field_value(node, 0x1ec, 4, 0);
+                    if (signal && readable(signal, 0xfc)) {
+                        snprintf(key, sizeof key, "ring.%x.signal_position", node);
+                        rr_log(key, sim_field_value(signal, 0x1c, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_index", node);
+                        rr_log(key, sim_field_value(signal, 0xf8, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_phase", node);
+                        rr_log(key, sim_field_value(signal, 0xf0, 4, 1));
+                        snprintf(key, sizeof key, "ring.%x.signal_accum", node);
+                        rr_log(key, sim_field_value(signal, 0xf4, 4, 1));
                     }
                     /* 0x00437e60 branch words (diagnostic-only, not in
                      * rr_sim_car_fields so old goldens still load): +0x2c
@@ -764,11 +1140,21 @@ static void dump_sim_tick(void) {
     ++g_sim_frames;
     if (g_randlog_all) dump_randlog();
     fflush(g_out);
-    if ((g_quit_after > 0 && g_sim_frames >= (uint32_t)g_quit_after) ||
+    const int outcome = (int32_t)RD32(0x004c5d7c);
+    if ((g_until_finish && outcome >= 2 && outcome <= 5) ||
+        (g_quit_after > 0 && g_sim_frames >= (uint32_t)g_quit_after) ||
         (g_input_exhausted_tick >= 0 && tick >= g_input_exhausted_tick + 0xb4)) {
+        if (g_until_finish) {
+            rr_log("capture.finished", outcome == 2 || outcome == 3);
+            rr_log("capture.outcome", outcome);
+        }
         fputs("end\n", g_out);
         fclose(g_out);
         g_out = NULL;
+        if (g_record) {
+            fclose(g_record);
+            g_record = NULL;
+        }
         ExitProcess(0);
     }
 }
@@ -822,11 +1208,284 @@ static void capture_police_spawn(void) {
     }
 }
 
+// Preserve the original player-think entry and count actual visits to its
+// human-control branch. The five copied entry bytes contain no relative operand.
+// Read-only world-strip dispatch probe: bounds are world laterals, not
+// projected pixels. Record retained actor-slice identity and queue membership.
+static uintptr_t __fastcall rr_ped_lookup_probe(uint32_t selector, int32_t type, int32_t part) {
+    const int tick = RD32(0x004b7ecc);
+    const int probe = g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4;
+    const unsigned slot = (selector & 0xc0) >> 6;
+    const uintptr_t root = (uint32_t)RD32(0x0049e550 + slot * 4);
+    const int guard = RD32(0x0049e630 + slot * 4);
+    // Invoke the stateful lookup exactly once; this wrapper only observes it.
+    const uintptr_t result = ((uintptr_t(__fastcall*)(uint32_t, int32_t, int32_t))0x0044acd0)(selector, type, part);
+    if (probe)
+        fprintf(g_out, "# ped-lookup tick=%d render=%u selector=%u type=%d part=%d slots=%d root=%u guard=%d/%d result=%u family=%d categories=%d\n",
+                tick, g_frame, selector, type, part, RD32(0x004755f8), (unsigned)root,
+                guard, RD32(0x0049e630 + slot * 4), (unsigned)result,
+                RD32(0x004b7f10 + slot * 4), readable(root, 4) ? RD32(root) : -1);
+    return result;
+}
+
+static void rr_family_queue_state(const char* phase) {
+    const int tick = RD32(0x004b7ecc);
+    if (!g_out || tick < g_ai_probe_tick - 20 || tick > g_ai_probe_tick + 4) return;
+    fprintf(g_out, "# family-queue tick=%d phase=%s read=%d write=%d worker=%d/%d/%d busy=%d slots=",
+            tick, phase, RD32(0x004755f4), RD32(0x004755f0), RD32(0x0049e578),
+            RD32(0x0049e57c), RD32(0x0049e580), RD32(0x0049e640));
+    for (int i = 0; i < 4; ++i)
+        fprintf(g_out, "%s%d:%d", i ? "," : "", RD32(0x004b7f10 + i * 4), RD32(0x0049e630 + i * 4));
+    fputs(" entries=", g_out);
+    for (int i = 0; i < 8; ++i)
+        fprintf(g_out, "%s%d/%d/%d", i ? "," : "", RD32(0x0049e5d0 + i * 12),
+                RD32(0x0049e5d4 + i * 12), RD32(0x0049e5d8 + i * 12));
+    fputc('\n', g_out);
+}
+
+static void __cdecl rr_family_queue_probe(void) {
+    rr_family_queue_state("before");
+    ((void(__cdecl*)(void))0x0044b0e0)();
+    rr_family_queue_state("after");
+}
+
+static void __fastcall rr_actor_speed_probe(uintptr_t self) {
+    const int tick = RD32(0x004b7ecc);
+    const int probe = g_out && tick == g_ai_probe_tick && RD32(self + 0xc4) == 0x20;
+    if (probe) {
+        const uintptr_t slice = (uint32_t)RD32(self + 0x2c);
+        fprintf(g_out, "# actor-speed-before tick=%d serial=%u pos=%d lat=%d dt=%d speed=%d heading=%d contact=%d slice=%u type=%u flags=%u edges=%d/%d shoulders=%d/%d\n",
+                tick, RD32(self + 0x1c4), RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x18),
+                RD32(self + 0xec), RD32(self + 0x128), RD32(self + 0x160), (unsigned)slice,
+                RD8(slice + 0x3c), RD8(slice + 0x37), RD32(slice + 0xe0), RD32(slice + 0xe4),
+                RD32(slice + 0xe8), RD32(slice + 0xec));
+    }
+    ((void(__fastcall*)(uintptr_t))0x004390c0)(self);
+    if (probe)
+        fprintf(g_out, "# actor-speed-after tick=%d serial=%u speed=%d drag=%d/%d accel=%d\n",
+                tick, RD32(self + 0x1c4), RD32(self + 0xec), RD32(self + 0x158), RD32(self + 0x15c), RD32(0x004c3cec));
+}
+
+static void __fastcall rr_draw_half_probe(uintptr_t strip, int32_t left, int32_t right) {
+    const int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4 && readable(strip, 0x104)) {
+        const uintptr_t slice = (uint32_t)RD32(strip + 0xc);
+        const int count = RD32(0x0046dcc4);
+        const uintptr_t parent = (uint32_t)RD32(strip + 8);
+        fprintf(g_out, "# draw-half tick=%d render=%u strip=%u slice=%u cutoff=%d bounds=%d/%d queue=%d camera=%d copied-camera=%d\n",
+                tick, g_frame, (unsigned)strip, (unsigned)slice, readable(parent, 12) ? RD32(parent + 8) : -1,
+                left, right, count, RD32(0x004b7ef4), RD32(0x004bc7e4));
+        for (int i = 0; i < count && i < 50; ++i) {
+            const uintptr_t actor = (uint32_t)RD32(0x004c3d30 + i * 4);
+            if (!readable(actor, 0x220) || RD32(actor + 0xc4) != 0x20) continue;
+            const uintptr_t actor_slice = (uint32_t)RD32(actor + 0x54);
+            if (actor_slice != slice && (g_slice_probe < 0 || (RD32(actor + 0x44) >> 8) != g_slice_probe)) continue;
+            fprintf(g_out, "# draw-ped tick=%d serial=%u actor=%u pos=%d lateral=%d loaded=%u slice=%u actor-slice=%u matches=%d\n",
+                    tick, (unsigned)RD32(actor + 0x1c4), (unsigned)actor, RD32(actor + 0x44),
+                    RD32(actor + 0x50), RD8(actor + 0x1e0), (unsigned)slice, (unsigned)actor_slice, actor_slice == slice);
+        }
+    }
+    ((void(__fastcall*)(uintptr_t, int32_t, int32_t))0x00438610)(strip, left, right);
+    if (g_out && tick >= g_ai_probe_tick - 4 && tick <= g_ai_probe_tick + 4)
+        for (int i = 0; i < RD32(0x0046dcc4) && i < 50; ++i) {
+            const uintptr_t actor = (uint32_t)RD32(0x004c3d30 + i * 4);
+            if (readable(actor, 0x220) && RD32(actor + 0xc4) == 0x20 &&
+                (uint32_t)RD32(actor + 0x54) == (uint32_t)RD32(strip + 0xc))
+                fprintf(g_out, "# draw-ped-after tick=%d serial=%u loaded=%u\n",
+                        tick, (unsigned)RD32(actor + 0x1c4), RD8(actor + 0x1e0));
+        }
+}
+
+static void __fastcall rr_static_view_probe(uintptr_t self) {
+    int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 80 && tick <= g_ai_probe_tick)
+        for (int h = 0; h < (int)RD32(self + 4) && h < 2; ++h) {
+            uintptr_t view = (uint32_t)RD32(self + 0x14 + h * 4);
+            uintptr_t sl = view && readable(view, 0x104) ? (uint32_t)RD32(view + 0xc) : 0;
+            if (sl && readable(sl, 0x64) && RD8(sl + 0x3d) && RD8(sl + 0x40) == 133)
+                fprintf(g_out, "# static-view tick=%d half=%d slice=%u local=%d depth=%d visible=%u road=%d/%d selector=%u flags=%u boxes=%u\n",
+                        tick, h, (unsigned)sl, (int32_t)RD32(sl + 4), (int32_t)RD32(view + 0x18),
+                        RD8(view + 0x100), (int32_t)RD32(view + 0x60), (int32_t)RD32(view + 0x68),
+                        RD8(sl + 0x40), RD8(sl + 0x41), RD8(sl + 0x43));
+        }
+    ((void(__fastcall*)(uintptr_t))0x00443b40)(self);
+}
+static void __fastcall rr_collision_pair_probe(uintptr_t self, uintptr_t other) {
+    const int probe = g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick;
+    if (probe)
+        fprintf(g_out, "# collision-pair self=%u other=%u types=%u/%u pos=%d/%d lat=%d/%d height=%d/%d last=%d/%d\n",
+                (unsigned)self, (unsigned)other, RD32(self + 0xc4), RD32(other + 0xc4),
+                RD32(self + 0x1c), RD32(other + 0x1c), RD32(self + 0x28), RD32(other + 0x28),
+                RD32(self + 0x20), RD32(other + 0x20), RD32(self + 0x10), RD32(other + 0x10));
+    ((void(__fastcall*)(uintptr_t, uintptr_t))0x00436a40)(self, other);
+    if (probe)
+        fprintf(g_out, "# collision-pair-result self=%u other=%u pos=%d/%d lat=%d/%d height=%d/%d\n",
+                (unsigned)self, (unsigned)other, RD32(self + 0x1c), RD32(other + 0x1c),
+                RD32(self + 0x28), RD32(other + 0x28), RD32(self + 0x20), RD32(other + 0x20));
+}
+static int __fastcall rr_collision_walk_probe(uintptr_t self) {
+    if (g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick && g_slice_probe >= 0) {
+        uintptr_t node = (uint32_t)RD32(RD32(self));
+        for (int i = 0; node && readable(node, 0x180) && RD32(node) && i < 512; ++i) {
+            if (abs((int32_t)RD32(node + 0x1c) - g_slice_probe * 256) < 768)
+                fprintf(g_out, "# collision-walk actor=%u next=%u type=%u flags=%u last=%d pos=%d lat=%d height=%d halflength=%d ignore=%u\n",
+                        (unsigned)node, RD32(node), RD32(node + 0xc4), RD8(node + 0xc0), RD32(node + 0x10),
+                        RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x20), RD32(node + 0x178), RD32(node + 0x144));
+            node = (uint32_t)RD32(node);
+        }
+    }
+    return ((int(__fastcall*)(uintptr_t))0x004368f0)(self);
+}
+static void __fastcall rr_static_sweep_probe(uintptr_t self) {
+    const int probe = g_out && (int32_t)RD32(0x004b7ecc) == g_ai_probe_tick && RD32(self + 0xc4) == 0x20;
+    uintptr_t sl = probe ? (uint32_t)RD32(self + 0x2c) : 0;
+    if (probe && sl && readable(sl, 0x65))
+        fprintf(g_out, "# ped-static-before actor=%u pos=%d lateral=%d state=%d type=%d borr=%u billboards=%u selector=%u bbtype=%u boxes=%u\n",
+                (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8), RD32(self + 0x1e4),
+                RD8(sl + 0x60), RD8(sl + 0x3d), RD8(sl + 0x40), RD8(sl + 0x42), RD8(sl + 0x43));
+    if (probe && sl && readable(sl, 0xb0)) {
+        const uintptr_t boxes = (uint32_t)RD32(sl + 0x68);
+        fprintf(g_out, "# ped-static-bounds actor=%u width=%d height=%d boxcount=%u boxptr=%u flags=%u\n",
+                (unsigned)self, RD32(self + 0x174), RD32(self + 0x17c), RD8(sl + 0x61), (unsigned)boxes, (unsigned)RD32(sl + 0xac));
+        for (int i = 0; i < RD8(sl + 0x60) && i < 15; ++i)
+            fprintf(g_out, "# ped-static-slot actor=%u i=%d lateral=%d\n", (unsigned)self, i, RD32(sl + 0x6c + i * 4));
+        for (int i = 0; i < RD8(sl + 0x61) && i < 15 && readable(boxes + i * 16, 16); ++i)
+            fprintf(g_out, "# ped-static-box actor=%u i=%d bounds=%d/%d/%d/%d\n", (unsigned)self, i,
+                    RD32(boxes + i * 16), RD32(boxes + i * 16 + 4), RD32(boxes + i * 16 + 8), RD32(boxes + i * 16 + 12));
+    }
+    ((void(__fastcall*)(uintptr_t))0x004373f0)(self);
+    if (probe)
+        fprintf(g_out, "# ped-static-after actor=%u pos=%d lateral=%d state=%d\n",
+                (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8));
+}
+static int __fastcall rr_place_refresh_probe(uintptr_t self) {
+    if (g_out && RD32(0x004b7ecc) == g_ai_probe_tick && RD32(self + 0x1f4) <= RD32(self + 0x10)) {
+        const uintptr_t slice = (uint32_t)RD32(self + 0x2c);
+        const unsigned mask = readable(slice, 0x37) ? RD8(slice + 0x36) : 0;
+        fprintf(g_out, "# place-self actor=%u pos=%d distance=%d mask=%u\n", (unsigned)self,
+                RD32(self + 0x1c), RD32(self + 0x1f8), mask);
+        for (int i = 0; i < RD32(0x4642d4) - 1 && i < 16; ++i) {
+            const uintptr_t other = (uint32_t)RD32(0x4c7fb0 + i * 4);
+            if (!readable(other, 0x200)) continue;
+            const uintptr_t os = (uint32_t)RD32(other + 0x2c);
+            fprintf(g_out, "# place-other actor=%u row=%d other=%u pos=%d distance=%d slice=%u mask=%u\n",
+                    (unsigned)self, i, (unsigned)other, RD32(other + 0x1c), RD32(other + 0x1f8),
+                    (unsigned)os, readable(os, 0x37) ? RD8(os + 0x36) : 0);
+        }
+    }
+    return ((int(__fastcall*)(uintptr_t))0x4075f0)(self);
+}
+static void __fastcall rr_billboard_draw_probe(uintptr_t self, int32_t mask, int32_t left, int32_t right) {
+    uintptr_t sl = (uint32_t)RD32(self + 0xc);
+    int tick = RD32(0x004b7ecc);
+    if (g_out && tick >= g_ai_probe_tick - 80 && tick <= g_ai_probe_tick && sl && readable(sl, 0x64) &&
+        RD8(sl + 0x3d) && RD8(sl + 0x40) == 133)
+        fprintf(g_out, "# billboard-draw tick=%d slice=%u local=%d depth=%d mask=%u limits=%d/%d flags=%u boxes=%u\n",
+                tick, (unsigned)sl, (int32_t)RD32(sl + 4), (int32_t)RD32(self + 0x18), (unsigned)mask,
+                left, right, RD8(sl + 0x41), RD8(sl + 0x43));
+    ((void(__fastcall*)(uintptr_t,int32_t,int32_t,int32_t))0x0044b980)(self,mask,left,right);
+}
+static int __fastcall rr_curvature_probe(uintptr_t slice, int count) {
+    const int result = ((int(__fastcall*)(uintptr_t, int))0x449b40)(slice, count);
+    if (g_out && RD32(0x4b7ecc) == g_ai_probe_tick) {
+        fprintf(g_out, "# curvature count=%d source=%u result=%d\n", count, (unsigned)slice, result);
+        for (int i = 0; i < count && i < 16 && readable(slice, 0xd0); ++i) {
+            fprintf(g_out, "# curvature-slice i=%d slice=%u local=%d centre=%d bend=%d mask=%u\n", i,
+                    (unsigned)slice, RD32(slice + 4), RD32(slice + 0xcc), RD32(slice + 0xb4), RD8(slice + 0x36));
+            slice = (uint32_t)RD32(slice + 0x10);
+        }
+    }
+    return result;
+}
+static void __fastcall rr_ai_curve_probe(uintptr_t self) {
+    ((void(__fastcall*)(uintptr_t))0x004090a0)(self);
+    if (g_out && RD32(0x004b7ecc) == g_ai_probe_tick) {
+        uintptr_t half = (uint32_t)RD32(self + 0x2fc);
+        uintptr_t brain = (uint32_t)RD32(half + 0x1d8);
+        fprintf(g_out, "# ai-target tick=%u actor=%u pos=%d lat=%d target=%d/%d lane=%d bias=%d\n",
+                RD32(0x004b7ecc), (unsigned)self, (int32_t)RD32(self + 0x1c), (int32_t)RD32(self + 0x28),
+                (int32_t)RD32(brain + 0x194), (int32_t)RD32(brain + 0x198),
+                (signed char)RD8(brain + 0x18c), (int32_t)RD32(brain + 0x190));
+        uintptr_t sl = (uint32_t)RD32(self + 0x2c);
+        for (int i = 0; i < 10 && sl && readable(sl, 0x164); ++i) {
+            fprintf(g_out, "# ai-road actor=%u i=%d slice=%u centre=%d bend=%d lanes=%d/%d halves=%u\n",
+                    (unsigned)self, i, (unsigned)sl, (int32_t)RD32(sl + 0xcc), (int32_t)RD32(sl + 0xb4),
+                    (int32_t)RD32(sl + 0x30), (int32_t)RD32(sl + 0x2c), RD8(sl + 0x36));
+            sl = (uint32_t)RD32(sl + 0x10);
+        }
+    }
+}
+static void __fastcall rr_wall_probe(uintptr_t self) {
+    uintptr_t sl = (uint32_t)RD32(self + 0x2c);
+    int probe = g_slice_probe >= 0 && ((int32_t)RD32(self + 0x1c) >> 8) == g_slice_probe;
+    if (probe && g_out && sl && readable(sl, 0x164))
+        fprintf(g_out, "# wall-entry tick=%u actor=%u kind=%u pos=%d lat=%d slice=%u type=%u event=%u flags=%u shoulders=%d/%d rate=%d selectors=%u/%u halfwidth=%d\n",
+                RD32(0x004b7ecc), (unsigned)self, RD32(self + 0xc4), (int32_t)RD32(self + 0x1c),
+                (int32_t)RD32(self + 0x28), (unsigned)sl, RD8(sl + 0x3c), RD8(sl + 0x38), RD8(sl + 0x37),
+                (int32_t)RD32(sl + 0xe8), (int32_t)RD32(sl + 0xec), (int32_t)RD32(self + 0xf0),
+                RD8(sl + 0x148), RD8(sl + 0x149), (int32_t)RD32(self + 0x174));
+    if (probe && g_out) {
+        const unsigned references[2] = {0x13c, 0x40};
+        for (int i = 0; i < 2; ++i) {
+            const uintptr_t previous = (uint32_t)RD32(self + references[i]);
+            if (previous && readable(previous, 0x14a))
+                fprintf(g_out, "# wall-previous reference=%x actor=%u slice=%u flags=%u selectors=%u/%u speed=%d heading=%d contact=%d\n",
+                        references[i], (unsigned)self, (unsigned)previous, RD8(previous + 0x37), RD8(previous + 0x148),
+                        RD8(previous + 0x149), RD32(self + 0xec), RD32(self + 0x128), RD32(self + 0x160));
+        }
+    }
+    ((void(__fastcall*)(uintptr_t))0x0043a610)(self);
+    if (probe && g_out)
+        fprintf(g_out, "# wall-exit actor=%u pos=%d lat=%d rate=%d\n", (unsigned)self,
+                (int32_t)RD32(self + 0x1c), (int32_t)RD32(self + 0x28), (int32_t)RD32(self + 0xf0));
+}
+typedef uint32_t (__fastcall *rr_player_think_fn)(uintptr_t,uint32_t);
+static rr_player_think_fn g_player_think_original;
+static uint32_t __fastcall rr_player_think_probe(uintptr_t self,uint32_t second){
+    if(RD8(0x004753c8)==0 && RD32(0x004c5d7c)==1)++g_player_human_calls;
+    return g_player_think_original(self,second);
+}
+static int rr_install_player_probe(void){
+    uint8_t* entry=(uint8_t*)(uintptr_t)0x00434660;
+    static const uint8_t expected[5]={0x53,0x56,0x8d,0x59,0x70};
+    if(memcmp(entry,expected,sizeof expected)){
+        if(g_out)fputs("# patch verification failed at player think entry\n",g_out);
+        return 0;
+    }
+    uint8_t* trampoline=VirtualAlloc(NULL,10,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
+    if(!trampoline)return 0;
+    memcpy(trampoline,entry,5);trampoline[5]=0xe9;
+    int32_t jump=(int32_t)((uintptr_t)(entry+5)-(uintptr_t)(trampoline+10));
+    memcpy(trampoline+6,&jump,4);
+    DWORD old;
+    if(!VirtualProtect(entry,5,PAGE_EXECUTE_READWRITE,&old)){VirtualFree(trampoline,0,MEM_RELEASE);return 0;}
+    g_player_think_original=(rr_player_think_fn)trampoline;
+    entry[0]=0xe9;jump=(int32_t)((uintptr_t)rr_player_think_probe-(uintptr_t)(entry+5));memcpy(entry+1,&jump,4);
+    VirtualProtect(entry,5,old,&old);FlushInstructionCache(GetCurrentProcess(),NULL,0);
+    return 1;
+}
+
 /* Per-step hook at 0x0044b324 (call 0x0044b3b0). The tick counters increment
  * before the call, so the dump after the original sees the new tick. Steps
  * before the bootstrapped race entry (startup 0x0044b2e0(1) calls) are
  * skipped via g_race_started. */
 static void __cdecl hook_step(void) {
+    if (g_sim && g_race_started && g_sim_frames == 0 && readable(0x0046dcc8, 4)) {
+        const uintptr_t list = (uint32_t)RD32(0x0046dcc8);
+        const uintptr_t end = list && readable(list, 8) ? (uint32_t)RD32(list) : 0;
+        const uintptr_t cursor = list && readable(list, 8) ? (uint32_t)RD32(list + 4) : 0;
+        uintptr_t node = cursor && readable(cursor + 4, 4) ? (uint32_t)RD32(cursor + 4) : 0;
+        for (int guard = 0; node && node != end && guard < 512; ++guard) {
+            if (!readable(node, 0xc8)) break;
+            if (RD32(node + 0xc4) == 0x400 && RD32(node + 0x10) + RD32(node + 0x14) == RD32(node + 0xc)) {
+                g_initial_traffic_tick = RD32(node + 0xc);
+            }
+            if (RD32(node + 0xc4) == 0x20 && RD32(node + 0x10) + RD32(node + 0x14) == RD32(node + 0xc))
+                g_initial_pedestrian_tick = RD32(node + 0xc);
+            if (g_initial_traffic_tick >= 0 && g_initial_pedestrian_tick >= 0) break;
+            node = (uint32_t)RD32(node + 4);
+        }
+    }
     // The seed fixes the live stream before the race's first step consumes
     // it, so the golden rng after tick 0 equals f(seed) on both sides.
     if (g_sim && g_race_started && !g_seed_applied && g_seed >= 0) {
@@ -856,15 +1515,31 @@ static void __cdecl hook_step(void) {
             if (g_input_exhausted_tick < 0) g_input_exhausted_tick = RD32(0x004b7ecc);
         }
     }
+    if ((g_sim || g_frontend_probe) && g_race_started && (g_drive || g_input))
+        capture_keyboard_axes(RD32(0x004b7ed0));
     if (g_knock_tick && g_sim && g_race_started && RD32(0x004b7ecc) == g_knock_tick) {
         static int32_t rider_impulse[3] = {-256, 0, 1792}, bike_impulse[3] = {0, 0, 1024};
         const uintptr_t player = (uint32_t)RD32(0x004642d8);
         if (readable(player, 0x32c))
             ((void(__fastcall*)(uintptr_t, int32_t*, int32_t*, int))0x00403d60)(player, rider_impulse,
                                                                                 bike_impulse, 1);
+        g_knock_applied_tick = RD32(0x004b7ecc);
         g_knock_tick = 0;
     }
-    if (g_police_probe && g_race_started && g_out) capture_police_spawn();
+    if (g_police_probe && g_race_started && g_out) {
+        // Constructor observations happen before the step but belong inside
+        // its frame record. Never emit integer fields in the trace header.
+        FILE* main_out = g_out;
+        g_police_fields = tmpfile();
+        if (g_police_fields) {
+            g_out = g_police_fields;
+            capture_police_spawn();
+            g_out = main_out;
+        } else {
+            fputs("# instrumentation failure: cannot buffer police fixture\n", g_out);
+            g_fixture_error = 1;
+        }
+    }
     ((void(__cdecl*)(void))0x0044b3b0)();
     if (!g_sim || !g_race_started || !g_out) return;
     dump_sim_tick();
@@ -2458,7 +3133,7 @@ static void capture_actor_animation(void) {
 static void capture_terrain_ground(void) {
     int current[96], next[96];
     char key[128];
-    for (int c = 0; c < 32; ++c) {
+    for (int c = 0; c < 33; ++c) {
         memset(current, 0, sizeof current);
         memset(next, 0, sizeof next);
         current[3] = (int)(uintptr_t)next;
@@ -2486,6 +3161,21 @@ static void capture_terrain_ground(void) {
                 next[offset / 4] = sign * (630 + band * 610 + c % 5 * 25);
                 next[offset / 4 + 1] = (c % 5 - 2) * (band + 1) * 35;
             }
+        if (c == 32) {
+            // Synthetic split-side boundary: zero-width right lane, opening
+            // inner shoulder and a descending first terrain band.
+            current[0xe0 / 4] = next[0xe0 / 4] = -500;
+            current[0xe4 / 4] = next[0xe4 / 4] = 0;
+            current[0xe8 / 4] = next[0xe8 / 4] = -750;
+            current[0xec / 4] = 0;
+            next[0xec / 4] = 2;
+            current[0x140 / 4] = next[0x140 / 4] = 0;
+            current[0x144 / 4] = next[0x144 / 4] = 0;
+            current[0xf8 / 4] = 1000;
+            next[0xf8 / 4] = 960;
+            current[0xfc / 4] = -90;
+            next[0xfc / 4] = -113;
+        }
 #define GROUND_LOG(label, value)                                                                             \
     do {                                                                                                     \
         snprintf(key, sizeof key, "ground.%d.%s", c, label);                                                 \
@@ -2504,7 +3194,8 @@ static void capture_terrain_ground(void) {
             rr_log(key, next[offsets[i] / 4]);
         }
         for (int i = 0; i < 64; ++i) {
-            const int x = (i - 32) * 75 * 256 + c * 3, frac = (i * 13 + c * 7) & 255;
+            const int x = c == 32 ? i * 256 : (i - 32) * 75 * 256 + c * 3;
+            const int frac = c == 32 ? 146 : (i * 13 + c * 7) & 255;
             snprintf(key, sizeof key, "ground.%d.%d.x", c, i);
             rr_log(key, x);
             snprintf(key, sizeof key, "ground.%d.%d.fraction", c, i);
@@ -2514,7 +3205,7 @@ static void capture_terrain_ground(void) {
         }
 #undef GROUND_LOG
     }
-    rr_log("ground.count", 32);
+    rr_log("ground.count", 33);
 }
 static void terrain_word(unsigned char*, int, uint32_t);
 static void capture_scenery(void) {
@@ -2579,7 +3270,7 @@ static void capture_scenery(void) {
 }
 
 static void capture_napa_events(void) {
-    FILE* input = fopen("D:\\ROADRASH\\DATA\\COURSES\\NAPA.CRS", "rb");
+    FILE* input = fixture_open("DATA\\COURSES\\NAPA.CRS");
     if (!input) return;
     fseek(input, 0, SEEK_END);
     const long size = ftell(input);
@@ -2731,7 +3422,13 @@ static void snapshot(snap_region* out, uint32_t* n) {
 // on the heap and is never inside the two-level closure, so walk it here and
 // append full bike (0x340) + rider-half bytes per scheduler node to the
 // scene file. Version 4 = v3 regions + node blobs + rider blobs.
+static struct {
+    uint32_t address, sub, fraction;
+    int32_t lateral, height;
+} g_ground_queries[512];
+static uint32_t g_ground_query_count;
 static void dump_rider_objects(FILE* out) {
+    g_ground_query_count = 0;
     uint32_t count = 0;
     if (readable(0x0046dcc8, 4)) {
         const uintptr_t S = (uint32_t)RD32(0x0046dcc8);
@@ -2760,6 +3457,26 @@ static void dump_rider_objects(FILE* out) {
         unsigned char bike[0x340];
         memcpy(bike, (void*)(uintptr_t)node, 0x340);
         fwrite(bike, 1, 0x340, out);
+        const uintptr_t sub = (uint32_t)RD32(node + 0x140);
+        if (readable(sub, 0x164) && g_ground_query_count < 512) {
+            uint32_t* random = sim_rand_state();
+            const uint32_t before = random ? *random : 0;
+            const int32_t lateral = RD32(node + 0x28);
+            const uint32_t fraction = (uint32_t)RD32(node + 0x138);
+            const int32_t height = ((int(__fastcall*)(int*, int, uint32_t))0x439b10)(
+                (int*)sub, lateral, fraction);
+            if (random && *random != before) {
+                fputs("# instrumentation failure: ground query consumed RNG\n", g_out);
+                fflush(g_out);
+                ExitProcess(1);
+            }
+            const uint32_t index = g_ground_query_count++;
+            g_ground_queries[index].address = (uint32_t)node;
+            g_ground_queries[index].sub = (uint32_t)sub;
+            g_ground_queries[index].lateral = lateral;
+            g_ground_queries[index].fraction = fraction;
+            g_ground_queries[index].height = height;
+        }
         fwrite(&half_ok, 4, 1, out);
         if (half_ok) {
             unsigned char rh[0x340];
@@ -2773,6 +3490,25 @@ static int capture_frame(void) {
     return g_out && g_pixels && !(g_frame % (uint32_t)g_pixel_every);
 }
 static void __fastcall hook_project(uint32_t a, int* b, int c, int* d, int e) {
+    if (g_view_pose >= 0 && g_race_started) {
+        if (g_sim) ExitProcess(2); /* a posed component cannot be simulation evidence */
+        const int target = g_view_pose + 256;
+        int steps = 0;
+        while (RD32(0x004b6e5c) != target && steps++ < 512) {
+            const int gap = target - RD32(0x004b6e5c);
+            ((void(__fastcall*)(int))0x00454120)(gap > 256 ? 256 : gap < -256 ? -256 : gap);
+        }
+        if (RD32(0x004b6e5c) != target) ExitProcess(3);
+        const uintptr_t row = (uint32_t)RD32(0x0049e820 + ((g_view_pose & 0x7f00) >> 6));
+        g_view_pose_row_ok = readable(row, 12) && RD32(row + 8) == (g_view_pose & ~255);
+        g_view_pose_applied = 1;
+        a = g_view_pose;
+        RD32(0x004bc7e4) = a;
+        d[0] = RD32(0x004bc7d8) = 0;
+        d[1] = RD32(0x004bc7dc) = 150;
+        e = 0;
+        RD8(0x00473498) = 0;
+    }
     if (capture_frame()) {
         snapshot(g_pre, &g_npre);
         g_pre_frame = (int)g_frame;
@@ -3495,8 +4231,8 @@ static void capture_cels(void) {
     int count = 0;
     for (int file = 0; file < 6; ++file) {
         char source_path[256];
-        snprintf(source_path, sizeof source_path, "D:\\ROADRASH\\DATA\\%s", files[file]);
-        FILE* in = fopen(source_path, "rb");
+        snprintf(source_path, sizeof source_path, "DATA\\%s", files[file]);
+        FILE* in = fixture_open(source_path);
         if (!in) continue;
         fseek(in, 0, SEEK_END);
         long size = ftell(in);
@@ -3749,7 +4485,7 @@ static void capture_road_panels(void) {
     ((void(__cdecl*)(void))0x44fb10)();
     unsigned char* global = NULL;
     int* real_ccb[8] = {0};
-    FILE* input = fopen("D:\\ROADRASH\\DATA\\GLOBAL.RSC", "rb");
+    FILE* input = fixture_open("DATA\\GLOBAL.RSC");
     if (input) {
         fseek(input, 0, SEEK_END);
         long size = ftell(input);
@@ -4035,6 +4771,11 @@ static void dump_frame(uint32_t site) {
     rr_log("camera.x", RD32(0x004bc7d8));
     rr_log("camera.height", RD32(0x004bc7dc));
     rr_log("camera.half", RD8(0x00473498));
+    if (g_view_pose >= 0) {
+        rr_log("component.pose.requested", g_view_pose);
+        rr_log("component.pose.applied", g_view_pose_applied);
+        rr_log("component.pose.row_valid", g_view_pose_row_ok);
+    }
     rr_log("view.coordinate_shift", RD32(0x00481fa8));
     rr_log("view.coordinate_mask", (uint32_t)RD32(0x00481ff4));
     if (g_frame == 0) {
@@ -4051,6 +4792,16 @@ static void dump_frame(uint32_t site) {
     if (g_scene_written) {
         rr_log("scene.file", g_frame);
         rr_log("scene.nodes", g_scene_nodes);
+        rr_log("terrain.query.count", g_ground_query_count);
+        for (uint32_t i = 0; i < g_ground_query_count; ++i) {
+            char key[128];
+#define QUERY_LOG(name, value) do { snprintf(key, sizeof key, "terrain.query.%u.%s", g_ground_queries[i].address, name); rr_log(key, value); } while(0)
+            QUERY_LOG("sub", g_ground_queries[i].sub);
+            QUERY_LOG("lateral", g_ground_queries[i].lateral);
+            QUERY_LOG("fraction", g_ground_queries[i].fraction);
+            QUERY_LOG("height", g_ground_queries[i].height);
+#undef QUERY_LOG
+        }
         g_scene_written = 0;
     }
     // Dispatch records buffered during this frame's projection/draw.
@@ -4123,7 +4874,7 @@ static void dump_frame(uint32_t site) {
         reset_actor_records();                                                                               \
         palette_hook_install();                                                                              \
         orig_frame();                                                                                        \
-        if (g_out && !g_sim) dump_frame(site);                                                               \
+        if (g_out && !g_sim && (!g_frontend_probe || g_frontend_trace)) dump_frame(site);                     \
         post_scripted_keys();                                                                                \
         ++g_frame;                                                                                           \
         if (!g_sim && g_quit_after > 0 && g_frame >= (uint32_t)g_quit_after) {                               \
@@ -4143,7 +4894,7 @@ FRAME_HOOK(3, 0x00443249)
 /* Original save-file writer capture (RR_ORACLE_SAVE=1, plan 13 Task 6 Step 1).
    Isolated call at attach time: seeds the 32-byte game state (0x004b8a10)
    and the 10 personality triples for rider index 2 (0x004c6b40,
-   0x00467a6c), points the dialog path (0x004b8900) at C:\save-seed.RRS and
+   0x00467a6c), points the dialog path (0x004b8900) at a capture-owned RRS and
    calls the original writer 0x0042f000, then hex-dumps its 0xa0-byte buffer
    (0x00497090). The reader 0x0042f110 is not called here: it runs the UI
    string setter 0x00444fb0, which is unsafe before a window exists. */
@@ -4166,7 +4917,10 @@ static void capture_save(void) {
         }
     char oldpath[260];
     for (int i = 0; i < 260; ++i) oldpath[i] = (char)RD8(0x004b8900 + i);
-    const char* sp = "C:\\save-seed.RRS";
+    char savepath[MAX_PATH];
+    const int length = snprintf(savepath, sizeof savepath, "%s-save.rrs", g_output);
+    if (length < 0 || length >= MAX_PATH) return;
+    const char* sp = savepath;
     int i = 0;
     while (sp[i]) {
         RD8(0x004b8900 + i) = (uint8_t)sp[i];
@@ -4176,9 +4930,9 @@ static void capture_save(void) {
     ((void(__cdecl*)(void))0x0042f000)();
     for (int j = 0; j < 260; ++j) RD8(0x004b8900 + j) = (uint8_t)oldpath[j];
     if (g_out) {
-        fputs("save.begin\n", g_out);
-        for (int j = 0; j < 0xa0; ++j) fprintf(g_out, "%02x", RD8(0x00497090 + j));
-        fputs("\nsave.end\n", g_out);
+        fputs("frame\t0\nsave.size\t160\n", g_out);
+        for (int j = 0; j < 0xa0; ++j)
+            fprintf(g_out, "save.byte.%d\t%u\n", j, (unsigned)RD8(0x00497090 + j));
         fflush(g_out);
     }
 }
@@ -4297,14 +5051,21 @@ static DWORD WINAPI menu_watchdog(LPVOID arg) {
     return 0;
 }
 
+#include "frontend_probe.h"
+
 static int rr_install_hooks(void) {
     char buf[32], path[MAX_PATH];
+    if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND", buf, sizeof buf)) g_frontend_probe = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND_TRACE", buf, sizeof buf)) g_frontend_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_FRAMES", buf, sizeof buf)) g_quit_after = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_UNTIL_FINISH", buf, sizeof buf)) g_until_finish = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_PIXELS", buf, sizeof buf)) g_pixels = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_GROUND_FIXTURE", buf, sizeof buf)) g_ground_fixture = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_GROUND_TRACE", buf, sizeof buf)) g_ground_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_DRIVE", buf, sizeof buf)) {
         g_drive = atoi(buf);
-        if (g_drive < 0 || g_drive > 3) return 0;
+        if (g_drive < 0 || g_drive > 5) return 0;
     }
     if (GetEnvironmentVariableA("RR_ORACLE_SIM", buf, sizeof buf)) g_sim = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_SEED", buf, sizeof buf)) g_seed = atoi(buf);
@@ -4318,10 +5079,16 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_SEEDED", buf, sizeof buf))
         g_terrain_seeded = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_TRACE", buf, sizeof buf)) g_terrain_trace = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_SLICE_SAMPLE", buf, sizeof buf)) g_slice_probe = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_VIEW_POSE", buf, sizeof buf)) g_view_pose = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_AI_TARGET_TICK", buf, sizeof buf)) g_ai_probe_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_SOLO", buf, sizeof buf)) g_solo = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_HUMAN", buf, sizeof buf)) g_human = atoi(buf) != 0;
-    if (GetEnvironmentVariableA("RR_ORACLE_KNOCK", buf, sizeof buf)) g_knock_tick = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_KNOCK", buf, sizeof buf))
+        g_knock_initial_tick = g_knock_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_ORDER", buf, sizeof buf)) g_order = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_ORDER_RANGE", buf, sizeof buf))
+        g_order_range = (int32_t)strtol(buf, 0, 0);
     if (GetEnvironmentVariableA("RR_ORACLE_PALETTE", buf, sizeof buf)) g_palette = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_EXIT_FADEOUT", buf, sizeof buf))
         g_palette_exit_fadeout = atoi(buf) != 0;
@@ -4397,6 +5164,47 @@ static int rr_install_hooks(void) {
             if (g_out) fprintf(g_out, "# patch verification failed at %08x\n", calls[i].site);
             return 0;
         }
+    }
+    if(g_sim&&g_human&&!rr_install_player_probe())return 0;
+    if (g_ai_probe_tick >= 0 &&
+        (!rr_patch_call((uint8_t*)0x0043ade3, 0x004390c0, rr_actor_speed_probe) ||
+         !rr_patch_call((uint8_t*)0x0044b3f7, 0x0044b0e0, rr_family_queue_probe) ||
+         !rr_patch_call((uint8_t*)0x00440694, 0x0044acd0, rr_ped_lookup_probe) ||
+         !rr_patch_call((uint8_t*)0x004406ac, 0x0044acd0, rr_ped_lookup_probe) ||
+         !rr_patch_call((uint8_t*)0x00443b6d, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443bc2, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443bf2, 0x00438610, rr_draw_half_probe) ||
+         !rr_patch_call((uint8_t*)0x00443ca2, 0x00438610, rr_draw_half_probe))) {
+        if (g_out) fputs("# patch installation failed at world-strip draw probe\n", g_out);
+        return 0;
+    }
+    if(g_ai_probe_tick >= 0 &&
+       (!rr_patch_call((uint8_t*)0x00409043,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x004090db,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x00409268,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
+        !rr_patch_call((uint8_t*)0x00409e29,0x004090a0,rr_ai_curve_probe))) {
+        if(g_out)fputs("# patch installation failed at AI target probe\n",g_out);
+        return 0;
+    }
+    if(g_ai_probe_tick >= 0 &&
+       (!rr_patch_call((uint8_t*)0x00406191,0x004075f0,rr_place_refresh_probe) ||
+        !rr_patch_call((uint8_t*)0x00436952,0x004373f0,rr_static_sweep_probe) ||
+        !rr_patch_call((uint8_t*)0x004383b6,0x004368f0,rr_collision_walk_probe) ||
+        !rr_patch_call((uint8_t*)0x004369f6,0x00436a40,rr_collision_pair_probe) ||
+        !rr_patch_call((uint8_t*)0x00443b1b,0x00443b40,rr_static_view_probe) ||
+        !rr_patch_call((uint8_t*)0x00443b2a,0x00443b40,rr_static_view_probe) ||
+        !rr_patch_call((uint8_t*)0x0043864c,0x0044b980,rr_billboard_draw_probe) ||
+        !rr_patch_call((uint8_t*)0x004386d5,0x0044b980,rr_billboard_draw_probe) ||
+        !rr_patch_call((uint8_t*)0x00438764,0x0044b980,rr_billboard_draw_probe))) {
+        if(g_out)fputs("# patch installation failed at static view probe\n",g_out);
+        return 0;
+    }
+    if(g_slice_probe >= 0 &&
+       (!rr_patch_call((uint8_t*)0x0043a5fe,0x0043a610,rr_wall_probe) ||
+        !rr_patch_call((uint8_t*)0x0043adf1,0x0043a610,rr_wall_probe))) {
+        if(g_out)fputs("# patch installation failed at wall probe\n",g_out);
+        return 0;
     }
     for (unsigned i = 0; i < count; ++i) {
         if (!rr_patch_call((uint8_t*)(uintptr_t)calls[i].site, calls[i].target, calls[i].hook)) {
@@ -4503,6 +5311,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             }
             return FALSE;
         }
+        if (g_ground_fixture && g_out) {
+            fputs("frame\t0\n", g_out);
+            capture_terrain_ground();
+            fputs("end\n", g_out);
+            fclose(g_out);
+            g_out = NULL;
+            return defer_fixture_exit(g_fixture_error ? 1 : 0);
+        }
         if (g_raster == 2 && g_out) {
             const int width = 640, height = 480;
             void* pixels = malloc((size_t)width * height);
@@ -4529,12 +5345,18 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
                 fclose(g_out);
                 g_out = NULL;
             }
+            return defer_fixture_exit(g_out || g_fixture_error ? 1 : 0);
         }
         if (g_save && g_out) {
             capture_save();
             fputs("end\n", g_out);
             fclose(g_out);
             g_out = NULL;
+            return defer_fixture_exit(g_fixture_error ? 1 : 0);
+        }
+        if (g_frontend_probe) {
+            HANDLE thread = CreateThread(NULL, 0, frontend_probe, NULL, 0, NULL);
+            if (thread) CloseHandle(thread);
         }
         if (g_menu_screen >= 0) {
             HANDLE thread = CreateThread(NULL, 0, menu_watchdog, (LPVOID)(intptr_t)g_menu_screen, 0, NULL);

@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 34 Task 2 Step 5: multi-human deterministic races. Needs the disc
 // (exit 77 without it). Two and eight humans with scripted inputs give
 // identical per-tick field hashes across runs; reading the race through a
@@ -75,7 +76,7 @@ Run run(const rr::Assets& assets, const std::vector<uint8_t>& exe, int humans, i
 
 int main() {
     rr::test::Checks check;
-    const std::string root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string root = rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;

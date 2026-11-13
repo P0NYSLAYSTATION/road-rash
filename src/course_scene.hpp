@@ -18,6 +18,7 @@ class UpscaleCache;
 // (0x0040b6a0). Resources 2/3 are 'MROF' voices: big-endian word +8 is the
 // speech argument 0x00440730 byte-swaps for sound event 0x16 (-1 if absent).
 struct PedestrianLook {
+    uint32_t graphics_offset = 0; // RRAN address relative to the reusable family-slot buffer
     Animation graphics;
     ActorGraphicsGroups views;
     ActorAnimationBank bank;
@@ -48,6 +49,9 @@ class CourseScene {
     // (Race::apply_ring_terrain) over these values; terrain() stays the
     // render view.
     const TerrainSlice& base_terrain(uint32_t section, uint32_t local) const;
+    std::array<uint8_t, 2> undrawn_selectors(uint32_t section, uint32_t local) const {
+        return undrawn_selectors_.at(section).at(local);
+    }
     std::vector<uint32_t> terrain_section_sizes() const;
     // Plan 20 Task 3: family textures for generation (read-only walk).
     const std::map<uint32_t, Family>& families() const { return families_; }
@@ -70,12 +74,25 @@ class CourseScene {
     // billboard category 4 frame 0), as 0x0044b630 resolves it.
     const AnimationFrame* static_frame(uint32_t section, uint32_t local, uint8_t selector,
                                        bool billboard) const;
+    std::vector<std::array<int32_t, 4>> static_collision_boxes(
+        const AnimationFrame&, const std::vector<uint16_t>& family_history) const;
     // DZHR actor records placed on this sample (place_dzhr), in original order.
     const std::vector<DzhrActor>& dzhr_actors(uint32_t section, uint32_t local) const;
     // 0x0044acd0(selector, 2, n) against the families resident at this
     // sample; nullptr when resource 0 or 1 is missing (0x00440680 then
     // never loads or draws the pedestrian).
     const PedestrianLook* pedestrian_look(uint32_t section, uint32_t local, uint8_t selector) const;
+    const PedestrianLook* pedestrian_family_look(uint16_t family, uint8_t selector) const;
+    bool pedestrian_family_graphics_valid(const std::vector<uint16_t>& history,
+                                          const PedestrianLook& look) const;
+    // 00441445 tests the cached RRAN header, including bytes beyond a shorter
+    // replacement's end; changing the selector's current family is insufficient.
+    bool pedestrian_graphics_valid(uint32_t section, uint32_t local, uint8_t selector,
+                                     const PedestrianLook&) const;
+    const PedestrianLook* pedestrian_look(const std::vector<RouteSample>&, size_t sample,
+                                           uint8_t selector, bool exact_front = false) const;
+    bool pedestrian_graphics_valid(const std::vector<RouteSample>&, size_t sample, uint8_t selector,
+                                     const PedestrianLook&, bool exact_front = false) const;
     // Marking flag 0x40 on a mountain sample: drawn as a tunnel (type 3).
     bool tunnel(uint32_t section, uint32_t local) const;
     // 0x0041c200 rail height ((1<<+0x1b)<<+0x19)*4 of the sample's CESR
@@ -96,8 +113,14 @@ class CourseScene {
     std::array<int32_t, 257> sine_words_{};             // 0x004766f0
     std::array<uint8_t, 128> sine_bytes_{};             // 0x00476870
     std::vector<std::vector<TerrainSlice>> terrain_;
+    std::vector<std::vector<std::array<uint8_t, 2>>> undrawn_selectors_;
     std::map<std::pair<uint32_t, uint32_t>, TerrainSlice> base_saved_; // originals of ring-written samples
     std::vector<std::vector<std::array<uint16_t, 4>>> family_slots_;
+    struct FamilyTimeline {
+        std::vector<FamilyEvent> events;
+        int32_t forward_bias = 0;
+    };
+    std::vector<FamilyTimeline> family_timelines_;
     std::map<uint32_t, Family> families_;
     RoadMaterials roads_;
     Cel water_; // GLOBAL.RSC CEL 0x10, cliff-foot water (0x0040d030)

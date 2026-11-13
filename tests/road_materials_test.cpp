@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "road_materials.hpp"
 #include "assets.hpp"
 #include <filesystem>
@@ -75,7 +76,7 @@ int main() {
             return 1;
         } catch (const std::runtime_error&) {
         }
-        const auto root = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH";
+        const auto root = std::filesystem::path(rr::test::assets_root());
         if (std::filesystem::exists(root)) {
             rr::Assets assets(root.string());
             const auto real =

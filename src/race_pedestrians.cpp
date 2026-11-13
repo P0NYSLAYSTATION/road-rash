@@ -2,25 +2,60 @@
 #include "pedestrians.hpp"
 #include "track_ring.hpp"
 #include "traffic.hpp"
+#include "terrain_ground.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 
 // Pedestrians, plan 24 Task 4. Each function names the routine it ports.
-// Known native differences (labelled where they occur):
-// - 0x004415b0 (traffic-light phase) reads live intersection signals:
-//   phase 2 crosses without a road check, phases 0/1 wait, -1 checks;
-// - category-2 resources load at spawn, not at the first draw (0x00440680
-//   calls 0x00440b80 lazily), so +0x1e0 is set one or more ticks early;
-// - the ground height +0x24 settles on the first move instead of
-//   0x00439b10 at allocation;
-// - 0x0043a610 walls are not yet applied to pedestrians (Race::walls now
-//   ports it for riders; pedestrian object types are untested there);
-// - only the camera roadway's DZHR records spawn; the other roadway of a
-//   split (second 0x00454240 call) is not walked yet;
-// - scheduler order: pedestrians think after every rider, not interleaved
-//   by ring position, and the contact pass runs after rider/car contacts.
+// The live scheduler interleaves pedestrians with riders and traffic. The
+// track ring walks both roadways at splits, and draw-time category-2 lookup
+// follows the shared resource queue. Allocation queries the newly built
+// sub-slice before copying its placement words, as 0x00438930 does.
+// Standalone fixtures without a track ring retain the fallback slice builder.
 namespace rr {
+int32_t Race::allocation_ground(const Rider& r, const RouteSample& current) const {
+    const auto& b = r.bike;
+    const auto& path = current.path;
+    const int32_t lateral = b.i32(0x28) - current.offset * 256;
+    if (!terrain_source_) {
+        const int32_t x = lateral >> 8;
+        if (x > path.right)
+            return x >= path.right + path.shoulder_right ? 999 : path.height_right;
+        if (x < -path.left)
+            return x <= -path.left - path.shoulder_left ? 999 : path.height_left;
+        return 0;
+    }
+    const auto& terrain = ground(current);
+    const uint8_t fraction = uint8_t(b.i32(0x138));
+    if (terrain.type != 4 || fraction == 0)
+        return terrain_height(terrain, path, terrain, path, lateral, fraction, 0, current.offset);
+
+    // The current slice has just been written, but its forward physical
+    // slot can still hold the previous ring generation (or the initial slot template).
+    // Do not substitute the not-yet-built future route geometry.
+    const auto& route = route_of(r);
+    const auto* ring = nearest_ring(b.i32(0x1c));
+    if (ring && !ring->slice_location(int32_t((r.sample + 1) * 256), current.half)) {
+        // 004551c0 initializes unbuilt slots: ground edges e0/e4 are
+        // -500/+500, shoulders e8/ec -650/+650. They are not zeroed roads.
+        PathSample initial{};
+        initial.left = initial.right = 500;
+        initial.shoulder_left = initial.shoulder_right = 150;
+        return terrain_height(terrain, path, TerrainSlice{}, initial, lateral, fraction,
+                              -current.offset, current.offset);
+    }
+    size_t next_sample = std::min(r.sample + 1, route.size() - 1);
+    if (ring) {
+        const int64_t back = ring->back_q8() >> 8;
+        next_sample = size_t(std::clamp<int64_t>(back + ((int64_t(next_sample) - back) & 127),
+                                                0, int64_t(route.size() - 1)));
+    }
+    auto next = route[next_sample];
+    if (next.dual && next.event == RoadEvent::split) next = route_half(next, 1);
+    return terrain_height(terrain, path, ground(next), slice_path(next, next_sample), lateral, fraction,
+                          next.offset - current.offset, current.offset);
+}
 namespace {
 int32_t sar8(int32_t x) {
     return (x + ((x >> 31) & 0xff)) >> 8;
@@ -143,7 +178,11 @@ void Race::ring_actor(const RingActor& a, uint32_t jitter) {
     if (!pedestrians_) return;
     const auto& road = route_of(riders_[0]);
     if (a.ring_sample < 0 || size_t(a.ring_sample) >= road.size()) return;
-    spawn_pedestrian(road[size_t(a.ring_sample)], size_t(a.ring_sample),
+    auto sample = road[size_t(a.ring_sample)];
+    if (sample.dual && sample.other_section == a.section && sample.other_local == a.local)
+        sample = route_half(sample, sample.half ^ 1);
+    sample.offset = a.road_offset;
+    spawn_pedestrian(sample, size_t(a.ring_sample),
                      DzhrActor{uint32_t(a.ring_sample), a.word0, a.word1}, jitter);
 }
 
@@ -171,16 +210,22 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
         }
         return;
     }
-    const int32_t player = ring_setup_ ? 0 : riders_[size_t(snapshot_authority_?human_rider(actor_seat_):0)].bike.i32(0x1c); // local_8
+    const int32_t player = ring_setup_ ? 0 : snapshot_authority_
+        ? riders_[size_t(human_rider(actor_seat_))].half_mirror.position : player_half_position();
     Pedestrian* slot = nullptr;
     for (auto& p : system.pool())
-        if (!p.active) {
+        if (!p.active && (!slot || p.free_order > slot->free_order)) {
             slot = &p;
-            break;
         }
     if (!slot) return; // pool full: 0x004387a0 returns null, the record is still consumed
     Pedestrian& p = *slot;
+    //00438c10 returns the existing pool storage. 004387a0 clears selected
+    //motion fields, but not +108/+10c; 004409e0 leaves crossing lane+1fc.
+    const auto previous_image = p.body.bike.m;
+    const int8_t previous_lane = p.lane;
     p = Pedestrian{};
+    p.body.bike.m = previous_image;
+    p.lane = previous_lane;
     p.active = true;
     Bike& b = p.body.bike;
     system.apply_template(b);
@@ -191,12 +236,23 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
     b.i32(0x20) = 0;
     b.i32(0x24) = 0;
     b.i32(0x28) = lateral;
-    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
     b.i32(0x134) = position;
     b.i32(0x138) = position;
-    p.body.route = riders_[size_t(snapshot_authority_?human_rider(actor_seat_):0)].route;
+    p.body.route = riders_[size_t(snapshot_authority_ ? human_rider(actor_seat_) : 0)].route;
+    const int initial_route = p.body.route;
+    for (int index = 0; index < 2; ++index) {
+        const int road = (initial_route + index) % 2;
+        if (s < routes_[road]->size() && (*routes_[road])[s].section == sample.section &&
+            (*routes_[road])[s].local == sample.local) {
+            p.body.route = road;
+            break;
+        }
+    }
     p.body.sample = p.body.previous_sample = s;
+    b.i32(0x24) = allocation_ground(p.body, sample);
+    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
     p.anchor = position; // +0x1c8..+0x1d8 copy of +0x1c..+0x2c
+    p.anchor_lateral = lateral;
     p.selector = uint8_t(w0 >> 8);
     p.type = type;
     p.side = lateral < 1 ? 1 : 3;
@@ -224,13 +280,36 @@ void Race::load_pedestrian_looks() {
     // resources on its first drawn frame, after that tick's sim step. The
     // think gate at 0x00440eff reads the still-unloaded +0x208/+0x21c words
     // until then and passes via +0x1e0 == 0 (plan 10 napa-field-l5 measured
-    // the resulting tick-1 rand() draw). Every spawn lands inside the camera
-    // ring window, so one end-of-tick load pass models that render.
+    // the resulting tick-1 rand() draw). 0x00438610 calls a node's draw
+    // (+0xdc) only on the slices that frame draws: one behind the ring
+    // camera (front - 0x5000) up to camera + 0x1e00, the static-box reach.
+    // A pedestrian beyond it stays unloaded and keeps thinking as one
+    // (city-parked-randlog-20261102: the parked-camera crosser 10000 Q8
+    // ahead walks at the unloaded pace 4). 0x00438610's lateral dispatch
+    // bounds are world coordinates, not projected screen x; the static
+    // strip's broad bounds also admit these pedestrian nodes.
     if (!pedestrians_) return;
+    const int32_t camera =
+        std::max<int32_t>(ring_ ? ring_->front_q8() - 0x5000 : int32_t(camera_position()), 0);
+    const size_t first = size_t(std::max<int32_t>((camera >> 8) - 1, 0));
     for (auto& p : pedestrians_->pool()) {
-        if (!p.active || p.look) continue;
-        const auto& road = route_of(p.body);
-        p.look = pedestrians_->look(road[std::min(p.body.sample, road.size() - 1)], p.selector);
+        if (!p.active) continue;
+        p.pre_draw_resources = {p.loaded(), p.has(0), p.has(5)};
+        if (p.loaded()) continue;
+        if (p.body.sample < first || int64_t(p.body.sample) * 256 > int64_t(camera) + 0x1e00) continue;
+        const auto& road = route_of(riders_[0]);
+        // 0x0044acd0 resolves a global family slot, advanced by the front
+        // MSRR walker. Query its global front coordinate directly: subtracting
+        //and re-adding view_slices inside a section can fire events beyond
+        //that section's actual terminal cursor.
+        const size_t front =
+            ring_ ? size_t(std::max(0, ring_->front_q8() >> 8)) : p.body.sample;
+        const auto* current = ring_ && pedestrians_->has_resident_sources()
+            ? pedestrians_->resident_look(ring_->resident_family(p.selector >> 6), p.selector)
+            : pedestrians_->look(road, std::min(front, road.size() - 1), p.selector);
+        if (!current) continue;
+        p.look = current;
+        p.graphics_evicted = false;
         if (p.look) { // 0x00440b80
             set_animation(p.animation, p.look->bank, 1, uint32_t(ticks_));
             queue_animation(p.animation, p.look->bank, -1);
@@ -270,7 +349,7 @@ void Race::run_ped_node(Pedestrian& p) {
         // Nulled-callback solo replays keep their measured same-step removal
         // contract; only the live move-slot path defers unlink.
         if (freeze_actors_) {
-            p.active = false;
+            pedestrians_->recycle(p);
             return;
         }
         // 0x00437c10 -> 0x00437be0: disabled now, still in the list through
@@ -288,8 +367,7 @@ void Race::step_pedestrians() {
     for (auto& p : pedestrians_->pool()) {
         // 0x00437df0 removes last tick's marked nodes before scheduling.
         if (p.pending_remove) {
-            p.active = false;
-            p.pending_remove = false;
+            pedestrians_->recycle(p);
             continue;
         }
         if (!p.active || p.next_tick > ticks_) continue;
@@ -297,9 +375,19 @@ void Race::step_pedestrians() {
     }
 }
 
+size_t Race::pedestrian_sample(const Pedestrian& p) const {
+    const auto& road = route_of(p.body);
+    if (const auto* ring = live_schedule_ ? nearest_ring(p.body.bike.i32(0x1c)) : nullptr) {
+        const int64_t back = ring->back_q8() >> 8;
+        return size_t(std::clamp<int64_t>(back + ((int64_t(p.body.sample) - back) & 127),
+                                          0, int64_t(road.size() - 1)));
+    }
+    return p.body.sample;
+}
+
 int Race::pedestrian_lane(const Pedestrian& p) const {
     // 0x0044a020(obj, 0): lanes of 250 world units from the slice centre.
-    const auto& s = route_of(p.body)[p.body.sample];
+    const auto& s = route_of(p.body)[pedestrian_sample(p)];
     const int32_t d = int32_t(uint32_t(p.body.bike.i32(0x28)) - uint32_t(s.offset * 256));
     return int8_t(int32_t(int64_t(sar8(d)) / 250) - (d < 0 ? 1 : 0));
 }
@@ -326,6 +414,8 @@ bool Race::pedestrian_road_clear(const Pedestrian& p, int factor, int delta) con
         other_velocity = velocity;
     };
     for (const auto& r : riders_) {
+        if (!r.bike_slice_present)
+            continue; // 0x00449ce0 skips nodes without a slice (+0x2c), e.g. parked bikes
         const auto& sample = route_of(r)[r.sample];
         if (sample.dual && r.route != p.body.route) continue; // 0x00449ce0 roadway-half test
         consider(r.bike.i32(0x1c), r.bike.i32(0x28), sample.offset, r.bike.i32(0x108));
@@ -337,7 +427,7 @@ bool Race::pedestrian_road_clear(const Pedestrian& p, int factor, int delta) con
             const auto& own=snapshot_authority_?route_for(car.road):road;
             const size_t s = std::min(size_t(car.position) >> 8, own.size() - 1);
             if(snapshot_authority_&&!same_collision_road(p.body.route,p.body.sample,car.road,s))continue;
-            consider(car.position, car.lateral, own[s].offset, car.kind == 2 ? -car.speed : car.speed);
+            consider(car.position, car.lateral, own[s].offset, car.motion.i32(0x108));
         }
     }
     if (!found) return true;
@@ -356,7 +446,7 @@ bool Race::pedestrian_road_clear(const Pedestrian& p, int factor, int delta) con
 bool Race::pedestrian_arrived(const Pedestrian& p) const {
     // 0x004414a0: past the middle of the far shoulder (+0xe4/+0xec right,
     // +0xe0/+0xe8 left).
-    const SliceEdges e = edges(p.body, p.body.sample);
+    const SliceEdges e = edges(p.body, pedestrian_sample(p));
     const int32_t lateral = p.body.bike.i32(0x28);
     if (p.side == 1) return ((e.right + e.right_shoulder) / 2) * 256 < lateral;
     return lateral < ((e.left + e.left_shoulder) / 2) * 256;
@@ -374,7 +464,8 @@ void Race::pedestrian_voice(Pedestrian& p, int which) {
 void Race::think_pedestrian(Pedestrian& p) {
     // 0x00440dd0.
     Bike& b = p.body.bike;
-    const int32_t player = (snapshot_authority_?nearest_human(p.body.bike.i32(0x1c)):riders_[0]).bike.i32(0x1c);
+    const int32_t player = snapshot_authority_
+        ? nearest_human(p.body.bike.i32(0x1c)).half_mirror.position : player_half_position();
     const uint32_t tick = uint32_t(ticks_);
     auto set = [&](int8_t code) {
         if (p.look) set_animation(p.animation, p.look->bank, code, tick);
@@ -398,8 +489,8 @@ void Race::think_pedestrian(Pedestrian& p) {
     // signal for this side of the road, or -1. Phase 2 walks without a road
     // check; other phases hold; no signal checks the road.
     const int signal = traffic_
-                           ? traffic_->pedestrian_signal(route_of(p.body)[p.body.sample].path.marking_flags,
-                                                         b.i32(0x1c), pedestrian_lane(p), snapshot_authority_?p.body.route:-1)
+                           ? traffic_->pedestrian_signal(route_of(p.body)[pedestrian_sample(p)].path.marking_flags,
+                                                         b.i32(0x1c), pedestrian_lane(p), snapshot_authority_ ? p.body.route : -1)
                            : -1;
     p.pace = 0;
     if (p.state != 2) {
@@ -536,19 +627,63 @@ void Race::think_pedestrian(Pedestrian& p) {
         b.i32(0xec) = speed;
         b.i32(0x5c) = heading;
     }
-    if (p.look) advance_animation(p.animation, p.look->bank, tick);
+    if (p.loaded()) {
+        //The global family slots follow the player's committed front walker,
+        //not a pedestrian's retained historical split arm.
+        const auto& road = route_of(riders_[0]);
+        const size_t front =
+            ring_ ? size_t(std::max(0, ring_->front_q8() >> 8)) : p.body.sample;
+        if (ring_ && std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+            const auto state = ring_->diagnostic_state();
+            const auto& s = road[std::min(front, road.size() - 1)];
+            std::fprintf(stderr, "ped-family-cursor serial %u ped-route %d player-route %d query %zu section %u local %u physical-node %u physical-position %d\n",
+                         unsigned(p.serial), p.body.route, riders_[0].route, front, s.section, s.local,
+                         state.front.node, state.front.position);
+        }
+        const bool valid = ring_ && pedestrians_->has_resident_sources()
+            ? pedestrians_->resident_graphics_valid(ring_->family_history(p.selector >> 6), *p.look)
+            : pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look);
+        if (!valid) {
+            // 0x0044143b..0x00441474: replaced graphics lose their RRAN
+            // header. Only pointers +0/+4/+0xc are cleared; animation
+            // code/frame/queue/deadline remain, as do bank-table +8 and
+            // availability words. State3 can keep waiting on retained code2.
+            p.graphics_evicted = true;
+            p.animation.selected.reset();
+        } else {
+            advance_animation(p.animation, p.look->bank, tick);
+        }
+    }
 }
 
 void Race::move_pedestrian(Pedestrian& p) {
     // 0x00440990: 0x0043adc0 (independent actor motion), then stay within
     // 0x1ff of the spawn position.
     Bike& b = p.body.bike;
+    p.body.wall_previous_sample = p.body.sample;
     if (!b.i32(0x160)) {
         b.i32(0x114) = b.i32(0x118) = 0;
         b.u8(0x164) = 0;
     }
-    integrate_speed(b, tables_, surface_class(edges(p.body, p.body.sample), b.i32(0x28)));
+    size_t surface_sample = p.body.sample;
+    if (const auto* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr) {
+        const int64_t back = ring->back_q8() >> 8;
+        surface_sample = size_t(std::clamp<int64_t>(back + ((int64_t(surface_sample) - back) & 127),
+                                                  0, int64_t(route_of(p.body).size() - 1)));
+    }
+    const auto surface_edges = edges(p.body, surface_sample);
+    const int surface = surface_class(surface_edges, b.i32(0x28));
+    if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
+        std::fprintf(stderr, "ped-integrate serial %u dt %d pos %d lat %d speed %d heading %d surface %d type %u flags %u edges %d/%d shoulders %d/%d retained %zu\n",
+                     unsigned(p.serial), int32_t(b.i32(0x18)), int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)),
+                     int32_t(b.i32(0xec)), int32_t(b.i32(0x128)), surface, unsigned(surface_edges.type),
+                     unsigned(surface_edges.flags), surface_edges.left, surface_edges.right,
+                     surface_edges.left_shoulder, surface_edges.right_shoulder, surface_sample);
+    integrate_speed(b, tables_, surface);
     advance_actor_motion(b, tables_, [&](int32_t distance) { move_along(p.body, distance); });
+    //0043adf1 runs the shared wall/shoulder response for pedestrians too,
+    //before vertical settling. City6207 clamps the walker to the shoulder.
+    walls(p.body);
     vertical(p.body);
     const int32_t gap = int32_t(uint32_t(p.anchor) - uint32_t(b.i32(0x1c)));
     if (magnitude(gap) > 0x1ff) {
@@ -600,6 +735,7 @@ void Race::contact_pedestrian(Rider& self, Pedestrian& p) {
     // decision. Upright pedestrians (state != 2) only nudge the rider below
     // speed 2000 (500 for one already down); faster riders ride up over them.
     Bike& s = self.bike;
+    if (s.i32(0x2f4) == 0) self.half_object.u8(0x1e9) = 0; // 00404b2c
     const Bike& q = p.body.bike;
     const int32_t steer = s.i32(0xf0);
     if (human(self)) {
@@ -644,7 +780,7 @@ void Race::contact_pedestrian(Rider& self, Pedestrian& p) {
     if (s.i32(0xec) < -1000) s.i32(0xec) = -1000;
     s.i32(0xf4) = std::clamp(int32_t(s.i32(0xf4)), -10000, 10000);
     if (live_schedule_ && s.i32(0x2f4) == 0 && finish_q8_ != 0)
-        self.finish_distance = finish_q8_ - self.half_mirror.position;
+        self.finish_distance = remaining_finish_distance(self, self.half_mirror.position);
 }
 
 void Race::contact_rider_pedestrian(Rider& r, Pedestrian& p, bool rider_outer) {
@@ -689,7 +825,81 @@ void Race::collide_pedestrians() {
     }
 }
 void Race::attach_terrain_type() {
-    if (traffic_ && terrain_source_)
+    if (traffic_ && terrain_source_) {
+        traffic_->set_obstacle_scan([this](const TrafficCar& car, int32_t reach) -> std::optional<TrafficObstacle> {
+            build_scan_list();
+            int at = -1;
+            const int index = int(&car - traffic_->cars().data());
+            for (size_t i = 0; i < scan_.size(); ++i)
+                if (scan_[i].car == index) { at = int(i); break; }
+            const int32_t origin = car.position;
+            auto lateral_next = [&](int from) {
+                if (from < 0) return -1;
+                const auto self = scan_[size_t(from)];
+                auto side = [&](bool forward) {
+                    int current = from;
+                    for (;;) {
+                        const int32_t range = 128 + (forward ? self.position - scan_[size_t(current)].position
+                                                                           : scan_[size_t(current)].position - self.position);
+                        current = scan_next(current, 0x3f, forward, range);
+                        if (current < 0) return -1;
+                        const int32_t x = scan_[size_t(current)].lateral;
+                        if (x != self.lateral && (self.lateral < x) == (car.kind == 1)) return current;
+                    }
+                };
+                const int forward = side(true), backward = side(false);
+                if (forward < 0) return backward;
+                if (backward < 0) return forward;
+                return (scan_[size_t(forward)].lateral > scan_[size_t(backward)].lateral) == (car.kind == 1)
+                           ? backward : forward;
+            };
+            for (;;) {
+                at = (car.kind & 1) ? lateral_next(at) : scan_next(at, 0x3f, car.kind == 0, reach);
+                if (at < 0) return std::nullopt;
+                const auto& o = scan_[size_t(at)];
+                if (car.kind & 1) {
+                    if (((o.position ^ origin) & ~255) != 0) continue;
+                } else {
+                    const int32_t delta = int32_t(uint32_t(o.lateral) - uint32_t(o.sample->offset * 256));
+                    const int lane = int8_t(int32_t(int64_t(delta / 256) / 250) - (delta < 0 ? 1 : 0));
+                    if (lane != car.lane) continue;
+                }
+                int32_t across = 0;
+                if (o.car >= 0) across = traffic_->cars()[size_t(o.car)].motion.i32(0x10c);
+                else if (o.pedestrian >= 0) across = pedestrians_->pool()[size_t(o.pedestrian)].body.bike.i32(0x10c);
+                else if (o.rider >= 0) {
+                    const auto& r = riders_[size_t(o.rider)];
+                    across = o.type == 4 ? r.bike.i32(0x10c)
+                             : r.crash_active ? r.crash_actor.motion.i32(0x10c) : r.half_mirror.lat_vel;
+                }
+                return TrafficObstacle{o.position, o.lateral, o.speed, across, o.type};
+            }
+        });
+        traffic_->set_ring_source([this](int32_t position) { return nearest_ring(position); });
         traffic_->set_terrain_type([this](const RouteSample& s) { return int(ground(s).type); });
+        traffic_->set_road_motion([this](int32_t position) -> std::optional<std::pair<int32_t, int32_t>> {
+            const auto* ring = nearest_ring(position);
+            if (!ring) return std::nullopt;
+            const auto& route = route_of(riders_[0]);
+            const size_t sample = size_t(std::clamp(position >> 8, 0, int32_t(route.size()) - 1));
+            return ring->retained_motion(position, route[sample].half);
+        });
+        traffic_->set_wall_response([this](Bike& body, size_t current, size_t previous) {
+            Rider actor;
+            actor.bike = body;
+            actor.route = riders_[0].route;
+            actor.sample = current;
+            actor.previous_sample = previous;
+            actor.wall_previous_sample = previous;
+            if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
+                const auto s = sub_slice(actor, current);
+                std::fprintf(stderr, "car-wall tick %d pos %d lat %d samples %zu/%zu type %u flags %u edges %d/%d shoulders %d/%d halfwidth %d\n",
+                             ticks_, int32_t(body.i32(0x1c)), int32_t(body.i32(0x28)), previous, current,
+                             unsigned(s.type), unsigned(s.flags), s.e0, s.e4, s.e8, s.ec, int32_t(body.i32(0x174)));
+            }
+            walls(actor);
+            body = actor.bike;
+        });
+    }
 }
 } // namespace rr

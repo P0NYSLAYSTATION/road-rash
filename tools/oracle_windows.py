@@ -51,6 +51,21 @@ def run_owned(command,cwd,env,log,timeout):
             except subprocess.TimeoutExpired:process.kill();process.wait()
             return 124
 
+
+def collect_companions(scratch, tag, output_stem, controls):
+    """Retain names embedded in traces as well as flat replay aliases."""
+    scratch, controls = Path(scratch), Path(controls)
+    files = (list(scratch.glob(tag + '-*.raw')) + list(scratch.glob(tag + '*.rrs'))
+             + ([controls] if controls.is_file() else []))
+    companions = []
+    for file in files:
+        if file.suffix == '.raw':
+            companions.append(file)
+        target = scratch / file.name.replace(tag, output_stem, 1)
+        shutil.copy2(file, target)
+        companions.append(target)
+    return companions
+
 @contextlib.contextmanager
 def instrument_live(install,helper):
     from instrument_aweman import instrument
@@ -111,7 +126,7 @@ def working_registry(install):
     finally:winreg.DeleteKeyEx(winreg.HKEY_CURRENT_USER,path,winreg.KEY_WOW64_32KEY)
 
 def capture(args):
-    from oracle_capture import validate_trace,publish_capture
+    from oracle_capture import validate_trace,validate_recorded_controls,publish_capture
     import re
     if os.name!='nt':raise ValueError('Native capture requires Windows')
     if not re.fullmatch(r'[A-Za-z0-9_-]+',args.scenario):raise ValueError('Invalid scenario name')
@@ -142,13 +157,16 @@ def capture(args):
                         if sha256(install/'AWEMAN32.DLL')!=dll_hash:raise ValueError('Capture DLL changed during execution')
                         if input_path and sha256(input_path)!=input_hash:raise ValueError('Controls changed during execution')
                         info=validate_trace(trace,env.get('RR_ORACLE_SIM','0')!='0',
-                            profile['runtime_exe_sha256'],int(env['RR_ORACLE_FRAMES']) if env.get('RR_ORACLE_FRAMES') else None)
+                            profile['runtime_exe_sha256'],int(env['RR_ORACLE_FRAMES'])
+                            if env.get('RR_ORACLE_FRAMES') and env.get('RR_ORACLE_UNTIL_FINISH','0')=='0' else None)
+                        if env.get('RR_ORACLE_FRAMES') and info['frames'] > int(env['RR_ORACLE_FRAMES']):
+                            raise ValueError('Capture exceeded requested tick limit')
                         if record and not controls.is_file():raise ValueError('Recorded controls missing')
+                        if record:info['recorded_controls_count']=validate_recorded_controls(trace,controls)
+                        if env.get('RR_ORACLE_HUMAN','0')!='0' and info['control_branch']!='human':
+                            raise ValueError('Capture does not prove execution of the original human-control branch')
                 # Do not accept or replace any output until restoration succeeded.
-                companions=[]
-                for file in list(scratch.glob(tag+'-*.raw'))+([controls] if controls.is_file() else []):
-                    target=scratch/file.name.replace(tag,output.stem,1)
-                    shutil.copy2(file,target);companions.append(target)
+                companions = collect_companions(scratch, tag, output.stem, controls)
                 info.update(reference_exe_sha256=REFERENCE_SHA,**profile,
                     aweman_instrumentation=dict(instrumentation),requested_scenario=args.scenario,
                     proxy_sha256=dll_hash,process_exit_code=code,duration_seconds=time.time()-started,

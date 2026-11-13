@@ -103,12 +103,11 @@ CrashRecoveryAction recover_crash_actor(Bike& bike, CrashActor& rider, const Act
             body.i32(0xec) = 1200;
         }
     } else if (state.animation == 37) {
-        // 0x00449c20 uses a logical sign shift, preserving its unusual result
-        // for a negative longitudinal difference.
-        const uint32_t difference = uint32_t(bike.i32(0x1c)) - uint32_t(body.i32(0x1c));
-        const uint32_t sign = difference >> 31;
-        const uint32_t bits = (difference ^ sign) - sign;
-        const int64_t distance = bits <= INT32_MAX ? int64_t(bits) : int64_t(bits) - 0x100000000LL;
+        // 00449c20 bytes 2bd1 8bc2 99 33c2 2bc2: subtract,
+        // CDQ, XOR and SUB implement signed absolute distance. INT_MIN
+        // retains its original 32-bit wraparound value.
+        const int32_t difference = add(bike.i32(0x1c), negate(body.i32(0x1c)));
+        const int32_t distance = difference < 0 ? negate(difference) : difference;
         if (!bike.i32(0x2f0) && distance < 80) {
             if (state.loops >= 1) {
                 if (input.player) return CrashRecoveryAction::wrecked;

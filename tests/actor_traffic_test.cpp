@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "traffic.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -6,18 +7,15 @@
 #include <iostream>
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/CARS/NAPA.CAR")) {
             std::cout << "Imported actor traffic corpus absent\n";
-            return 0;
+            return 77;
         }
         const rr::VehicleLibrary library(assets.read("DATA/CARS/NAPA.CAR"), assets.read("ROADRASH.EXE"));
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-actor-animation-fixtures.tsv");
-        if (!file) {
-            std::cout << "Original vehicle graphics fixture absent\n";
-            return 0;
-        }
+        if (!file) throw std::runtime_error("Required original actor_traffic fixture missing");
         std::map<std::string, int64_t> values;
         std::string line, key;
         int64_t value;

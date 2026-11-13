@@ -1,5 +1,96 @@
 # Simulation Oracle and Tick Verification Implementation Plan
 
+## November 12, 2026 — all five completed human recordings
+
+Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
+[Evidence](../agent-handoffs/parity-resource-lookup-20261112.md).
+
+## November 12, 2026 — Canyn checkpoint
+
+Completed Canyn L1/seed1 human recording29620 matches including RNG; Hiway14084 and Napa29055 remain exact. Finished Medly seed2 recording37186 matches20645 before resource availability; City33819 matches18307 before similar resource availability. All five finished reference recordings exist. All-level/branch acceptance remains open; multiplayer held. Final native/strict gates and1.1.17 packaging are in progress.
+[Evidence](../agent-handoffs/parity-city-visibility-20261112.md).
+
+## November 12, 2026 — complete Napa checkpoint
+
+Strict whole-race Napa L1/seed1 human replay matches all29055 ticks including RNG. Hiway14084 full regression remains exact; four prefixes pass. Full MSVC Release and SDL gate pass104 with35 explicit skips, two unavailable D3D exclusions. Completed City33819 matches18,307 ticks; first fails18,308 pedestrian resource availability. Medly ended in arrest. Other tracks/levels/branches remain open; multiplayer stays held.
+[Evidence](../agent-handoffs/parity-projected-velocity-20261112.md).
+
+## Mixed-contact checkpoint — November 12, 2026
+
+Complete Hiway14084 and moving Napa2400 now match including RNG. Moving City
+first gap is1559 car position34152/native34150. Other full races/levels remain
+open; see [evidence](../agent-handoffs/parity-mixed-contacts-20261112.md).
+
+## Completed Hiway checkpoint — November 12, 2026
+
+Strict whole-race human replay passes all14084 ticks including RNG on the
+unchanged level1/seed1 recording. All-track/all-level acceptance remains open;
+multiplayer stays held. See [evidence](../agent-handoffs/parity-finish-pools-20261112.md).
+
+## Physical statics checkpoint — November 12, 2026
+
+Exact Hiway prefix11158 includes RNG. Physical-half static builds restore10073
+marking contact; first11159 active riders5/native6 remains open. Full-race/all-track
+acceptance is unfinished. See current handoff for evidence.
+
+## Latest Windows checkpoint — November 12, 2026
+
+Hiway matches through10072 including RNG on the unchanged completed recording.
+Physical contact force, mover-start wall references and graph node/local identity
+resolve9749,9783 and9785. First remaining gap10073 is half+1e8 marking state.
+Full-race/all-track acceptance remains open. See current handoff for evidence.
+
+## Windows continuation — November 12, 2026
+
+Current exact-family/physical-road continuation matches through9748 including
+RNG on the unchanged completed Hiway trace. First gap9749 is opponent ground
+64/native71. Full-race/all-track acceptance remains open; older gaps below
+are historical. See the [current evidence](../agent-handoffs/parity-parking-20261112.md).
+
+Latest physical-traffic-motion continuation matches through9406 including RNG.
+First gap9407 is pedestrian serial8 resource availability original1/native0.
+All-track full-race acceptance remains open; historical gaps follow below.
+
+Current crashed-contact continuation matches through9335 including RNG.
+First gap9336 is a traffic car's accumulated rise72/native99. Complete
+start-to-finish all-track parity remains open; older first-gap notes follow.
+
+Latest police-lifetime continuation matches through8349 including RNG on the
+completed Hiway trace. First gap8350 is RNG, original2 calls/native4. All-track
+full-race acceptance remains open. This supersedes older gap statements below.
+
+Latest traffic continuation matches the completed Hiway trace through8191,
+including RNG. First gap8192 is police brain+140 original12/native0. Traffic
+wall/dimension, undrawn selector and signal-lifetime evidence supersedes older
+gap statements below; see the [current handoff](../agent-handoffs/parity-parking-20261112.md).
+
+Current continuation supersedes the historical first-gap statements below:
+the unchanged completed Hiway trace matches through8131 including RNG.
+First gap8132 is ring actor0x336fb08 lateral152320/native201994.
+Parking, retained physical half motion and standings evidence is in the
+[current handoff](../agent-handoffs/parity-parking-20261112.md). Complete
+all-track start-to-finish parity remains open; multiplayer stays on hold.
+
+Latest first gap is6604 (parked position223502/223501), after6603 exact ticks
+including RNG. Original secondary-road visibility prevented the false6557
+decal contact; the native box-loading gate now reproduces it. See the
+[scenery continuation](../agent-handoffs/parity-scenery-culling-20261112.md).
+
+Latest continuation supersedes the6007 first-gap statement below: the same
+completed Hiway trace matches through6556; first gap6557 is opponent steering
+original2310/native3465. Graph finish discovery, AI roadway masks and
+physical inner-shoulder geometry were measured against E:/RR. See
+[current evidence](../agent-handoffs/parity-split-geometry-20261112.md).
+
+Strict replay of the completed Hiway human recording now matches ticks1..6006
+including RNG. First remaining gap6007 is graph-relative finish distance on an
+opponent's alternate branch; original227708/native232828. Complete all-track
+start-to-finish parity remains open. No reanchor or golden change was used.
+Resource/header lifetime, circular-slice, in-road scenery pool and split event
+findings are in [the current handoff](../agent-handoffs/parity-residency-20261112.md).
+Independent moving Napa1259 and City1251 divergences remain. Full original RNG
+caller logging now retains all52,137 calls in the completed14,084-tick capture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Read [00-INDEX.md](00-INDEX.md) first.
 
 **Goal:** Make the original game produce deterministic per-tick traces of every rider, bike and car from a fixed seed and a recorded control stream. Replay the same seed and controls through `rr::Race`, and find and fix every divergence in physics, AI racing, contact, combat and traffic.
@@ -604,3 +695,56 @@ This completes the requested full live-field capture. The task checkboxes
 above remain open for the other specified scenarios (level5, dedicated fights,
 steals and isolated traffic) and unmeasured police/split/mixed-actor branches.
 Do not infer all-game or all-course parity from this single captured route.
+
+
+### City pedestrian RNG (November 3)
+
+`city-cops-parked-20261026` now matches RNG, ring-window riders and the cop
+to its 4552 end, with the original arrest on 4552 asserted. Two new
+2400-tick City captures match end to end. The fixes are pedestrian rules:
+resources load only for pedestrians inside the drawn slices, and the
+road-clear scan follows `0x00449ce0` (slice-holding nodes, car `+0x108`).
+This covers City at level byte 2 (`RR_ORACLE_LEVEL=3`) with a parked player only. Moving-camera City races,
+other levels and the remaining courses still need captures. See
+[handoff](../agent-handoffs/city-rng-20261102.md).
+
+### Remount rejoins the half on the remount tick (November 4)
+
+`sim-napa-traffic-field.tsv --driver=human` diverged at tick 2279 on one
+0x004463e0 shadow node (original 75067, native 75033) while the rider
+position matched: the original's node.28 jumps exactly when rider slot 3's
+crash flag clears 3 -> 0. `Race::crash_recovery` ran `remount_crash_actor`
+but not the `0x004067d0` copy-back that the `0x00404560` remount tail calls
+(export line 37, gated on the just-zeroed 0x2f4), and the bike node was not
+due that tick. One-line fix: `live_standings(r)` in the remount branch
+(matching the original call order; the non-live path is unchanged because
+`update_halves` rewrites the same words with no RNG). New `crash-test`
+block fails pre-fix and passes post-fix. Results: traffic-field 2279 ->
+**4381/4381 identical** (Task 7 traffic-field scenario now fully replays);
+steal-farm 3627 -> 4059, steal-farm-l1 2837 -> 5697; contact/fight/steal
+first divergences unchanged; field/city/acceptance goldens unchanged. See
+[handoff](../agent-handoffs/remount-mirror-20261104.md).
+
+
+### November 4, 2026: split-ring continuation checkpoint
+
+Dual-half runtime walkers, cached window reentry, commitment and lane offsets
+are implemented with synthetic forward/back/snapshot coverage. Static route
+opposite identity, intersection roadway selection and the ground right-forward
+link are corrected. Single-anchor `sim-napa-steal-farm` now matches through7872;
+first gap7873 is body_f4 original1302/native1032. Strict human1431/1431 remains
+exact. No all-split or full-race acceptance claim: arbitrary route choices,
+complete neighbor topology and other-course/human cases remain open.
+[Evidence and next action](../agent-handoffs/split-ring-latest-20261104.md).
+
+### November 11, 2026: Windows upstream integration and expanded probes
+
+Merged upstream main20fb4c0 before further work. Native original captures from
+the owner's exact E:/RR installation now measure initial construction clocks,
+pedestrian cached-bank eviction, traffic body motion and per-tick RNG calls.
+Graphics lifetime, shared road accumulation and tick-zero setup are corrected.
+Expanded longer scenarios retain failures at Napa1072 (equal-key mixed scan
+ordering) and City751 (crossing-car lateral motion). These are next parity
+targets, not accepted differences. Full Debug native gate passes with36
+explicit corpus/platform skips; no complete parity claim.
+[Evidence](../agent-handoffs/actor-lifetimes-clock-20261111.md).

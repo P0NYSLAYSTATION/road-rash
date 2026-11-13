@@ -1,4 +1,5 @@
 #include "terrain_ground.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -51,7 +52,14 @@ int main(int argc, char** argv) {
                 rr::terrain_height(tunnel, q, tunnel, q, 300 * 256, 0) != 20)
                 throw std::runtime_error("Tunnel sidewalk pair-B heights");
         }
-        std::ifstream file(argc > 1 ? argv[1] : RR_SOURCE_DIR "/analysis/oracle/napa-building-fixtures.tsv");
+        const char* configured = std::getenv("RR_TEST_GROUND_FIXTURE");
+        const std::string fixture = argc > 1                    ? argv[1]
+                                    : configured && *configured ? configured
+                                                                : RR_SOURCE_DIR
+                                        "/analysis/oracle/napa-building-fixtures.tsv";
+        std::ifstream file(fixture);
+        if (!file && (argc > 1 || (configured && *configured)))
+            throw std::runtime_error("Missing configured original ground fixture: " + fixture);
         if (file) {
             std::map<std::string, int32_t> values;
             std::string line, key;

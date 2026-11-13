@@ -106,6 +106,14 @@ void init_object(Bike& b, const std::array<int32_t, 26>& w) {
     b.i32(0x1a4) = w[22];
     b.i32(0x1a8) = w[23];
     b.i32(0x1ac) = w[24];
+    // 0x0043886a..0x00438924 resets these words on every allocation.
+    // In particular +0x108/+0x10c are NOT reset: recycled pool objects
+    // retain their previous velocity until the first movement update.
+    for (int offset : {0x198, 0x188, 0x18c, 0x184, 0xf0,  0xf4,  0xec,  0xf8,  0xfc,  0x114, 0x118,
+                       0x120, 0x124, 0x128, 0x130, 0x158, 0x144, 0x1b0, 0x100, 0x104, 0x12c, 0x15c})
+        b.i32(offset) = 0;
+    b.u8(0x1bc) = 0;
+    b.u8(0x164) = 0;
     b.i32(0x11c) = -0x25;
 }
 
@@ -225,6 +233,28 @@ int32_t atan_ratio(const PhysicsTables& t, int32_t x) {
     if (x < 0x101) return t.atan[size_t(x)];
     if (x < 0x10000) return 0x100 - atan_ratio(t, 0x10000 / x);
     return 0x100;
+}
+
+void accumulate_road_motion(Bike& b, const PhysicsTables& tables, uint32_t from, uint32_t to,
+                            int32_t old_bend, int32_t old_rise, int32_t new_bend, int32_t new_rise) {
+    const auto curvature = [&](int32_t bend) { return (atan_ratio(tables, bend) * (1 << 14)) >> 8; };
+    if (((to ^ from) & 0xffffff00u) == 0) {
+        const int32_t distance = int32_t(to - from);
+        b.i32(0x128) -= (curvature(new_bend) * distance) / 2;
+        b.i32(0x130) = -(new_bend * distance);
+        b.i32(0x12c) = new_rise * distance;
+        return;
+    }
+    int32_t in_new = int32_t(to & 0xff), in_old;
+    if (int32_t(to) < int32_t(from)) {
+        in_old = -int32_t(from & 0xff);
+        in_new -= 0x100;
+    } else {
+        in_old = 0x100 - int32_t(from & 0xff);
+    }
+    b.i32(0x128) -= (curvature(old_bend) * in_old + curvature(new_bend) * in_new) / 2;
+    b.i32(0x130) = -(new_bend * in_new + old_bend * in_old);
+    b.i32(0x12c) = new_rise * in_new + old_rise * in_old;
 }
 
 int32_t sine(const PhysicsTables& t, uint32_t a) {

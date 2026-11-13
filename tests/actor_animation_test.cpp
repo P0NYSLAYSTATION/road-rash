@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "actor_animation.hpp"
 #include "assets.hpp"
 #include "exe_tables.hpp"
@@ -36,6 +37,11 @@ int main(int argc, char** argv) {
         if (!rejected) throw std::runtime_error("Invalid signed frame accepted");
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-actor-animation-fixtures.tsv");
+        if (!file) {
+            rr::Assets assets(rr::test::assets_root());
+            if (!assets.exists("DATA/GLOBAL.RSC")) return 77;
+            throw std::runtime_error("Required original animation fixture missing");
+        }
         if (file) {
             std::map<std::string, int64_t> values;
             std::string line, key;
@@ -44,7 +50,7 @@ int main(int argc, char** argv) {
                 std::istringstream row(line);
                 if (row >> key >> value) values[key] = value;
             }
-            rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+            rr::Assets assets(rr::test::assets_root());
             const auto bytes = rr::read_exe_data(assets.read("ROADRASH.EXE"), 0x464430, 16);
             std::vector<int8_t> fallback;
             for (int i = 0; i < 4; ++i) fallback.push_back(int8_t(bytes[i * 4]));

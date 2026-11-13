@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #define RR_PATCH_NO_WINDOWS 1
 #include "aweman_proxy.c"
+#include "drive_progress.h"
 
 /* Preflight hook sites against the reference executable: parse the PE
  * section table, map each site VA to a file offset, and check the expected
@@ -31,10 +32,18 @@ static uint16_t read_u16(const uint8_t* p) {
 
 static int preflight_reference_sites(void) {
     char path[1024];
+    const char* assets = getenv("RR_ASSETS");
+    if (assets && *assets)
+        snprintf(path, sizeof path, "%s/ROADRASH.EXE", assets);
+#ifdef RR_TEST_ASSETS_DIR
+    else snprintf(path, sizeof path, "%s/ROADRASH.EXE", RR_TEST_ASSETS_DIR);
+#else
+    else
 #ifdef RR_SOURCE_DIR
     snprintf(path, sizeof path, "%s/../cdrom/ROADRASH/ROADRASH.EXE", RR_SOURCE_DIR);
 #else
     snprintf(path, sizeof path, "../cdrom/ROADRASH/ROADRASH.EXE");
+#endif
 #endif
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -101,6 +110,21 @@ static int preflight_reference_sites(void) {
 
 int main(void) {
     int failures = 0;
+    {
+        RRDriveProgress progress = {0};
+        rr_drive_stalled(&progress, 0, 12800, 1);
+        for (uint32_t tick = 1; tick < 300; ++tick)
+            if (rr_drive_stalled(&progress, tick, 12800 + (tick & 1 ? 100 : -100), 1)) ++failures;
+        if (!rr_drive_stalled(&progress, 300, 12800, 1) || progress.stalls != 1) ++failures;
+        if (rr_drive_stalled(&progress, 300, 12800, 1)) ++failures; // repeated poll, same tick
+        rr_drive_stalled(&progress, 400, 13056, 1); // meaningful progress
+        if (rr_drive_stalled(&progress, 699, 13056, 1)) ++failures;
+        if (!rr_drive_stalled(&progress, 700, 13056, 1)) ++failures;
+        rr_drive_stalled(&progress, 701, 13056, 0); // countdown/crash disables monitoring
+        if (rr_drive_stalled(&progress, 2000, 13056, 1)) ++failures;
+        if (rr_drive_stalled(&progress, 1, 13056, 1)) ++failures; // new race clock
+        puts("five-second driver progress checks completed");
+    }
     uint8_t code[16] = {0};
     uintptr_t base = (uintptr_t)code;
     /* call to target 0x1000 bytes ahead of the next instruction */

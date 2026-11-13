@@ -92,6 +92,7 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
     for (const auto& section : course.sections) {
         terrain_.emplace_back();
         family_slots_.emplace_back();
+        family_timelines_.push_back({section.family_events, section.family_forward_bias});
         tunnels_.emplace_back();
         event_selectors_.emplace_back();
         // The original terrain helpers consume CRT rand values. This isolated
@@ -106,7 +107,7 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
         size_t event = 0;
         for (size_t j = 0; j < section.samples.size(); ++j) {
             if (j) iterator.step(256);
-            const auto& path = section.samples[j];
+            const auto& path = !j && section.forward_start ? *section.forward_start : section.samples[j];
             auto t = iterator.slice(-path.left - path.shoulder_left, path.right + path.shoulder_right);
             if (t.type == 4 && path.marking_flags && !(path.marking_flags & 0x40))
                 for (auto& point : t.points) point[1] = 0;
@@ -155,6 +156,10 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
             families_.emplace(entry.id,
                               read_family(std::vector<uint8_t>(file.begin() + entry.offset,
                                                                file.begin() + entry.offset + entry.size)));
+    for (const auto& section : terrain_) {
+        undrawn_selectors_.emplace_back();
+        for (const auto& t : section) undrawn_selectors_.back().push_back(t.selectors);
+    }
     for (size_t section = 0; section < terrain_.size(); ++section)
         for (size_t local = 0; local < terrain_[section].size(); ++local) {
             auto& t = terrain_[section][local];
@@ -186,7 +191,10 @@ const TerrainSlice& CourseScene::terrain(uint32_t section, uint32_t local) const
 }
 void CourseScene::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample& path,
                                      const TerrainSlice& slice) {
-    if (slice.type != 1 && slice.type != 4) return;
+    if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
+        terrain_.at(section).at(local).side_heights.reset();
+        return;
+    }
     auto& t = terrain_.at(section).at(local);
     base_saved_.emplace(std::make_pair(section, local), t); // keeps the first (original) value
     ring_terrain_onto(t, path, slice);
@@ -207,7 +215,9 @@ void ring_terrain_onto(TerrainSlice& t, const PathSample& path, const TerrainSli
     t.walls = slice.walls;
     t.points = slice.points;
     t.shades = slice.shades;
-    if (slice.type == 4 && (path.marking_flags || path.zone_end) && !(path.marking_flags & 0x40))
+    t.side_heights = slice.side_heights;
+    if (!slice.ring_adjusted && slice.type == 4 && (path.marking_flags || path.zone_end) &&
+        !(path.marking_flags & 0x40))
         for (auto& point : t.points) point[1] = 0;
     t.type = type;
 }
@@ -344,8 +354,101 @@ const AnimationFrame* CourseScene::static_frame(uint32_t section, uint32_t local
 const std::vector<DzhrActor>& CourseScene::dzhr_actors(uint32_t section, uint32_t local) const {
     return actors_.at(section).at(local);
 }
+bool CourseScene::pedestrian_graphics_valid(uint32_t section, uint32_t local, uint8_t selector,
+                                            const PedestrianLook& look) const {
+    const auto& timeline = family_timelines_.at(section);
+    const int64_t cursor = std::max<int64_t>(0, int64_t(local) + view_slices + timeline.forward_bias);
+    // 004155e5 copies the replacement payload into the existing allocation;
+    // it does not clear the unused tail. Overlay only the four header bytes
+    // rather than allocating/copying the entire graphics buffer per query.
+    std::array<uint8_t, 4> header{0x4e, 0x41, 0x52, 0x52};
+    for (const auto& event : timeline.events) {
+        if (event.sample > cursor) break;
+        if (event.slot != selector >> 6 || (event.type != 1 && event.type != 3)) continue;
+        const auto family = families_.find(event.family);
+        if (family == families_.end()) continue;
+        const auto& bytes = family->second.bytes;
+        for (size_t i = 0; i < header.size(); ++i) {
+            const uint64_t offset = uint64_t(look.graphics_offset) + i;
+            if (offset < bytes.size()) header[i] = bytes[size_t(offset)];
+        }
+    }
+    return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
+}
+
 const PedestrianLook* CourseScene::pedestrian_look(uint32_t section, uint32_t local, uint8_t selector) const {
     const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    return pedestrian_family_look(id, selector);
+}
+
+const PedestrianLook* CourseScene::pedestrian_look(const std::vector<RouteSample>& route, size_t sample,
+                                                  uint8_t selector, bool exact_front) const {
+    bool previous_section = false;
+    for (;;) {
+        const auto& s = route.at(sample);
+        uint16_t id = 0;
+        if (exact_front) {
+            const auto& timeline = family_timelines_.at(s.section);
+            const int64_t cursor = int64_t(s.local) + (previous_section ? 1 : 0) + timeline.forward_bias;
+            for (auto it = timeline.events.rbegin(); it != timeline.events.rend(); ++it)
+                if (it->sample <= cursor && it->slot == selector >> 6 && (it->type == 1 || it->type == 3)) {
+                    id = it->family;
+                    break;
+                }
+        } else id = family_slots_.at(s.section).at(s.local)[selector >> 6];
+        if (id) return pedestrian_family_look(id, selector);
+        // A section can leave a slot untouched. The original global slot
+        // then keeps its incoming family rather than resetting to zero.
+        if (sample <= s.local) return nullptr;
+        sample -= size_t(s.local) + 1;
+        previous_section = true;
+    }
+}
+
+bool CourseScene::pedestrian_graphics_valid(const std::vector<RouteSample>& route, size_t sample,
+                                            uint8_t selector, const PedestrianLook& look, bool exact_front) const {
+    const bool trace = std::getenv("RR_RESOURCE_TRACE_SAMPLE") &&
+                       sample == size_t(std::atoi(std::getenv("RR_RESOURCE_TRACE_SAMPLE")));
+    if (trace) std::fprintf(stderr, "resource-check sample %zu selector %u offset %u\n", sample,
+                            unsigned(selector), unsigned(look.graphics_offset));
+    std::array<uint8_t, 4> header{0x4e, 0x41, 0x52, 0x52};
+    uint8_t found = 0;
+    bool previous_section = false;
+    for (;;) {
+        const auto& s = route.at(sample);
+        const auto& timeline = family_timelines_.at(s.section);
+        const int64_t cursor = exact_front
+                                   ? int64_t(s.local) + (previous_section ? 1 : 0) + timeline.forward_bias
+                                   : std::max<int64_t>(0, int64_t(s.local) + view_slices + timeline.forward_bias);
+        if (trace) std::fprintf(stderr, "resource-timeline section %u local %u cursor %lld\n", s.section,
+                                s.local, static_cast<long long>(cursor));
+        for (auto it = timeline.events.rbegin(); it != timeline.events.rend(); ++it) {
+            if (it->sample > cursor || it->slot != selector >> 6 || (it->type != 1 && it->type != 3))
+                continue;
+            const auto family = families_.find(it->family);
+            if (family == families_.end()) continue;
+            const auto& bytes = family->second.bytes;
+            if (trace) std::fprintf(stderr, "resource-event sample %u family %u size %zu\n",
+                                    unsigned(it->sample), unsigned(it->family), bytes.size());
+            for (size_t i = 0; i < header.size(); ++i) {
+                const uint64_t offset = uint64_t(look.graphics_offset) + i;
+                if (!(found & (1 << i)) && offset < bytes.size()) {
+                    header[i] = bytes[size_t(offset)];
+                    found |= uint8_t(1 << i);
+                }
+            }
+            if (found == 15) break;
+        }
+        if (found == 15 || sample <= s.local) break;
+        sample -= size_t(s.local) + 1;
+        previous_section = true;
+    }
+    if (trace) std::fprintf(stderr, "resource-header %02x%02x%02x%02x found %u\n",
+                            header[0], header[1], header[2], header[3], unsigned(found));
+    return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
+}
+
+const PedestrianLook* CourseScene::pedestrian_family_look(uint16_t id, uint8_t selector) const {
     const auto key = std::make_pair(uint32_t(id), uint32_t(selector & 63));
     if (const auto it = pedestrians_.find(key); it != pedestrians_.end())
         return it->second ? &*it->second : nullptr;
@@ -373,6 +476,7 @@ const PedestrianLook* CourseScene::pedestrian_look(uint32_t section, uint32_t lo
     }
     const std::vector<uint8_t> layout(bytes.begin() + *cans, bytes.begin() + long(end));
     PedestrianLook look;
+    look.graphics_offset = *graphics;
     look.graphics = read_animation(bytes, *graphics);
     look.views = read_actor_graphics(layout);
     for (const auto& table : pedestrian_tables_) {
@@ -393,6 +497,54 @@ const PedestrianLook* CourseScene::pedestrian_look(uint32_t section, uint32_t lo
         }
     slot = std::move(look);
     return &*slot;
+}
+
+bool CourseScene::pedestrian_family_graphics_valid(const std::vector<uint16_t>& history,
+                                                   const PedestrianLook& look) const {
+    std::array<uint8_t, 4> header{0x4e, 0x41, 0x52, 0x52};
+    uint8_t found = 0;
+    for (auto it = history.rbegin(); it != history.rend() && found != 15; ++it) {
+        const auto family = families_.find(*it);
+        if (family == families_.end()) continue;
+        const auto& bytes = family->second.bytes;
+        for (size_t i = 0; i < header.size(); ++i) {
+            const uint64_t offset = uint64_t(look.graphics_offset) + i;
+            if (!(found & (1 << i)) && offset < bytes.size()) {
+                header[i] = bytes[size_t(offset)];
+                found |= uint8_t(1 << i);
+            }
+        }
+    }
+    return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
+}
+
+std::vector<std::array<int32_t, 4>> CourseScene::static_collision_boxes(
+    const AnimationFrame& frame, const std::vector<uint16_t>& history) const {
+    auto boxes = frame.boxes;
+    if (!frame.collision_source_offset || history.empty()) return boxes;
+    // 0044b630 caches a pointer into the family slot, not a private copy
+    // of the rectangle. 004155e5 replaces that buffer in place, retaining
+    // its unused tail. Resolve each byte from the latest covering payload.
+    for (size_t box = 0; box < boxes.size(); ++box) {
+        for (size_t word = 0; word < 4; ++word) {
+            uint32_t value = uint32_t(boxes[box][word]);
+            uint8_t found = 0;
+            for (auto it = history.rbegin(); it != history.rend() && found != 15; ++it) {
+                const auto family = families_.find(*it);
+                if (family == families_.end()) continue;
+                const auto& bytes = family->second.bytes;
+                for (size_t byte = 0; byte < 4; ++byte) {
+                    const uint64_t offset = uint64_t(frame.collision_source_offset) + box * 16 + word * 4 + byte;
+                    if (!(found & (1 << byte)) && offset < bytes.size()) {
+                        value = (value & ~(0xffu << (byte * 8))) | uint32_t(bytes[size_t(offset)]) << (byte * 8);
+                        found |= uint8_t(1 << byte);
+                    }
+                }
+            }
+            boxes[box][word] = value <= INT32_MAX ? int32_t(value) : int32_t(int64_t(value) - 0x100000000LL);
+        }
+    }
+    return boxes;
 }
 const CelTexture* CourseScene::material(uint32_t section, uint32_t local, uint8_t selector, uint8_t category,
                                         std::optional<uint32_t> frame, int32_t width, int32_t height) const {
@@ -678,7 +830,28 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             const auto& old = roads[n][r];
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
-            const int32_t whole_left = -((path.left_q8 + 255) / 256) * 250;
+            // 0x004547e0 widens the sub-slice's panel grid to its forward
+            // neighbor(s). Physical road edges retain the fractional widths.
+            const auto& left_neighbor = roads[n][far.count == 2 && near.count == 1 ? 0 : r];
+            const auto& right_neighbor = roads[n][far.count == 2 && near.count == 1 ? 1 : r];
+            int32_t left_q8 = path.left_q8, right_q8 = path.right_q8;
+            int32_t next_left_q8 = left_neighbor.path->left_q8;
+            int32_t next_right_q8 = left_neighbor.path->right_q8;
+            if (&left_neighbor != &right_neighbor) {
+                next_left_q8 += right_neighbor.path->left_q8;
+                next_right_q8 += right_neighbor.path->right_q8;
+            }
+            int left_count = (left_q8 + 255) / 256, right_count = (right_q8 + 255) / 256;
+            const int32_t whole_left = std::min(-left_count * 250,
+                left_neighbor.offset - road.offset - ((left_neighbor.path->left_q8 + 255) / 256) * 250);
+            if (next_left_q8 != left_q8 && (left_q8 & 255) == 0) {
+                left_count = (next_left_q8 + 255) / 256;
+                if (next_left_q8 > left_q8) ++left_q8;
+            }
+            if (next_right_q8 != right_q8 && (right_q8 & 255) == 0) {
+                right_count = (next_right_q8 + 255) / 256;
+                if (next_right_q8 > right_q8) ++right_q8;
+            }
             RoadPanelInput panels;
             // 0x00444630 updates the previous strip's +0x30 using that
             // strip's own +0xd8 lane origin at the new far scale. Both ends
@@ -693,10 +866,10 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             panels.second_lane_width = wrap(int64_t(250) * near.scale);
             panels.near_depth_q8 = near.depth;
             panels.far_depth_q8 = far.depth;
-            panels.left_lanes_q8 = path.left_q8;
-            panels.right_lanes_q8 = path.right_q8;
-            panels.left_lane_count = uint8_t((path.left_q8 + 255) / 256);
-            panels.right_lane_count = uint8_t((path.right_q8 + 255) / 256);
+            panels.left_lanes_q8 = left_q8;
+            panels.right_lanes_q8 = right_q8;
+            panels.left_lane_count = uint8_t(left_count);
+            panels.right_lane_count = uint8_t(right_count);
             panels.marking_flags = path.marking_flags;
             panels.terrain_type = road.terrain->type;
             panels.next_terrain_type = old.terrain->type;

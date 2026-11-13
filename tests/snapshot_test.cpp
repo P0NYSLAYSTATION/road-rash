@@ -157,6 +157,17 @@ int main(int argc, char** argv) {
         for(int t=0;t<180;++t)live.race->step(controls);
         auto packet=rr::encode_snapshot_state(live);
         check(rr::apply_snapshot_state(copy,packet),"real course snapshot decodes");
+        if(rr::state_hash(live)!=rr::state_hash(copy)) {
+            auto first=live.race->snapshot(),second=copy.race->snapshot();
+            for(size_t i=0;i<std::min(first.fields.size(),second.fields.size());++i)
+                if(first.fields[i].name!=second.fields[i].name||first.fields[i].value!=second.fields[i].value)
+                    std::cerr<<"snapshot field "<<first.fields[i].name<<" "<<first.fields[i].value<<" / "<<second.fields[i].value<<"\n";
+            auto raw=[&](const char* kind,const auto& a,const auto& b){for(size_t i=0;i<a.size();++i)if(a[i]!=b[i]){std::cerr<<"snapshot raw "<<kind<<" "<<i<<" "<<int(a[i])<<" / "<<int(b[i])<<"\n";break;}};
+            for(size_t i=0;i<live.race->riders().size();++i){raw("bike",live.race->riders()[i].bike.m,copy.race->riders()[i].bike.m);raw("half",live.race->riders()[i].half_object.m,copy.race->riders()[i].half_object.m);}
+            auto a=live.ring->tracker_state(),b=copy.ring->tracker_state();
+            std::cerr<<"tracker sizes "<<a.size()<<" / "<<b.size()<<"\n";
+            for(size_t i=0;i<std::min(a.size(),b.size());++i)if(a[i]!=b[i])std::cerr<<"tracker "<<i<<" "<<a[i]<<" / "<<b[i]<<"\n";
+        }
         check(rr::state_hash(live)==rr::state_hash(copy),"real course riders, cars, pedestrians and ring cursors round-trip");
         for(int t=0;t<120;++t){
             live.race->step(controls);copy.race->step(controls);

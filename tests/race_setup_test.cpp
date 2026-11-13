@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 17 Task 2 step 1: one race setup for every course (all maps
 // playable). Skips 77 without the disc. For every course name and level
 // 0..4, make_race_setup returns a setup with a non-null scene, HUD, actors
@@ -26,7 +27,7 @@ int main() {
             std::cerr << "FAIL " << what << '\n';
         }
     };
-    const std::string assets_root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string assets_root = rr::test::assets_root();
     if (!std::filesystem::exists(assets_root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;

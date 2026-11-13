@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "scene.hpp"
 #include "golden.hpp"
 #include "assets.hpp"
@@ -305,11 +306,11 @@ int main() {
         }
         check(parts == std::vector<uint8_t>({0, 0, 0, 0, 0, 1, 2}), "trim and curb materials chosen once");
     }
-    const auto path = rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto path = rr::golden::raster_fixture();
     if (std::filesystem::exists(path)) {
         try {
             const auto golden = rr::golden::load(path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.empty())
                 throw std::runtime_error("Wrong scene oracle");
             const auto& frame = golden.frames.front();
@@ -342,12 +343,12 @@ int main() {
     if (std::filesystem::exists(strip_path)) {
         try {
             const auto golden = rr::golden::load(strip_path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.size() != 1)
                 throw std::runtime_error("Wrong hill strip oracle");
             const auto& fields = golden.frames[0];
             rr::Assets assets(
-                (std::filesystem::path(RR_SOURCE_DIR).parent_path() / "cdrom/ROADRASH").string());
+                (std::filesystem::path(rr::test::assets_root())).string());
             const auto table = rr::read_depth_table(assets.read("ROADRASH.EXE"));
             for (int c = 0; c < 128; ++c) {
                 const std::string prefix = "hill.strip." + std::to_string(c) + ".";
@@ -387,12 +388,12 @@ int main() {
     if (std::filesystem::exists(panels_path)) {
         try {
             const auto golden = rr::golden::load(panels_path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.size() != 1)
                 throw std::runtime_error("Wrong hill panel oracle");
             const auto& fields = golden.frames[0];
             rr::Assets assets(
-                (std::filesystem::path(RR_SOURCE_DIR).parent_path() / "cdrom/ROADRASH").string());
+                (std::filesystem::path(rr::test::assets_root())).string());
             const auto exe = assets.read("ROADRASH.EXE"), joins = rr::read_exe_data(exe, 0x004688e0, 128);
             const auto table = rr::read_depth_table(exe);
             rr::CelTexture texture;
@@ -462,12 +463,12 @@ int main() {
     if (std::filesystem::exists(shoulder_path)) {
         try {
             const auto golden = rr::golden::load(shoulder_path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.size() != 1)
                 throw std::runtime_error("Wrong shoulder oracle");
             const auto& fields = golden.frames[0];
             rr::Assets assets(
-                (std::filesystem::path(RR_SOURCE_DIR).parent_path() / "cdrom/ROADRASH").string());
+                (std::filesystem::path(rr::test::assets_root())).string());
             const auto table = rr::read_depth_table(assets.read("ROADRASH.EXE"));
             rr::CelTexture texture;
             size_t total = 0;

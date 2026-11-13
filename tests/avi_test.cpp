@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "avi.hpp"
 #include "assets.hpp"
 #include "ima_adpcm.hpp"
@@ -100,7 +101,7 @@ int main(int argc, char** argv) {
             throw std::logic_error("Invalid magic accepted");
         } catch (const std::runtime_error&) {
         }
-        const auto root = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH";
+        const auto root = std::filesystem::path(rr::test::media_root());
         if (std::filesystem::exists(root)) {
             rr::Assets assets(root.string());
             size_t files = 0, packets = 0;

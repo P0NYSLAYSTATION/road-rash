@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 34 Task 3 Step 1: race snapshots. Needs the disc (77 without it).
 // Run N ticks, save, run M, load, run M again: the per-tick state hashes and
 // the RNG are identical, across a long scripted race that crashes, walks,
@@ -16,6 +17,24 @@
 #include <iostream>
 
 namespace {
+
+uint32_t finish_drive(const rr::Race& race) {
+    const auto& rider = race.riders()[0];
+    const auto& b = rider.bike;
+    const auto& road = race.route_for(0);
+    const auto& s = road[std::min(rider.sample, road.size() - 1)];
+    const int64_t centre = int64_t(s.offset) * 256 + int64_t(s.path.right - s.path.left) * 128;
+    const int64_t predicted = int64_t(b.i32(0x28)) + int64_t(b.i32(0x10c)) * 8;
+    uint32_t word = 0;
+    if (centre - predicted > 10 * 256) word |= rr::control_right;
+    if (centre - predicted < -10 * 256) word |= rr::control_left;
+    const int32_t target = std::abs(s.path.bend) >= 6 ? 4000 : 6000;
+    if (b.i32(0xec) < target - 200)
+        word |= rr::control_accelerate;
+    else if (b.i32(0xec) > target + 200)
+        word |= rr::control_brake;
+    return word;
+}
 
 uint32_t script(int seat, int t) {
     uint32_t w = rr::control_accelerate;
@@ -48,7 +67,8 @@ void observe(const rr::RaceInstance& in, Coverage& c) {
 
 int main() {
     rr::test::Checks check;
-    const std::string root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string root = std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS")
+                                                      : rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;
@@ -122,6 +142,24 @@ int main() {
         }
         check(allocations == 0,
               "saving into a warmed slot allocates nothing (" + std::to_string(allocations) + ")");
+        if (std::getenv("RR_STATE_ALLOC_TRACE")) {
+            auto copy = [](const char* name, auto& to, const auto& from) {
+                size_t n;
+                {
+                    rr::test::CountAllocs counter;
+                    to = from;
+                    n = counter.count();
+                }
+                std::cerr << "snapshot allocations " << name << ' ' << n << " sizes";
+                for (size_t i = 0; i < std::min<size_t>(n, 16); ++i)
+                    std::cerr << ' ' << rr::test::sizes[i].load();
+                std::cerr << '\n';
+            };
+            copy("race", *slot.race, *setup.instance.race);
+            copy("traffic", *slot.traffic, *setup.instance.traffic);
+            copy("pedestrians", *slot.pedestrians, *setup.instance.pedestrians);
+            copy("ring", *slot.ring, *setup.instance.ring);
+        }
         // Cost (Debug build; the release budget is measured in Task 3 Step 4).
         const auto t0 = std::chrono::steady_clock::now();
         for (int i = 0; i < 200; ++i) rr::save_state(setup.instance, slot);
@@ -133,7 +171,9 @@ int main() {
                   << " us\n";
     }
     {
-        // Finish line: accelerate straight through on the shortest level.
+        // Finish line: follow the pavement at a controlled speed. A fixed
+        // accelerator/nitro word can wreck the bike before this fixture's
+        // snapshot boundary, which tests the driver rather than save/load.
         rr::RaceConfig config;
         config.course = "NAPA";
         config.level = 0;
@@ -142,22 +182,24 @@ int main() {
         for (int t = 0; t < 180; ++t) race.countdown_step();
         int t = 0;
         while (!race.riders()[0].finished && t < 40000) {
-            race.step(rr::control_accelerate | (t % 300 == 0 ? rr::control_nitro : 0u));
+            race.step(finish_drive(race));
             ++t;
             if (race.finish_q8() && race.riders()[0].bike.i32(0x1c) > race.finish_q8() - 0x1800) break;
         }
         rr::RaceState state;
         rr::save_state(setup.instance, state);
         std::vector<uint64_t> first;
+        std::vector<uint32_t> finish_controls;
         for (int k = 0; k < 600; ++k) {
-            race.step(rr::control_accelerate);
+            finish_controls.push_back(finish_drive(race));
+            race.step(finish_controls.back());
             first.push_back(rr::state_hash(setup.instance));
         }
         const bool finished = race.riders()[0].finished;
         rr::load_state(setup.instance, state);
         bool same = true;
         for (int k = 0; k < 600; ++k) {
-            race.step(rr::control_accelerate);
+            race.step(finish_controls[size_t(k)]);
             same &= rr::state_hash(setup.instance) == first[size_t(k)];
         }
         check(finished, "the finish run reaches the line");

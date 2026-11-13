@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include <cstdlib>
 #include "assets.hpp"
 #include "check.hpp"
@@ -13,18 +14,18 @@
 #include <fstream>
 #include <iostream>
 
-int main() {
+static int run() {
     rr::test::Checks check;
-    const std::string root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string root = rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) return 77;
     const auto dir =
         std::filesystem::temp_directory_path() /
         ("rr-net-front-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(dir);
-    rr::Assets assets(root);
+    rr::Assets assets(root, rr::test::media_root());
     auto exe = assets.read("ROADRASH.EXE");
     auto resources = rr::read_string_resources(assets.read("TEXT/ENU.DLL"));
-    rr::TextRenderer text(assets);
+    rr::TextRenderer text(assets, rr::TextSurface::rgb565);
     auto tables = rr::read_career_tables(exe);
     rr::Career hc, gc;
     hc.state.cash = 12345;
@@ -54,8 +55,14 @@ int main() {
         server.add_connection(std::move(pair.second), now);
         return std::move(pair.first);
     };
-    auto hello =
-        rr::net::make_hello("ignored", rr::net::Platform::bot, rr::net::verified_data_digest(assets));
+    // Exercise the same asset handshake as the game on this platform. Windows
+    // accepts compatible PC releases with different artwork/startup patches.
+#ifdef _WIN32
+    const auto digest = rr::net::gameplay_data_digest(assets);
+#else
+    const auto digest = rr::net::verified_data_digest(assets);
+#endif
+    auto hello = rr::net::make_hello("ignored", rr::net::Platform::bot, digest);
     host.net_attach(factory, hello);
     guest.net_attach(factory, hello);
     auto pump = [&] {
@@ -311,4 +318,13 @@ int main() {
           "all online result paths preserve both careers");
     std::filesystem::remove_all(dir);
     return check.finish("net_frontend");
+}
+
+int main() {
+    try {
+        return run();
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL net_frontend: " << error.what() << '\n';
+        return 1;
+    }
 }

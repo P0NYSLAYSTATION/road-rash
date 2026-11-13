@@ -115,9 +115,64 @@ static std::vector<rr::RouteSample> route() {
 static void check(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
 }
+static void car_body(rr::TrafficCar& car) {
+    auto& b = car.motion;
+    b.u8(0xc0) = 7;
+    b.i32(0xc4) = 16;
+    b.i32(0x1c) = car.position;
+    b.i32(0x28) = car.lateral;
+    b.i32(0xec) = b.i32(0x108) = car.speed;
+    b.i32(0x174) = car.kind & 1 ? 40960 : 16384;
+    b.i32(0x178) = 64;
+    b.i32(0x17c) = 8960;
+    b.i32(0x194) = 1800;
+    b.i32(0x180) = 256;
+    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
+}
 int main() {
     try {
         const auto library = vehicles();
+        // 00404ed9 compares against world velocity (+108), not engine
+        // speed (+ec). Equal engine speeds must still distinguish an
+        // oncoming car from one travelling in the rider's direction.
+        for (bool oncoming : {false, true}) {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            race.set_live_schedule(true);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& rider = race.riders()[0];
+            auto& b = rider.bike;
+            rider.sched_last = 1;
+            rider.sched_next = rider.half_sched_next = 100;
+            rider.stamina.current = rider.stamina.max = rider.stamina.base = 1000000;
+            rider.half_object.u8(0x1e9) = 1;
+            b.u8(0xc0) = 7;
+            b.i32(0xc4) = 4;
+            b.i32(0x18) = 1;
+            b.i32(0x174) = 7680;
+            b.i32(0x178) = 64;
+            b.i32(0x17c) = 8960;
+            b.i32(0x194) = 256;
+            b.i32(0x180) = 256;
+            b.i32(0xec) = b.i32(0x108) = 8000;
+            b.i32(0x30) = b.i32(0x1c) - 1000;
+            b.i32(0x3c) = b.i32(0x28);
+            b.i32(0x2f0) = 1000000;
+            auto& car = traffic.cars_mut()[0];
+            car.active = true;
+            car.position = b.i32(0x1c) + 64;
+            car.lateral = b.i32(0x28);
+            car.speed = 5000;
+            car.next_tick = 100;
+            car_body(car);
+            car.motion.i32(0x108) = oncoming ? -5000 : 5000;
+            race.step(0);
+            check((b.i32(0x2f4) != 0) == oncoming,
+                  "car impact crash threshold must use signed world velocity");
+            check(rider.half_object.u8(0x1e9) == 0,
+                  "car impact must clear the rider's scenery flash");
+        }
         // Both class 2 (contained) and class 3 (glancing) must finish the
         // handler after 0x004052c0 knocks the rider off: 00404f4d/00404feb.
         for (bool contained : {false, true}) {
@@ -160,6 +215,38 @@ int main() {
             if (contained) check(b.i32(0xec) == -1000, "negative contact speed must clamp to -1000");
             check(b.i32(0x288) == 123, "knock-off must skip the rate-change steering kick");
         }
+        //00404a5f jumps directly to the crashed tail, before sounds and
+        //class2/3 speed decisions. Test an impact large enough to have
+        //consumed two sound draws if that gate were missing.
+        uint64_t baseline_draws = 0;
+        for (bool colliding : {false, true}) {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& r = race.riders()[0];
+            auto& b = r.bike;
+            r.frozen = true;
+            b.i32(0x2f4) = 1;
+            b.i32(0x18) = 1;
+            b.i32(0x174) = 7680;
+            b.i32(0x178) = 64;
+            b.i32(0x17c) = 8960;
+            b.i32(0x30) = b.i32(0x1c) - 1000;
+            b.i32(0x108) = b.i32(0xec) = 8000;
+            b.i32(0x180) = 256;
+            auto& car = traffic.cars_mut()[0];
+            car.active = colliding;
+            car.position = b.i32(0x1c);
+            car.lateral = b.i32(0x28);
+            const auto draws = race.rng_draw_count();
+            race.step(0);
+            const auto consumed = race.rng_draw_count() - draws;
+            if (!colliding) baseline_draws = consumed;
+            check(consumed == baseline_draws, "crashed car contact must not consume sound RNG");
+            check(b.i32(0xec) == 8000, "crashed car contact must skip class2 speed transfer");
+            check(b.i32(0xf4) == (colliding ? 0x150 : 0), "crashed car contact retains its vertical bump");
+        }
         // Ascending contact walk: a car behind the bike must itself be
         // due; a due bike behind a sleeping car remains eligible.
         for (int scenario = 0; scenario < 3; ++scenario) {
@@ -186,8 +273,7 @@ int main() {
             car.last_tick = 0;
             car.next_tick = scenario == 2 ? 1 : 100;
             if (scenario == 1) car.kind = 1; // sleeping crossing car, callback still runs
-            car.motion.u8(0xc0) = 7;
-            car.motion.i32(0xc4) = 16;
+            car_body(car);
             const int32_t before = b.i32(0x28);
             race.step(0);
             check((b.i32(0x28) != before) == (scenario != 0),
@@ -214,6 +300,68 @@ int main() {
             const std::array<uint32_t,2> controls{};race.step(controls);
             check((b.i32(0x2f4)!=0)==same_road,"remote car contact uses its own road outside host draw distance");
             check(race.riders()[0].sample<100,"host stayed outside remote car-contact region");
+        }
+        {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            race.set_live_schedule(true);
+            race.riders()[0].frozen = true;
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& approach = traffic.cars_mut()[0];
+            approach.active = true;
+            approach.position = 100 * 256 - 32;
+            approach.next_tick = 1;
+            car_body(approach);
+            auto& crossing = traffic.cars_mut()[1];
+            crossing.active = true;
+            crossing.kind = 1;
+            crossing.position = 100 * 256;
+            crossing.next_tick = 100;
+            car_body(crossing);
+            race.step(0);
+            check(crossing.motion.i32(0x1f8) == 60,
+                  "crossing car contact with another car starts a60 tick pause");
+        }
+        for (bool blocker : {false, true}) {
+            rr::Opponent opponent{rr::BikeSpec{}, 90, 0, 0, 0, 1};
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90, {opponent});
+            race.set_live_schedule(true);
+            auto& r = race.riders()[0];
+            const int32_t position = r.bike.i32(0x1c);
+            for (auto& actor : race.riders()) {
+                actor.sched_next = actor.half_sched_next = 100;
+                actor.sched_last = actor.half_sched_last = 0;
+            }
+            r.sched_last = 1;
+            r.bike.u8(0xc0) = 7;
+            r.bike.i32(0x28) = 0;
+            r.bike.i32(0x174) = 7680;
+            r.bike.i32(0x178) = 64;
+            r.bike.i32(0x17c) = 8960;
+            r.bike.i32(0x194) = 256;
+            auto& owner = race.riders()[1];
+            owner.bike.u8(0xc0) = 4;
+            owner.bike.i32(0x1c) = position + 10000;
+            owner.crash_active = true;
+            auto& body = owner.crash_actor.motion;
+            body.u8(0xc0) = blocker ? 7 : 4;
+            body.i32(0xc4) = 8;
+            body.i32(0x1c) = position + 102;
+            body.i32(0x28) = 100000;
+            body.i32(0x178) = 16;
+            owner.crash_actor.sample = size_t(body.i32(0x1c) >> 8);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& car = traffic.cars_mut()[0];
+            car.active = true;
+            car.position = position + 104;
+            car.next_tick = 100;
+            car_body(car);
+            race.step(0);
+            check((car.motion.u8(0x1f4) != 0) == !blocker,
+                  "short eligible body ends the inner walk before a later longer car, regardless of lateral gap");
         }
         std::cout << "car contact crash tails pass\n";
     } catch (const std::exception& e) {

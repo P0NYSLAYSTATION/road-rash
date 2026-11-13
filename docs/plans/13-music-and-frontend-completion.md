@@ -198,3 +198,28 @@ per unpaused render frame, with PCM backpressure and synchronous mixer detach
 at stop. The thirty-second Napa streaming regression passes; exact AWE/MIDI
 audio fidelity remains subject to this plan's acceptance. See
 [handoff](../agent-handoffs/playtest-audio-ai-loading.md).
+
+#### October 31, 2026 status (Task 6 Step 2)
+
+Menu pictures are bit-exact against the original's decoded-image cache (226
+dumps), and the darkened fills and text colours are RGB565-exact. Menu text is
+Wine-GDI exact through pinned FreeType 2.13.3 (anti-aliased glyphs and the
+16-bit blend measured exhaustively; DrawText word wrap and clipping). The
+system faces (Wingdings arrows, Courier New Bold standings) and the y=380
+footers were added the same evening: 18 of 20 acceptance screens are
+pixel-exact full frame, and the other two differ only in port-only rows.
+Still open: AWE/EMU8000 timbre. See
+[frontend-exact-20261031](../agent-handoffs/frontend-exact-20261031.md).
+Controls key labels now follow `0x0040e7b0` ("<Keyboard>" + key, arrow keys
+as Wingdings icons drawn by `0x00420280`) since November 1
+([controls-key-labels-20261101](../agent-handoffs/controls-key-labels-20261101.md));
+no original capture shows filled labels, so the rendering is unmeasured.
+The SBK banks now play with their SF1 generator semantics (October 31,
+[sbk-timbre-20261031](../agent-handoffs/sbk-timbre-20261031.md)): attenuation
+level, samplePitch root at 44100 Hz, loop offsets and modes, global zones and
+the SF1 merge, both envelopes, filter, LFOs, pan, exclusive classes and the
+SF2 default controller modulators. This timbre is spec-derived and unmeasured
+(no EMU8000 oracle). Reverb/chorus buses followed on November 1 (driver
+default modes Hall 2/Chorus 3, stand-in algorithms, CC91/93 + zone sends).
+Still open for the timbre: the factory-ROM presets (owner-supplied ROM dump)
+and any measured comparison (needs an EMU8000 capture).

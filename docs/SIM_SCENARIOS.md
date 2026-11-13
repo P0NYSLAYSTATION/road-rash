@@ -415,8 +415,16 @@ asserted end, native arrest tick vs the measured `end_timer` tick.
 - `napa-cops-order2-20261026`: second KNOCK=4400 run, FRAMES=5031.
 - `napa-cops-foot-20261026`, `napa-cops-foot2-20261026`: KNOCK=4460,
   FRAMES=4701 (on-foot arrest window).
-- `city-cops-parked-20261026`: `RR_ORACLE_COURSE=1`, FRAMES=4552 (City AI is
-  not at parity; cop-only comparison to tick 4551).
+- `city-cops-parked-20261026`: `RR_ORACLE_COURSE=1`, FRAMES=4552. Since
+  November 3 the RNG, ring-window riders and cop match to 4552, and the
+  arrest on 4552 is asserted.
+- `city-parked-randlog-20261102` (trace `a0dae00d7e0b`) and
+  `city-parked-randlog2-20261102` (trace `0fef564dd1bf`): same City recipe
+  with FRAMES=2400, `RR_ORACLE_ORDER_RANGE=0x3000` (pedestrian laterals ~10000
+  Q8 ahead of the parked player), the second also with
+  `RR_ORACLE_RANDCOUNT=1 RR_ORACLE_RANDLOG=1` (per-draw callers). Proxy
+  `b02fffda7725`, private install `RoadRashOracle-cityrng20261102`. Both
+  replay 2400/2400 in `police_test`.
 
 Example recipe:
 
@@ -425,3 +433,15 @@ RR_ORACLE_COURSE=4 RR_ORACLE_LEVEL=3 RR_ORACLE_SEED=1 RR_ORACLE_SIM=1 \
 RR_ORACLE_HUMAN=1 RR_ORACLE_ORDER=1 RR_ORACLE_FRAMES=4731 \
 oracle/run.sh napa-cops-parked-20261026
 ```
+
+
+### November 4, 2026: split-ring continuation checkpoint
+
+Dual-half runtime walkers, cached window reentry, commitment and lane offsets
+are implemented with synthetic forward/back/snapshot coverage. Static route
+opposite identity, intersection roadway selection and the ground right-forward
+link are corrected. Single-anchor `sim-napa-steal-farm` now matches through7872;
+first gap7873 is body_f4 original1302/native1032. Strict human1431/1431 remains
+exact. No all-split or full-race acceptance claim: arbitrary route choices,
+complete neighbor topology and other-course/human cases remain open.
+[Evidence and next action](agent-handoffs/split-ring-latest-20261104.md).

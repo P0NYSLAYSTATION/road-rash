@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "cinepak.hpp"
 #include "avi.hpp"
 #include "assets.hpp"
@@ -156,7 +157,7 @@ int main(int argc, char** argv) {
             if (movie.update(10000000000ull) || !movie.finished())
                 throw std::runtime_error("Synthetic video did not finish");
         }
-        const auto root = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH";
+        const auto root = std::filesystem::path(rr::test::media_root());
         if (std::filesystem::exists(root)) {
             rr::Mixer mixer(4);
             rr::Assets assets(root.string());

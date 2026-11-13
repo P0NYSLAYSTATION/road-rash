@@ -21,7 +21,16 @@ RasterPoint middle(const RasterPoint& a, const RasterPoint& b) {
     return {add(a.x, b.x) / 2, add(a.y, b.y) / 2};
 }
 } // namespace
-bool normalize_quad(std::array<RasterPoint, 4>& p, uint32_t flags, bool* flip) {
+bool normalize_quad(std::array<RasterPoint, 4>& p, uint32_t flags, bool* flip, bool translation_invariant) {
+    // Original signed division truncates toward zero. At enhanced resolutions,
+    // floor the midpoint so translating a clipped polygon across x=0 cannot
+    // move its repaired corner by one pixel. Original-resolution calls retain
+    // the executable's wraparound and truncation exactly.
+    const auto midpoint = [&](const RasterPoint& a, const RasterPoint& b) {
+        if (!translation_invariant) return middle(a, b);
+        const auto half = [](int64_t sum) { return int32_t(sum >= 0 ? sum / 2 : (sum - 1) / 2); };
+        return RasterPoint{half(int64_t(a.x) + b.x), half(int64_t(a.y) + b.y)};
+    };
     uint8_t positive = 0, zero = 0;
     for (int i = 0; i < 4; ++i) {
         const auto& previous = p[(i + 3) % 4];
@@ -45,18 +54,18 @@ bool normalize_quad(std::array<RasterPoint, 4>& p, uint32_t flags, bool* flip) {
         reverse = true;
         break;
     case 1:
-        p[0] = middle(p[3], p[1]);
+        p[0] = midpoint(p[3], p[1]);
         reverse = true;
         break;
     case 2:
-        p[1] = middle(p[0], p[2]);
+        p[1] = midpoint(p[0], p[2]);
         reverse = true;
         break;
     case 3:
         std::swap(p[2], p[3]);
         break;
     case 4:
-        p[2] = middle(p[3], p[1]);
+        p[2] = midpoint(p[3], p[1]);
         reverse = true;
         break;
     case 5:
@@ -66,26 +75,26 @@ bool normalize_quad(std::array<RasterPoint, 4>& p, uint32_t flags, bool* flip) {
         std::swap(p[0], p[3]);
         break;
     case 7:
-        p[3] = middle(p[0], p[2]);
+        p[3] = midpoint(p[0], p[2]);
         break;
     case 8:
-        p[3] = middle(p[0], p[2]);
+        p[3] = midpoint(p[0], p[2]);
         reverse = true;
         break;
     case 9:
         std::swap(p[1], p[2]);
         break;
     case 11:
-        p[2] = middle(p[3], p[1]);
+        p[2] = midpoint(p[3], p[1]);
         break;
     case 12:
         std::swap(p[0], p[1]);
         break;
     case 13:
-        p[1] = middle(p[0], p[2]);
+        p[1] = midpoint(p[0], p[2]);
         break;
     case 14:
-        p[0] = middle(p[3], p[1]);
+        p[0] = midpoint(p[3], p[1]);
         break;
     case 15:
         break;

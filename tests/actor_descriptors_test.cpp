@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "actor_descriptors.hpp"
 #include "actor_render.hpp"
 #include "assets.hpp"
@@ -9,10 +10,10 @@
 #include <sstream>
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/GLOBAL.RSC")) {
             std::cout << "Imported descriptor corpus absent\n";
-            return 0;
+            return 77;
         }
         const auto exe = assets.read("ROADRASH.EXE"), global = assets.read("DATA/GLOBAL.RSC");
         std::vector<std::vector<uint8_t>> cans(2);
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
         }
         std::ifstream file(argc > 1 ? argv[1]
                                     : RR_SOURCE_DIR "/analysis/oracle/napa-actor-animation-fixtures.tsv");
+        if (!file) throw std::runtime_error("Required original descriptor fixture missing");
         if (file) {
             std::map<std::string, int64_t> values;
             std::string line, key;

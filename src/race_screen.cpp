@@ -474,16 +474,18 @@ bool RaceScreen::iterate(uint64_t now_ns) {
         if (!g_.view_ready) g_.view_prev = g_.view_cur;
         g_.view_ready = true;
         if (!g_.career) continue;
-        if (!decided_ && (g_.race().finished() || g_.race().wrecked() || g_.race().busted())) {
+        // 00434853..00434874 starts the result delay only after the
+        // finish-latched player has braked below 300, not at line crossing.
+        const int result_code = g_.race().race_outcome();
+        if (!decided_ && result_code != 1) {
             decided_ = true;
             end_ticks_ = race_end_delay;
             result_.place = std::max(0, g_.race().place(0) - 1);
             // 0x00416010: finished becomes won for places 1-3 (0-based < 3), lost otherwise;
             // 0x00407f30 arrests with outcome 4 (busted) before the bike is used up.
-            result_.outcome = g_.race().busted() ? RaceOutcome::busted
-                              : g_.race().finished()
-                                  ? (result_.place < 3 ? RaceOutcome::won : RaceOutcome::lost)
-                                  : RaceOutcome::wrecked;
+            result_.outcome = result_code == 4 ? RaceOutcome::busted
+                              : result_code == 2 ? RaceOutcome::won
+                              : result_code == 3 ? RaceOutcome::lost : RaceOutcome::wrecked;
         } else if (decided_ && --end_ticks_ <= 0) {
             // 0x00442e10 returned true: 0x004163d0 fades out, then returns.
             fade_ = Fade::out;

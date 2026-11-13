@@ -92,7 +92,7 @@ int main() {
         rr::draw_textured_quad_wide(fb2, q, big, 1024, 10, false, {0, 0, 64, 63}, true, s2);
         check(fb2.row(32)[32] == 7, "upscaled storage path samples plain addressing");
     }
-    const auto path = rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto path = rr::golden::raster_fixture();
     if (std::filesystem::exists(path)) {
         try {
             const auto golden = rr::golden::load(path);

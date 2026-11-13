@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Benchmark: Canvas::draw ms/frame on Napa after 900 sim ticks.
 // Local desktop bench, built only with -DRR_BENCH_DASH=ON (not a CTest). Usage:
 //   RR_PREF_OVERRIDE=/tmp/ws-orig ./build/dash_bench-test  (needs SDL video; uses hidden window)
@@ -28,7 +29,7 @@ int main() {
         SDL_DestroyWindow(window);
         return sdl_fail("SDL_CreateRenderer");
     }
-    const std::string assets_root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string assets_root = rr::test::assets_root();
     rr::Assets assets(assets_root);
     const std::vector<uint8_t> exe = assets.read("ROADRASH.EXE");
     rr::Settings settings =

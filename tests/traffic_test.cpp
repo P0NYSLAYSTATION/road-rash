@@ -1,9 +1,11 @@
+#include "test_assets.hpp"
 #include "traffic.hpp"
 #include <cstdlib>
 #include "race.hpp"
 #include "assets.hpp"
 #include "course.hpp"
 #include "course_scene.hpp"
+#include "track_ring.hpp"
 #include <filesystem>
 #include <algorithm>
 #include <iostream>
@@ -173,6 +175,11 @@ static std::vector<uint8_t> synthetic_exe() {
     w32(data(0x75698 + 0x24), 50);
     w32(data(0x75698 + 0x2c), 111);
     exe[data(0x75698 + 0x28)] = 10;                                     // template size
+    for (int kind = 0; kind < 4; ++kind) {
+        const uint32_t shape[6] = {uint32_t(kind & 1 ? 0xa000 : 0x4000), 64, 8960,
+                                  uint32_t(190 + kind), uint32_t(1800 + kind), 0};
+        for (int i = 0; i < 6; ++i) w32(data(0x75700 + (kind * 6 + i) * 4), shape[i]);
+    }
     for (int k = 0; k < 4; ++k) w32(data(0x68f00 + 4 * k), 0x40u << k); // lookahead windows
     for (int i = 0; i < 1024; ++i) w32(data(0x75768 + 4 * i), uint32_t(i * 32));
     return exe;
@@ -256,6 +263,55 @@ static void test_lane_validity_stop() {
 // ring front (mod-128 slots, verified against dumped proxy words on
 // L5e). On a course that narrows to one lane, a behind-back car
 // reads its slot sample, not its current sample.
+static void test_recycled_pool_order() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    std::vector<rr::RouteSample> route(400, lane_sample(512, 512));
+    auto& cars = system.cars_mut();
+    for (auto& car : cars) {
+        car.active = true;
+        car.next_tick = 1000;
+    }
+    // Original prepass follows ascending-position links. Both objects
+    // return on the same tick; allocation pops the last returned object.
+    cars[0].position = 100;
+    cars[1].position = 200;
+    cars[0].pending_remove = cars[1].pending_remove = true;
+    system.step(route, 120 * 256, 200 * 256, 100, 120 * 256, 0, [] { return 1u; }, 1);
+    if (!cars[1].active || cars[1].serial != 1)
+        throw std::runtime_error("car pool must reuse the last returned slot, not the first inactive");
+}
+
+static void test_physical_lane_probe() {
+    rr::Course course;
+    course.root = 20;
+    course.sections.resize(1);
+    course.sections[0].samples.resize(800, rr::PathSample{0, 0, 500, 500, 341, 298});
+    for (size_t i = 200; i < 800; ++i) {
+        course.sections[0].samples[i].left_q8 = 700;
+        course.sections[0].samples[i].right_q8 = 600;
+    }
+    course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 0, 0, 800});
+    course.nodes.emplace(40, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.set_ring_source([&](int32_t) { return &ring; });
+    const std::vector<rr::RouteSample> canonical(800, lane_sample(512, 512));
+    rr::TrafficCar car;
+    car.position = 100 * 256;
+    auto probe = system.lane_probe(car, canonical, ring.front_q8());
+    if (probe.right_q8 != 298 || probe.left_q8 != 341)
+        throw std::runtime_error("car lane planning must read physical lane words rather than canonical route values");
+    for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
+    probe = system.lane_probe(car, canonical, ring.front_q8());
+    if (probe.right_q8 != 600 || probe.left_q8 != 700)
+        throw std::runtime_error("a stale car slice must expose its rebuilt physical slot lane words");
+}
+
 static void test_lane_validity_linked_slots() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem system(library, synthetic_exe());
@@ -270,6 +326,35 @@ static void test_lane_validity_linked_slots() {
         route[size_t(s)].path.left_q8 = route[size_t(s)].path.right_q8 = 0x100;
     }
     const int32_t front = 200 * 256, back = front - 0x8000, camera = front - 0x5000;
+    // Native original capture tick 220: car at 136, front in 137. The
+    // forward link still contains sample 9, whose two lanes differ from
+    // the not-yet-built sample 137's single lane.
+    {
+        auto probe_route = route;
+        probe_route[137].path.right_q8 = probe_route[137].path.left_q8 = 256;
+        rr::TrafficCar probe_car;
+        probe_car.position = 136 * 256;
+        const auto p = system.lane_probe(probe_car, probe_route, 137 * 256 + 10);
+        if (p.next_right_q8 != 512 || p.next_left_q8 != 512)
+            throw std::runtime_error("unbuilt forward link must retain previous-lap geometry");
+        probe_route[136].event = rr::RoadEvent::split;
+        if (system.lane_probe(probe_car, probe_route, 137 * 256).slot_link != 2)
+            throw std::runtime_error("slice-owner link must expose the split event byte");
+        probe_route[264].event = rr::RoadEvent::merge_window;
+        if (system.lane_probe(probe_car, probe_route, 265 * 256).slot_link != 6)
+            throw std::runtime_error("reused owner link must expose its replacement traversal event");
+        // City tick 460: widening slice 159 changes slice 158's integral
+        // left lane word 512 to 513 (0x0045484c), after it is built.
+        probe_route[158].path.left_q8 = 512;
+        probe_route[159].path.left_q8 = 533;
+        probe_car.position = 158 * 256;
+        if (system.lane_probe(probe_car, probe_route, 159 * 256).left_q8 != 512 ||
+            system.lane_probe(probe_car, probe_route, 160 * 256).left_q8 != 513)
+            throw std::runtime_error("widening must nudge the preceding integral lane word after build");
+        probe_route[158].event = static_cast<rr::RoadEvent>(4);
+        if (system.lane_probe(probe_car, probe_route, 160 * 256).left_q8 != 512)
+            throw std::runtime_error("last split slice must not widen into the merged common road");
+    }
     auto drive_at = [&](uint8_t kind, int8_t lane, int32_t sample, int32_t speed) {
         system.begin_schedule(route, front, random, 1);
         auto& car = system.cars_mut()[0];
@@ -305,7 +390,224 @@ static void test_lane_validity_linked_slots() {
     }
 }
 
-static void test_deferred_car_teardown() {
+// 0x00449da0: a same-sample node must also be within the strict
+// +/-0x80 Q8 longitudinal scan. Steal-farm tick 4059 has a player
+// 152 Q8 behind the crossing car; it must not stop that car.
+static void test_crossing_obstacle_reach() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    auto drive = [&](int delta) {
+        rr::TrafficSystem traffic(library, synthetic_exe());
+        traffic.configure(6);
+        traffic.set_spawn_enabled(false);
+        std::vector<rr::RouteSample> road(800, lane_sample(0x200, 0x200));
+        for (auto& sample : road) sample.path.marking_flags = 0x20;
+        auto& car = traffic.cars_mut()[0];
+        car.active = true;
+        car.kind = 1;
+        car.position = 0x12080;
+        car.lateral = 0;
+        car.speed = 2000;
+        car.phase = 256;
+        car.zone_end = 0x13000;
+        car.zone_lanes = 2;
+        car.next_tick = 1;
+        car.motion.i32(0xc4) = 16;
+        if (delta != 1000) traffic.obstacles().push_back({car.position + delta, 4096, 0, 0, 4});
+        traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+        return car.lateral;
+    };
+    const auto clear = drive(1000);
+    if (clear <= 0 || drive(-128) != clear || drive(128) != clear || drive(-127) != 0 || drive(127) != 0)
+        throw std::runtime_error("crossing obstacle strict longitudinal reach");
+}
+
+// Traffic following reads the obstacle mover's projected velocity (+108),
+// which can differ from its scalar speed on a slope or during a turn.
+static void test_follow_projected_velocity() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    auto drive = [&](int32_t scalar, int32_t projected, int32_t gap = 928) {
+        rr::TrafficSystem traffic(library, synthetic_exe());
+        traffic.configure(6);
+        traffic.set_spawn_enabled(false);
+        std::vector<rr::RouteSample> road(800, lane_sample(0x200, 0x200));
+        for (auto& sample : road) {
+            sample.offset = 0;
+            sample.path.left = sample.path.right = 500;
+        }
+        auto& follower = traffic.cars_mut()[0];
+        follower.active = true;
+        follower.kind = 2;
+        follower.lane = -1;
+        follower.position = 0x12000;
+        follower.lateral = -32000;
+        follower.speed = 1560;
+        follower.phase = 256;
+        follower.next_tick = 1;
+        auto& leader = traffic.cars_mut()[1];
+        leader.active = true;
+        leader.kind = 2;
+        leader.lane = -1;
+        leader.position = follower.position - gap;
+        leader.lateral = -32000;
+        leader.speed = scalar;
+        leader.motion.i32(0x108) = -projected;
+        traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+        return follower.speed;
+    };
+    const auto projected = drive(386, 382);
+    if (projected != drive(382, 382) || projected == drive(386, 386))
+        throw std::runtime_error("car following must use projected rather than scalar velocity");
+    if (drive(386, 382, 0) >= drive(386, 382, -1))
+        throw std::runtime_error("equal-position lane obstacle must remain in the scan");
+}
+
+static void test_marked_crossing_final_move() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(800, lane_sample(512, 512));
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 1;
+    car.position = 0x12000;
+    car.speed = 1000;
+    car.motion.i32(0x128) = 0x400000;
+    car.motion.i32(0x160) = 74;
+    car.next_tick = 1;
+    // No intersection flag or zone:44dc10 marks and skips the think,
+    // but00437e60 still invokes its separately installed physics mover.
+    traffic.run_car(0, road, 0x12000, 0x17000, 0, 0, [] { return 1u; }, 1, 0);
+    if (!car.pending_remove || car.last_tick != 101 || car.lateral <= 0 ||
+        car.motion.i32(0x128) != 0x400000)
+        throw std::runtime_error("marked crossing car must move once using its retained heading");
+}
+
+static void test_signal_rebuilt_lane_slot() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    road[80].path.left_q8 = 0;
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 2;
+    signal.controller = 0;
+    signal.position_q8 = 80 * 256;
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.start_q8 = 70 * 256;
+    controller.end_q8 = 98 * 256;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 2;
+    car.lane = -1;
+    car.position = 100 * 256;
+    car.lateral = -125 * 256;
+    car.phase = 256;
+    car.signal = 0;
+    traffic.run_car(0, road, 140 * 256, 220 * 256, 140 * 256, 0, [] { return 1u; }, 60, 0);
+    if (car.speed <= 0)
+        throw std::runtime_error("a retained light reads rebuilt lane slot208, not historical slot80");
+}
+
+static void test_signal_physical_roadway_mask() {
+    rr::Course course;
+    course.root = 20;
+    course.sections.resize(1);
+    course.sections[0].samples.resize(400, rr::PathSample{0, 0, 500, 500, 512, 512});
+    course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 0, 0, 400});
+    course.nodes.emplace(40, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    traffic.set_ring_source([&](int32_t) { return &ring; });
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    for (auto& sample : road) { sample.dual = true; sample.half = 0; }
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 0;
+    signal.controller = 0;
+    signal.position_q8 = 60 * 256;
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.half = 1;
+    controller.start_q8 = 60 * 256;
+    controller.end_q8 = 80 * 256;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 0;
+    car.position = 50 * 256;
+    car.lane = 0;
+    car.phase = 256;
+    car.next_tick = 1;
+    traffic.run_car(0, road, 50 * 256, ring.front_q8(), 50 * 256, 0, random, 1, 0);
+    if (car.signal != 0)
+        throw std::runtime_error("rebuilt common roadway must admit a signal beyond logical arm masks");
+}
+
+static void test_invalid_crossing_spawn() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    auto random = [] { return 2u; };
+    traffic.begin_schedule(road, 200 * 256, random, 8, true);
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.active = true;
+    controller.variant = 3;
+    controller.start_q8 = controller.position_q8 = 95 * 256;
+    controller.end_q8 = 96 * 256;
+    controller.lanes = 3;
+    controller.last_tick = 7;
+    controller.next_tick = 8;
+    controller.signals[1] = 0;
+    controller.durations[0] = controller.durations[1] = 100;
+    controller.durations[2] = 0;
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 1;
+    signal.position_q8 = 100 * 256;
+    signal.phase = 2;
+    traffic.run_controller(0, 72 * 256, 200 * 256, 8, road, random);
+    const auto& car = traffic.cars()[0];
+    if (!car.active || !car.pending_remove || car.last_tick != 108 || car.next_tick != 108)
+        throw std::runtime_error("invalid crossing placement is marked during construction, before its first think");
+    traffic.begin_schedule(road, 200 * 256, random, 9, true);
+    if (car.active) throw std::runtime_error("marked new crossing car returns on the next prepass");
+}
+
+static void test_intersection_pool_reuse() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    auto random = [] { return 1u; };
+    traffic.begin_schedule(road, 130 * 256, random, 1, true);
+    for (int i = 0; i < 2; ++i) {
+        auto& c = const_cast<rr::IntersectionController&>(traffic.controllers()[size_t(i)]);
+        c.active = c.pending_remove = true;
+        c.position_q8 = (90 + i * 10) * 256;
+        c.signals[0] = i;
+        auto& s = const_cast<rr::IntersectionSignal&>(traffic.signals()[size_t(i)]);
+        s.active = true;
+        s.position_q8 = (80 + i * 10) * 256;
+    }
+    traffic.begin_schedule(road, 130 * 256, random, 2, true);
+    auto& path = road[140].path;
+    path.zone_end = true;
+    path.event_type = 1;
+    path.event_start = 130;
+    path.event_end = 140;
+    traffic.step(road, 61 * 256, 141 * 256, 11 * 256, 60 * 256, 0, random, 3);
+    const auto& replacement = traffic.controllers()[1];
+    if (!replacement.active || replacement.signals[0] != 1 ||
+        traffic.signals()[1].position_q8 != 139 * 256 + 0x50)
+        throw std::runtime_error("last returned intersection/light slots must be reused, updating retained light references");
+}
+
+static void test_deferred_car_teardown(bool lateral = false) {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
     traffic.set_spawn_enabled(false);
@@ -322,14 +624,15 @@ static void test_deferred_car_teardown() {
     car.active = true;
     car.kind = 2;
     car.phase = 0x100;
-    car.position = back - 1;
-    car.lateral = -32000;
+    car.position = lateral ? camera : back - 1;
+    car.lateral = lateral ? 0xc8000 + 0x1000 : -32000;
     car.speed = 1000;
     car.motion.u8(0xc0) = 7;
     car.last_tick = 0;
     car.next_tick = 1;
     traffic.run_car(0, road, camera, front, camera, 0, random, 1, 8000);
-    if (!car.active || !car.pending_remove || car.last_tick != 101 || car.next_tick != 101 ||
+    const int32_t next = lateral ? 1 + car.interval : 101;
+    if (!car.active || !car.pending_remove || car.last_tick != 101 || car.next_tick != next ||
         (car.motion.u8(0xc0) & 12) != 8)
         throw std::runtime_error("car retirement must mark the live node until next prepass");
     if (traffic.begin_schedule(road, front, random, 1) || !car.active)
@@ -552,6 +855,10 @@ static void test_spawn_and_move() {
     if (active == 0) throw std::runtime_error("no spawn after timer decay");
     if (oncoming != 1) throw std::runtime_error("oncoming spawn count");
     if (spawned->position != front - 0x100) throw std::runtime_error("spawn position");
+    if (spawned->motion.i32(0x174) != 0x4000 || spawned->motion.i32(0x178) != 64 ||
+        spawned->motion.i32(0x17c) != 8960 || spawned->motion.i32(0x180) != 192 ||
+        spawned->motion.i32(0x194) != 1802)
+        throw std::runtime_error("oncoming allocation must use its kind-specific dimensions and mass");
     if (spawned->lane != -1 && spawned->lane != -2)
         throw std::runtime_error("oncoming lane"); // -1 - (rand % 2)
     if (spawned->lateral != (1000 + spawned->lane * 250 + 125) * 256)
@@ -581,7 +888,8 @@ static void test_spawn_and_move() {
 static void test_zone_corpus() {
     // Napa at a steady 0x60 Q8/tick: spawns with the course's zone events
     // against the old fixed density 6, over the same random stream.
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) return;
     rr::Assets assets(root);
     rr::VehicleLibrary library(assets.read("DATA/CARS/NAPA.CAR"));
@@ -621,7 +929,8 @@ static void test_zone_corpus() {
 }
 
 static void test_corpus() {
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) {
         std::cout << "No CARS corpus\n";
         return;
@@ -682,7 +991,8 @@ static void test_corpus() {
 //   the rider; gap 129 misses the gate entirely (no nudge);
 // - crashed rider: no new crash is entered (0x004049c0 rejects).
 static void test_car_contact_synthetic() {
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for contact tests\n";
         return;
@@ -874,6 +1184,149 @@ static std::vector<rr::RouteSample> intersection_route(int variant = 1) {
     route[100].path.zone_end = true;
     return route;
 }
+static void test_mixed_scan_ties() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    std::vector<rr::RouteSample> route(512);
+    for (size_t i = 0; i < route.size(); ++i) {
+        route[i].local = uint32_t(i);
+        route[i].path.left = route[i].path.right = 500;
+        route[i].path.left_q8 = route[i].path.right_q8 = 512;
+    }
+    rr::Race race(route, route, rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90, {});
+    race.set_live_schedule(true);
+    race.set_demo_hold(true);
+    race.set_traffic(&traffic);
+    auto& rider = race.riders()[0];
+    rider.sched_next = rider.half_sched_next = 10000;
+    rider.bike.i32(0x1c) = rider.half_mirror.position = 10000;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.serial = 1;
+    car.next_tick = 10000;
+    car.position = car.motion.i32(0x1c) = 9999;
+    auto first_type = [&] {
+        const auto snapshot = race.snapshot();
+        for (const auto& field : snapshot.fields)
+            if (field.name == "scan_order.0.type") return field.value;
+        throw std::runtime_error("missing scan order in simulation hash fields");
+    };
+    race.countdown_step();
+    car.position = car.motion.i32(0x1c) = 10000;
+    race.countdown_step();
+    if (first_type() != 0x10) throw std::runtime_error("car ahead on +0 must retain precedence at equality");
+    car.position = car.motion.i32(0x1c) = 10001;
+    race.countdown_step();
+    car.position = car.motion.i32(0x1c) = 10000;
+    race.countdown_step();
+    if (first_type() == 0x10)
+        throw std::runtime_error("crossing changes tie order; cars have no blanket priority");
+}
+
+static void test_initial_signal_clock() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route();
+    const int32_t front = 130 * 256;
+    system.countdown_step(route, front, [] { return 0u; }, 1);
+    const int signal = system.controllers()[0].signals[2];
+    if (signal < 0 || system.signals()[size_t(signal)].phase != 0 ||
+        system.signals()[size_t(signal)].accum != 31)
+        throw std::runtime_error("tick-zero construction must contribute 31 on the first signal think");
+    for (uint32_t tick = 2; tick <= 571; ++tick) system.countdown_step(route, front, [] { return 0u; }, tick);
+    if (system.signals()[size_t(signal)].phase != 1 || system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("initial signal must change phase at tick 571, not 601");
+}
+
+static void test_deferred_controller() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route();
+    const int32_t front = 130 * 256;
+    auto random = [] { return 0u; };
+    system.countdown_step(route, front, random, 1);
+    const int signal = system.controllers()[0].signals[2];
+    system.begin_schedule(route, front, random, 571, true);
+    if (system.signals()[size_t(signal)].phase != 0 || system.signals()[size_t(signal)].accum != 31)
+        throw std::runtime_error("prepass must not run a deferred controller ahead of riders");
+    system.run_controller(0, front - 0x8000, front, 571, route, random);
+    if (system.signals()[size_t(signal)].phase != 1 || system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("position-ordered dispatch must execute the due controller");
+    system.run_controller(0, front - 0x8000, front, 571, route, random);
+    if (system.signals()[size_t(signal)].accum != 1)
+        throw std::runtime_error("controller must not execute twice during one scheduler pass");
+    system.run_controller(0, front + 1, front + 0x8000, 601, route, random);
+    const auto retained = system.signals()[size_t(signal)];
+    auto& car = system.cars_mut()[0];
+    car.active = true;
+    car.signal = signal;
+    car.next_tick = 10000;
+    system.begin_schedule(route, front, random, 602, true);
+    const auto& removed = system.signals()[size_t(signal)];
+    if (system.controllers()[0].active || removed.active || car.signal != signal ||
+        removed.position_q8 != retained.position_q8 || removed.phase != retained.phase ||
+        removed.accum != retained.accum || removed.controller != retained.controller)
+        throw std::runtime_error("returning signal slots must retain their data and car-held references");
+}
+
+static void test_opposite_intersection() {
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem system(library, synthetic_exe());
+    system.configure(6);
+    system.set_spawn_enabled(false);
+    auto route = intersection_route(3);
+    for (auto& s : route) {
+        s.dual = true;
+        s.half = 0;
+        s.other = s.path;
+        s.other.left_q8 = 0;
+        s.other.left = 0;
+        s.other.right_q8 = 256;
+        s.other.right = 250;
+        s.other.shoulder_left = s.other.shoulder_right = 100;
+        s.other_offset = 1000;
+        s.other_section = 1;
+        s.path.event_type = 0;
+        s.path.zone_end = false;
+    }
+    system.set_terrain_type([](const rr::RouteSample& s) { return s.section == 1 ? 4 : 1; });
+    const int32_t camera = 0x3100;
+    system.step(route, camera + 256, camera + 0x5100, 0, camera, 0, [] { return 1u; }, 100);
+    int signals = 0;
+    for (const auto& g : system.signals())
+        if (g.active) {
+            ++signals;
+            if (g.index != 0 || g.position_q8 != 99 * 256 + 0x50 || g.lateral_q8 != 1300 * 256 || !g.quiet)
+                throw std::runtime_error("opposite intersection signal uses its own lane edge and shoulder");
+        }
+    if (signals != 1 || !system.controllers()[0].active || system.controllers()[0].half != 1)
+        throw std::runtime_error(
+            "opposite intersection must not create a signal for the selected road's left lanes");
+    // The signal exists on half1, but a car on half0 must not latch it.
+    auto& car = system.cars_mut()[0];
+    car = rr::TrafficCar{};
+    car.active = true;
+    car.kind = 0;
+    car.phase = 256;
+    car.position = 95 * 256;
+    car.lateral = 1125 * 256;
+    car.speed = 2000;
+    car.next_tick = 101;
+    system.run_car(0, route, camera, camera + 0x5100, 0, 0, [] { return 1u; }, 101, 0);
+    if (car.signal >= 0) throw std::runtime_error("car latched the opposite roadway's signal");
+    for (auto& sample : route) sample = rr::route_half(sample, 1);
+    car.next_tick = 102;
+    system.run_car(0, route, camera, camera + 0x5100, 0, 0, [] { return 1u; }, 102, 0);
+    if (car.signal < 0) throw std::runtime_error("car ignored its own roadway's signal");
+
+}
+
 static void test_intersections() {
     // 0x0041eca0 / 0x0041ef60 / 0x0041f040 / 0x0044df60 / 0x0044e710.
     rr::VehicleLibrary library(synthetic_container(0));
@@ -1082,7 +1535,8 @@ static void test_intersections_all_courses() {
     // Plan 24 Task 5 intersections counterpart: every course with
     // type-1..3 zone ends places controllers through a full run, and the
     // pools never exceed the original sizes (10 controllers, 40 signals).
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root =
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for course sweep\n";
         return;
@@ -1125,16 +1579,30 @@ int main() {
         test_configure();
         test_lane_count();
         test_library_choose();
+        test_recycled_pool_order();
+        test_marked_crossing_final_move();
+        test_signal_rebuilt_lane_slot();
+        test_signal_physical_roadway_mask();
+        test_invalid_crossing_spawn();
+        test_intersection_pool_reuse();
         test_deferred_car_teardown();
+        test_deferred_car_teardown(true);
+        test_crossing_obstacle_reach();
+        test_follow_projected_velocity();
         test_countdown_timers();
         test_countdown_initial_fill();
         test_countdown_disabled_spawn_expiry();
         test_car_schedule_motion();
         test_lane_validity_stop();
         test_lane_validity_linked_slots();
+        test_physical_lane_probe();
         test_spawn_and_move();
         test_zone_events();
         test_intersections();
+        test_mixed_scan_ties();
+        test_initial_signal_clock();
+        test_deferred_controller();
+        test_opposite_intersection();
         test_signal_phase();
         test_intersections_all_courses();
         test_corpus();

@@ -1,0 +1,18 @@
+# Exercise a real Big Game race and the original Save As handler.
+wait 9
+videos 0
+activate 1
+wait 14
+activate 2
+wait 15
+state career-start
+enter 27
+wait 27
+activate 0
+wait_result
+state career-result
+enter 16
+wait 16
+saveas fe-career.RRS
+state career-saved
+exit
