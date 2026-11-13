@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include <cstdlib>
 #include <algorithm>
 #include "pedestrians.hpp"
@@ -13,7 +14,7 @@
 namespace {
 struct Fixture {
     rr::Assets assets{
-        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH")};
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root())};
     std::vector<uint8_t> exe;
     rr::PhysicsTables physics;
     std::vector<rr::BikeSpec> specs;
@@ -115,9 +116,13 @@ void retained_arrival_slice(const Fixture& f) {
     course.root = 20;
     rr::CourseSection section;
     section.samples.resize(1800, rr::PathSample{0, 0, 250, 250, 256, 256});
-    for (auto& path : section.samples) path.shoulder_left = path.shoulder_right = 250;
+    for (auto& path : section.samples) {
+        path.shoulder_left = path.shoulder_right = 250;
+        path.height_right = 11;
+    }
     section.samples[1475].right = 750;
     section.samples[1475].right_q8 = 768;
+    section.samples[1475].height_right = 55;
     course.sections.push_back(section);
     course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 1800});
     course.nodes.emplace(40u, rr::CourseNode{40, 4});
@@ -150,6 +155,19 @@ void retained_arrival_slice(const Fixture& f) {
     race.countdown_step();
     check(p.state == 1 && p.pace == 4 && p.side == 1,
           "last out-of-window crossing checks the rebuilt slot1475 shoulder, not historical slot1347");
+    rr::TerrainSlice terrain;
+    terrain.type = 0;
+    terrain.selectors = {255, 255};
+    race.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+    p.pending_remove = false;
+    p.body.bike.u8(0xc0) |= 4;
+    p.state = 7;
+    p.next_tick = 2;
+    p.last_tick = 1;
+    p.body.bike.i32(0x28) = 900 * 256;
+    race.countdown_step();
+    check(p.body.sample == 1347 && p.body.bike.i32(0x24) == 55,
+          "ground height follows rebuilt physical slot1475 without rewriting the actor's historical sample");
 }
 
 void initial_pedestrian_overlap(const Fixture& f) {
@@ -186,6 +204,32 @@ void initial_pedestrian_overlap(const Fixture& f) {
     check(system.pool()[0].anchor_lateral == 89600 && system.pool()[1].anchor_lateral == 81920,
           "contact separation must preserve the allocation anchors");
     check(race->rng_state() == rng, "unloaded pedestrian separation must consume no random draws");
+}
+
+void allocation_ground_snapshot(const Fixture& f) {
+    auto race = f.race(0);
+    auto system = f.pedestrians();
+    race->set_pedestrians(system.get());
+    rr::TerrainSlice sidewalk;
+    sidewalk.type = 0;
+    sidewalk.selectors = {255, 255};
+    sidewalk.side_heights = std::array{20, 20};
+    race->set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return sidewalk; });
+    rr::Course course;
+    course.root = 20;
+    rr::CourseSection section;
+    section.samples.resize(300, rr::PathSample{0, 0, 500, 500, 512, 512});
+    section.scenery_events.push_back({0x80000000u | (50u << 24) | (15u << 20) | (194u << 8), 1000});
+    course.sections.push_back(section);
+    course.nodes.emplace(20u, rr::CourseNode{20, 0, 40, 0, 0, 300});
+    course.nodes.emplace(40u, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    race->set_track_ring(&ring);
+    const auto& p = system->pool()[0];
+    check(p.active && p.body.bike.i32(0x24) == 20 && p.body.bike.i32(0x38) == 20,
+          "allocation must evaluate ground before copying previous placement, without a movement tick");
+    check(p.body.bike.i32(0x20) == 0 && p.body.bike.i32(0x34) == 0,
+          "ground placement must preserve relative height and its initial snapshot");
 }
 
 void recycled_pedestrian(const Fixture& f) {
@@ -611,7 +655,7 @@ void staged_hit(const Fixture& f, int32_t speed, int expected_state, bool bump) 
 int main(int argc, char** argv) {
     try {
         rr::Assets probe(
-            (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH"));
+            (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root()));
         if (!probe.exists("DATA/COURSES/CITY.CRS")) {
             std::cout << "No imported course corpus\n";
             return 0;
@@ -621,6 +665,7 @@ int main(int argc, char** argv) {
         retained_road_slice();
         Fixture city("CITY");
         recycled_pedestrian(city);
+        allocation_ground_snapshot(city);
         pedestrian_statics(city);
         pedestrian_shoulders(city);
         roadside_pool(city);

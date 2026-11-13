@@ -474,7 +474,10 @@ bool RaceScreen::iterate(uint64_t now_ns) {
         if (!g_.view_ready) g_.view_prev = g_.view_cur;
         g_.view_ready = true;
         if (!g_.career) continue;
-        if (!decided_ && (g_.race().finished() || g_.race().wrecked() || g_.race().busted())) {
+        // 00434853..00434874 starts the result delay only after the
+        // finish-latched player has braked below 300, not at line crossing.
+        const bool finish_ready = g_.race().finished() && g_.race().riders()[0].finish_controls_ended;
+        if (!decided_ && (finish_ready || g_.race().wrecked() || g_.race().busted())) {
             decided_ = true;
             end_ticks_ = race_end_delay;
             result_.place = std::max(0, g_.race().place(0) - 1);

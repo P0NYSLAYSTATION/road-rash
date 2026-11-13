@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "wav.hpp"
 #include "assets.hpp"
 #include <cstring>
@@ -46,7 +47,7 @@ std::vector<uint8_t> wav(int channels, int bits, const std::vector<uint8_t>& dat
 } // namespace
 int main(int argc, char**) {
     if (argc > 1) {
-        const auto root = std::filesystem::path(RR_SOURCE_DIR) / "../cdrom/ROADRASH";
+        const auto root = std::filesystem::path(rr::test::assets_root());
         if (!std::filesystem::exists(root)) {
             std::cerr << "SKIP disc missing\n";
             return 77;

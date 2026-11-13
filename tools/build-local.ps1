@@ -1,4 +1,4 @@
-param([ValidateSet('Debug','Release')][string]$Configuration='Debug', [switch]$ConfigureOnly, [string]$Target='')
+param([ValidateSet('Debug','Release')][string]$Configuration='Debug', [switch]$ConfigureOnly, [string]$Target='', [string[]]$CMakeOptions=@())
 $ErrorActionPreference='Stop'
 $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vs=& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -11,7 +11,7 @@ $repo=Split-Path $PSScriptRoot -Parent
 Push-Location $repo
 try {
   $preset='windows-local-'+$Configuration.ToLowerInvariant()
-  & cmake --preset $preset
+  & cmake --preset $preset @CMakeOptions
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
   if (!$ConfigureOnly) {
     if ($Target) { & cmake --build --preset $preset --parallel 6 --target $Target }

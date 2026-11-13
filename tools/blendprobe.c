@@ -85,6 +85,7 @@ int main(int argc, char** argv) {
         }
     }
     SelectObject(dc, old);
+    RemoveFontResourceA(path);
     printf("DONE\n");
     return 0;
 }

@@ -1,0 +1,29 @@
+# Original frontend commands; no race, career-state writes or direct save calls.
+wait 9
+focus 0
+capture main
+activate 1
+wait 14
+focus 0
+capture characters
+activate 2
+wait 15
+focus 0
+capture career-start
+enter 16
+wait 16
+focus 0
+capture restroom
+enter 17
+wait 17
+focus 0
+capture jukebox
+enter 18
+wait 18
+focus 0
+capture controls
+enter 19
+wait 19
+focus 0
+capture graphics
+exit

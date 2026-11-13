@@ -59,6 +59,7 @@ uint64_t state_hash(const RaceInstance& in) {
         f.i64(r.route);
         f.i64(r.ai);
         f.i64(r.finished);
+        f.i64(r.finish_controls_ended);
         f.i64(r.finish_tick);
         f.i64(r.place);
         f.i64(r.parked);

@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "traffic.hpp"
 #include <cstdlib>
 #include "race.hpp"
@@ -850,7 +851,7 @@ static void test_zone_corpus() {
     // Napa at a steady 0x60 Q8/tick: spawns with the course's zone events
     // against the old fixed density 6, over the same random stream.
     const std::string root =
-        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) return;
     rr::Assets assets(root);
     rr::VehicleLibrary library(assets.read("DATA/CARS/NAPA.CAR"));
@@ -891,7 +892,7 @@ static void test_zone_corpus() {
 
 static void test_corpus() {
     const std::string root =
-        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/DATA/CARS/NAPA.CAR")) {
         std::cout << "No CARS corpus\n";
         return;
@@ -953,7 +954,7 @@ static void test_corpus() {
 // - crashed rider: no new crash is entered (0x004049c0 rejects).
 static void test_car_contact_synthetic() {
     const std::string root =
-        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for contact tests\n";
         return;
@@ -1497,7 +1498,7 @@ static void test_intersections_all_courses() {
     // type-1..3 zone ends places controllers through a full run, and the
     // pools never exceed the original sizes (10 controllers, 40 signals).
     const std::string root =
-        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        (std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "No disc for course sweep\n";
         return;

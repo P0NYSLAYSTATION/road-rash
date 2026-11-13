@@ -31,6 +31,9 @@ struct TerrainDefinition {
 TerrainDefinition read_terrain(const std::vector<uint8_t>& bytes, uint32_t sample_count);
 struct TerrainSlice {
     uint8_t type = 0xff;
+    // 00454890 may flatten the inner side of a split independently of DLSR.
+    std::optional<std::array<int32_t, 2>> side_heights;
+    bool ring_adjusted = false; // already includes marking and split sub-slice writes
     std::array<int32_t, 2> building_height{};
     std::array<bool, 2> building_cut_roof{};
     std::array<uint8_t, 2> selectors{};

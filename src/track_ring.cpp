@@ -1,4 +1,5 @@
 #include "track_ring.hpp"
+#include "terrain_ground.hpp"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -568,21 +569,35 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         stored.edges[h] = {half.offset - path.left - path.shoulder_left,
                            half.offset + path.right + path.shoulder_right};
     }
-    //00454890: fade the inner shoulders over the measured window; clamp
-    //overlapping shoulders to half the inter-road gap before scaling.
-    if (w.dual && w.countdown > 0) {
-        int32_t right = path_of(w.halves[0]).shoulder_right;
-        int32_t left = path_of(w.halves[1]).shoulder_left;
-        const int32_t threshold = windows_->at(w.window).threshold;
-        int32_t factor = std::max(0, (threshold - w.countdown) * 65536 / threshold);
-        if (right + left > w.x_sep) {
-            right = left = w.x_sep / 2;
-            factor = std::max(factor, 32768);
+    //00454890 runs after both halves are built. Its writes include hill
+    //heights and polyline joins, not just the narrowing shoulder edges.
+    if (w.dual) {
+        std::array<PathSample, 2> paths{path_of(w.halves[0]), path_of(w.halves[1])};
+        std::array<TerrainSlice, 2> terrain;
+        for (int h = 0; h < 2; ++h) {
+            const auto& half = w.halves[h];
+            const auto& path = paths[h];
+            if (half.terrain)
+                terrain[h] = half.terrain->slice(-path.left - path.shoulder_left,
+                                                 path.right + path.shoulder_right);
+            if (terrain[h].type == 4 && (path.marking_flags || path.zone_end) &&
+                !(path.marking_flags & 0x40))
+                for (auto& point : terrain[h].points) point[1] = 0;
+            if (path.marking_flags & 0x40) terrain[h].type = 3;
         }
-        right = wrap32(int64_t(right) * factor) >> 16;
-        left = wrap32(int64_t(left) * factor) >> 16;
-        stored.edges[0][1] = w.halves[0].offset + path_of(w.halves[0]).right + right;
-        stored.edges[1][0] = w.halves[1].offset - path_of(w.halves[1]).left - left;
+        const auto raw = terrain;
+        adjust_split_terrain(terrain[0], paths[0], terrain[1], paths[1],
+                             w.x_sep, w.countdown, windows_->at(w.window).threshold);
+        stored.edges[0][1] = w.halves[0].offset + paths[0].right + paths[0].shoulder_right;
+        stored.edges[1][0] = w.halves[1].offset - paths[1].left - paths[1].shoulder_left;
+        if (slice_sink_)
+            for (int h = 0; h < 2; ++h) {
+                if (terrain[h].points == raw[h].points && terrain[h].side_heights == raw[h].side_heights)
+                    continue; // no terrain write after the ordinary half build
+                terrain[h].ring_adjusted = true;
+                const auto& half = w.halves[h];
+                slice_sink_(node_of(*course_, half.node).link, uint32_t(half.position >> 8), paths[h], terrain[h]);
+            }
     }
 }
 
@@ -604,9 +619,10 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
     statics.road_left = path.left;
     statics.road_right = path.right;
     w.borr.slots(path, *random_, statics); // first walk: stale edges, positions overwritten
-    if (slice_sink_ && w.terrain)          // 0x00451910 (draw-free)
-        slice_sink_(node.link, local, path,
-                    w.terrain->slice(-path.left - path.shoulder_left, path.right + path.shoulder_right));
+    if (slice_sink_)          // 0x00451910 (draw-free); also clear old split-height overrides
+        slice_sink_(node.link, local, path, w.terrain
+                    ? w.terrain->slice(-path.left - path.shoulder_left, path.right + path.shoulder_right)
+                    : TerrainSlice{});
     w.borr.slots(path, *random_, statics);
     const std::vector<std::array<uint32_t, 2>>* list = &events_.at(w.dzhr.node)->records;
     for (size_t i = size_t(std::max(0, w.dzhr.index)); i < list->size(); ++i) {

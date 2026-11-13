@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "career.hpp"
 #include <fstream>
@@ -150,7 +151,7 @@ int main(int argc, char** argv) {
     check(save_checksum(tiny, 2) == ((uint32_t(1) << 16 | 3) ^ 4), "checksum definition");
 
     if (argc > 1 && std::string(argv[1]) == "--corpus") {
-        Assets a(argc > 2 ? argv[2] : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        Assets a(argc > 2 ? argv[2] : rr::test::assets_root());
         if (!a.exists("ROADRASH.EXE")) {
             std::cout << "skip: no disc\n";
             return 77;
@@ -236,15 +237,25 @@ int main(int argc, char** argv) {
         // the original played Big Game Cydney through a City race and saved
         // via the restroom UI. Skip 77 only when no save evidence exists.
         {
-            const std::string dir = std::string(
+            const char* driven = std::getenv("RR_TEST_DRIVEN_SAVE_REFERENCE");
+            const bool native_reference = driven && *driven;
+            std::string dir = native_reference ? driven : rr::test::frontend_reference(
                 RR_SOURCE_DIR "/analysis/frontend/acceptance-20261026/34069bf3262241b3bdf4efa59c500751/");
+            if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
             std::ifstream df(dir + "fe-career.RRS", std::ios::binary);
             if (!df) {
+#ifdef _WIN32
+                check(
+                    false,
+                    "missing original-driven career save; configure RR_TEST_DRIVEN_SAVE_REFERENCE");
+#else
+                check(!rr::test::require_frontend_reference(), "missing configured driven original save");
                 std::cout << "skip: no driven original save\n";
+#endif
             } else {
                 const std::vector<uint8_t> driven((std::istreambuf_iterator<char>(df)),
                                                   std::istreambuf_iterator<char>());
-                Assets da(argc > 2 ? argv[2] : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+                Assets da(argc > 3 ? argv[3] : rr::test::assets_root());
                 if (!da.exists("ROADRASH.EXE")) {
                     std::cout << "skip: no disc for driven save tables\n";
                 } else {
@@ -254,19 +265,28 @@ int main(int argc, char** argv) {
                         const Career d = read_save(driven, real);
                         check(d.state.character == 3 && d.state.level == 0 && d.state.qualified == 0,
                               "driven save header");
-                        check(d.state.bike == 2 && d.state.course == 1 && d.state.place == 0,
+                        check(d.state.bike == 2 && d.state.course == 1,
                               "driven save race fields");
-                        check(d.state.cash == 651, "driven save cash after City race");
+                        if (!native_reference) {
+                            check(d.state.place == 0, "historical driven save place");
+                            check(d.state.cash == 651, "historical driven save cash after City race");
+                        }
                         check(d.mode == GameMode::big_game && !d.unsaved, "driven save forces big game");
                         check(write_save(d) == driven, "driven original save byte identity");
                         std::ifstream sf(dir + "fe-career-saved.state", std::ios::binary);
+                        check(!native_reference || bool(sf), "native save requires original memory payload");
                         if (sf) {
                             const std::vector<uint8_t> state((std::istreambuf_iterator<char>(sf)),
                                                              std::istreambuf_iterator<char>());
                             check(state.size() == 0xa0 - 8, "driven state dump size");
-                            if (state.size() == 0xa0 - 8)
+                            if (state.size() == 0xa0 - 8) {
                                 check(std::vector<uint8_t>(driven.begin() + 8, driven.end()) == state,
                                       "driven save payload equals dumped game state");
+                                check(d.state.place == state[6], "save place matches original memory");
+                                const uint32_t cash = uint32_t(state[8]) | uint32_t(state[9]) << 8 |
+                                                      uint32_t(state[10]) << 16 | uint32_t(state[11]) << 24;
+                                check(d.state.cash == cash, "save cash matches original memory");
+                            }
                         }
                     }
                 }

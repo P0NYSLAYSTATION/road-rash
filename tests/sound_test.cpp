@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "bike.hpp"
 #include "race.hpp"
@@ -35,7 +36,7 @@ int main(int argc, char** argv) {
               rr::pitch_q8(1, 11025) == rr::pitch_q8(100, 11025),
           "frequency clamp and pitch");
 
-    rr::Assets assets(argc > 1 ? argv[1] : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+    rr::Assets assets(argc > 1 ? argv[1] : rr::test::assets_root());
     if (!assets.exists("ROADRASH.EXE")) {
         std::cout << "skip: no disc\n";
         return failures ? 1 : 77;

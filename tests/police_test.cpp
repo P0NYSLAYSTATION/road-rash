@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "police.hpp"
 #include "assets.hpp"
 #include "career.hpp"
@@ -87,7 +88,7 @@ int main() {
                     !rr::police_spawn_due(4096, 0, 0, true) && !rr::police_spawn_due(4096, 1, 0, false) &&
                     !rr::police_spawn_due(4096, 0, 0x10, false),
                 "Spawn boundaries");
-        rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Police threshold tests passed; imported corpus absent\n";
             return 0;
@@ -355,6 +356,9 @@ int main() {
         //   staying unloaded (0x00440680 loads on draw) and on the road-clear
         //   scan's slice and +0x108 rules (0x00441500/0x00449ce0).
         //   See docs/VERIFICATION.md for measured spans and capture provenance.
+        if (std::getenv("RR_TEST_STRICT_POLICE")) {
+            std::cout << "Original police parity is required by the oracle-police-* strict replay suite\n";
+        } else {
         for (const CopCapture& scenario :
              {CopCapture{"NAPA", "napa-cops-parked-20261026", 4730, 0, 4730, 4552, 4730, 4730},
               CopCapture{"CITY", "city-cops-parked-20261026", 4552, 0, 4552, 4552, 4552, 4552},
@@ -531,6 +535,8 @@ int main() {
             } else
                 std::cout << "skipped: " << scenario.name << " fixture absent\n";
         }
+        }
+
         {
             // Arrest while the rider walks (crash state 2, 0x00407f30): the half is the
             // walking body, so the cop must come within 512 of it.

@@ -559,7 +559,8 @@ static void render_nodes_rgb_impl(FramebufferRgb& fb, const std::vector<DrawNode
         std::array<RasterPoint, 4> nq;
         for (size_t i = 0; i < 4; ++i)
             nq[i] = {mode.map(node.view_points[i].x), mode.map(node.view_points[i].y)};
-        if (node.texture && !normalize_quad(nq, node.texture->flags, &rgb_flip)) continue;
+        if (node.texture && !normalize_quad(nq, node.texture->flags, &rgb_flip,
+                                            mode.surface_width > 640 || mode.surface_height > 480)) continue;
         // Fog follows the normalize permutation: match reordered corners back
         // to originals by coordinates (first match; coincident corners share
         // an edge, so any match fogs correctly).

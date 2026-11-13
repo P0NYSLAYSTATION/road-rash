@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 34 Task 3 Step 1: race snapshots. Needs the disc (77 without it).
 // Run N ticks, save, run M, load, run M again: the per-tick state hashes and
 // the RNG are identical, across a long scripted race that crashes, walks,
@@ -67,7 +68,7 @@ void observe(const rr::RaceInstance& in, Coverage& c) {
 int main() {
     rr::test::Checks check;
     const std::string root = std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS")
-                                                      : std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+                                                      : rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;

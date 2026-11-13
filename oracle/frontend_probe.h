@@ -2,9 +2,20 @@
  * Commands are explicit instrumentation; screen entry uses the original's
  * cross-thread PostMessage path, input uses its normal child-window handlers.
  * Never writes career state or calls race outcomes/save serialisers directly. */
-static void frontend_dump(const char* label) {
+static int frontend_artifact_path(char* path, size_t capacity, const char* label, const char* suffix) {
+    if (!*label) return 0;
+    for (const char* p = label; *p; ++p)
+        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-' ||
+              *p == '_'))
+            return 0;
+    char directory[MAX_PATH];
+    env("RR_ORACLE_FRONTEND_DIRECTORY", directory, sizeof directory, "C:\\");
+    const int n = snprintf(path, capacity, "%s\\fe-%s%s", directory, label, suffix);
+    return n >= 0 && (size_t)n < capacity;
+}
+static void frontend_dump_state(const char* label) {
     char path[MAX_PATH];
-    snprintf(path, sizeof path, "C:\\fe-%s.state", label);
+    if (!frontend_artifact_path(path, sizeof path, label, ".state")) return;
     FILE* f = fopen(path, "wb");
     if (f) {
         fwrite((void*)0x004b8a10, 1, 32, f);
@@ -13,12 +24,19 @@ static void frontend_dump(const char* label) {
             fwrite((void*)(uintptr_t)(0x004c6b40 + p * 0x204 + rider * 12), 1, 12, f);
         fclose(f);
     }
+}
+static void frontend_dump(const char* label) {
+    frontend_dump_state(label);
+    char path[MAX_PATH];
+    FILE* f;
     /* Raw decoded RGB555 image cache, before either surface conversion. */
     for (unsigned i = 0; i < 9; ++i) {
         const uint32_t row = 0x004859c0 + i * 0x58;
         const uint32_t pixels = (uint32_t)RD32(row + 4);
         if (!readable(pixels, 640 * 480 * 2)) continue;
-        snprintf(path, sizeof path, "C:\\fe-%s-cache%u.raw", label, i);
+        char suffix[32];
+        snprintf(suffix, sizeof suffix, "-cache%u.raw", i);
+        if (!frontend_artifact_path(path, sizeof path, label, suffix)) continue;
         f = fopen(path, "wb");
         if (f) {
             fwrite((void*)(uintptr_t)pixels, 2, 640 * 480, f);
@@ -53,7 +71,12 @@ static int frontend_shot(const char* label) {
         SelectObject(dc, old);
         if (ok) {
             char path[MAX_PATH];
-            snprintf(path, sizeof path, "C:\\fe-%s.bmp", label);
+            if (!frontend_artifact_path(path, sizeof path, label, ".bmp")) {
+                DeleteObject(bmp);
+                DeleteDC(dc);
+                ReleaseDC(window, source);
+                return 0;
+            }
             FILE* f = fopen(path, "wb");
             if (f) {
                 BITMAPFILEHEADER bh;
@@ -102,19 +125,43 @@ static void frontend_activate(unsigned index) {
     PostMessageA(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(10, 10));
     PostMessageA(window, WM_LBUTTONUP, 0, MAKELPARAM(10, 10));
 }
+static void frontend_focus(unsigned index) {
+    if (index >= (unsigned)RD32(0x00496c18)) return;
+    HWND window = (HWND)(uintptr_t)RD32(0x00496028 + index * 4);
+    const DWORD owner = GetWindowThreadProcessId(window, NULL), current = GetCurrentThreadId();
+    const BOOL attached = owner != current && AttachThreadInput(current, owner, TRUE);
+    if (owner == current || attached) SetFocus(window);
+    const int focused = GetFocus() == window;
+    if (attached) AttachThreadInput(current, owner, FALSE);
+    if (g_out) {
+        fprintf(g_out, "# fe focus %u %d\n", index, focused);
+        fflush(g_out);
+    }
+}
 
 static DWORD WINAPI frontend_probe(LPVOID unused) {
     (void)unused;
-    char script[MAX_PATH], line[256];
+    char script[MAX_PATH], line[1024];
     env("RR_ORACLE_FRONTEND_SCRIPT", script, sizeof script, "C:\\frontend.script");
     FILE* f = fopen(script, "r");
     if (!f) return 1;
     for (int i = 0; i < 600 && RD32(0x0046a660) != 9; ++i) Sleep(100);
     while (fgets(line, sizeof line, f)) {
-        char command[32], arg[128];
+        char command[32], arg[MAX_PATH];
         int value = 0;
         arg[0] = 0;
-        if (sscanf(line, "%31s %127s", command, arg) < 1 || command[0] == '#') continue;
+        int consumed = 0;
+        if (sscanf(line, "%31s%n", command, &consumed) < 1 || command[0] == '#') continue;
+        const char* argument = line + consumed;
+        while (*argument == ' ' || *argument == '\t') ++argument;
+        size_t length = strcspn(argument, "\r\n");
+        while (length && (argument[length - 1] == ' ' || argument[length - 1] == '\t')) --length;
+        if (length >= sizeof arg) {
+            if (g_out) fputs("# fe FAIL argument too long\n", g_out);
+            break;
+        }
+        memcpy(arg, argument, length);
+        arg[length] = 0;
         if (g_out) {
             fprintf(g_out, "# fe command %s", line);
             fflush(g_out);
@@ -130,12 +177,20 @@ static DWORD WINAPI frontend_probe(LPVOID unused) {
             Sleep(600);
         } else if (!strcmp(command, "sleep"))
             Sleep(atoi(arg));
+        else if (!strcmp(command, "videos")) {
+            // Original video-enabled option (004023e6); this working
+            // installation intentionally has its movies disabled/absent.
+            // It is a presentation setting, not career or simulation state.
+            RD32(0x0047538c) = atoi(arg) != 0;
+        }
         else if (!strcmp(command, "key"))
             frontend_key(strtoul(arg, NULL, 0));
         else if (!strcmp(command, "enter"))
             ((void(__fastcall*)(int))0x00421df0)(atoi(arg));
         else if (!strcmp(command, "activate"))
             frontend_activate(atoi(arg));
+        else if (!strcmp(command, "focus"))
+            frontend_focus(atoi(arg));
         else if (!strcmp(command, "wait_result")) {
             int i = 0;
             for (; i < 12000; ++i) {
@@ -167,6 +222,14 @@ static DWORD WINAPI frontend_probe(LPVOID unused) {
             SetDlgItemTextA(frontend_dialog, 0x480, arg);
             PostMessageA(frontend_dialog, WM_COMMAND, IDOK, 0);
             Sleep(1000);
+        } else if (!strcmp(command, "state")) {
+            frontend_dump_state(arg);
+            if (g_out) {
+                fprintf(g_out, "# fe state %s screen %d tick %d outcome %d mode %d human %d\n", arg,
+                        RD32(0x0046a660), RD32(0x004b7ecc), RD32(0x004c5d7c),
+                        RD32(0x004753b0), RD8(0x004753c8) == 0);
+                fflush(g_out);
+            }
         } else if (!strcmp(command, "capture")) {
             const int ok = frontend_shot(arg);
             frontend_dump(arg);

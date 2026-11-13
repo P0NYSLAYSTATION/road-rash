@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "crash.hpp"
 #include "actor_descriptors.hpp"
 #include "assets.hpp"
@@ -20,7 +21,7 @@ static std::vector<rr::RouteSample> knock_straight(size_t n) {
 static void test_knock_off_reasons();
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/GLOBAL.RSC")) {
             std::cout << "Imported crash corpus absent\n";
             return 0;

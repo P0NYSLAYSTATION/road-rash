@@ -199,7 +199,7 @@ static void threaded_band(ThreadedCtx& c, int top, int bottom, RasterScratch64& 
         if (texture.flags & 0x2000)
             throw std::runtime_error("Dynamic rider texture must be specialized before rendering");
         bool flip_u = node.flip_u;
-        if (!normalize_quad(points, texture.flags, &flip_u)) continue;
+        if (!normalize_quad(points, texture.flags, &flip_u, wide_surface)) continue;
         const auto& bounds = texture.bounds;
         const uint32_t src_w = uint32_t(std::abs(int64_t(bounds[2]) - bounds[0]) + 1);
         const uint32_t src_h = uint32_t(std::abs(int64_t(bounds[3]) - bounds[1]) + 1);

@@ -10,16 +10,13 @@
 
 // Live rider scheduler (plan 10 Task 6): 0x00438170(0) walks the object list
 // and 0x00437e60 runs each due node. Each function names the routine it
-// ports. Known native differences (labelled where they occur):
-// - pedestrians keep their own pass after riders/cars, and intersection
-//   controllers run in a prepass; those nodes are not yet interleaved;
+// ports. Riders, pedestrians, cars and intersection nodes share the live
+// position-ordered scheduler. Remaining tracker/route limitations:
 // - the ring trackers 0x00450d30/0x00450dc0 are taken at their measured
 //   offsets from the ring back (14 and 91 samples, set up by 0x004552e0);
 //   their split/merge hand-over is not modelled;
 // - the parked virtual walk follows the rider's own route at splits, where
 //   the original takes the split node's byte +0x18;
-// - a crashed bike keeps the native crash path in its move slot; the
-//   crashed branches of 0x004060b0 and 0x00406890 are not ported.
 namespace rr {
 namespace {
 int32_t sar(int32_t x, int n) {
@@ -413,6 +410,10 @@ void Race::think_half(Rider& r, uint32_t controls, bool countdown) {
         // body words left by the previous half move; the walk-back and
         // remount states follow it on the same half block.
         if (!r.crash_active) crash(r); // entry applies once, on the first node to run
+        // 004346c6..004346e1 starts the result for a crashed, finish-latched
+        // player before dispatching crash AI, without a speed threshold.
+        if (player && (r.half_object.u8(0xc0) & 0x10) != 0)
+            r.finish_controls_ended = true;
         ai_think(r);
         // 0x00434660 wrapper stamina regen (lines 15-24): the player half
         // regenerates +dt whenever crash != 1, on top of the 0x00407bd0
@@ -428,7 +429,9 @@ void Race::think_half(Rider& r, uint32_t controls, bool countdown) {
             advance_ride_animation(r, player);
         return;
     }
-    const bool demo_player = demo_hold_ && player;
+    // 004346a1..004346b6 selects AI after any terminal outcome as
+    // well as during attract hold; player input ends before the result delay.
+    const bool demo_player = player && (demo_hold_ || r.finish_controls_ended || r.busted);
     fight(r, demo_player ? 0 : controls, size_t(&r - riders_.data()));
     rider_think(r, controls, player);
 }
@@ -522,8 +525,9 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
             // sliding on its own drag. Once they sit more than 0x500 apart
             // along the road, the bike's speed eighths toward the half's: the
             // slower side gains (|half| - |bike|) / 8, or, when the half is
-            // slower, the bike sheds its own speed / 8. The standings call
-            // 0x0043c7e0 that follows inside that block is not ported here.
+            // slower, the bike sheds its own speed / 8. The following
+            // 0x0043c7e0 serializes a network snapshot; its first branch
+            // returns when both network-mode bytes are zero (offline).
             const Bike& body = r.crash_actor.motion;
             if (std::abs(b.i32(0x1c) - body.i32(0x1c)) > 0x500) {
                 const int32_t bike_speed = b.i32(0xec);

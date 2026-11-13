@@ -139,7 +139,8 @@ def publish_capture(trace, output, receipt, companions=()):
     shutil.copy2(trace, dest)
     for path in companions:
         shutil.copy2(path, run / Path(path).name)
-    receipt = dict(receipt, trace=str(dest.resolve()), artifacts=[str(x.resolve()) for x in run.iterdir()])
+    receipt = dict(receipt, trace=str(dest.resolve()), artifacts=[str(x.resolve()) for x in run.iterdir()],
+                   artifact_sha256={x.name: sha256(x) for x in run.iterdir() if x.is_file()})
     atomic_json(run / 'receipt.json', receipt)
     # Legacy consumers retain the flat path. Companions are only copied after validation.
     for path in run.iterdir():

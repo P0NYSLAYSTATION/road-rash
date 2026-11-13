@@ -1,12 +1,12 @@
 {
-  "reviewed_on": "2026-11-12",
-  "timezone": "America/Los_Angeles",
+  "reviewed_on": "2026-11-13",
+  "timezone": "Europe/London",
   "areas": [
     {
       "area": "Native build",
       "implementation": "Playable native game + research viewer",
-      "verification": "Strict Debug full build, 134/134 CTests with the disc, zero skips (macOS and Linux, October 31); viewer smoke and all-course sweep (October18 full-field source); ASan/UBSan10/10",
-      "remaining": "Simulation acceptance separate",
+      "verification": "Windows optimized MSVC Release:152 selected CTests pass, zero failures/CTest skips; owner excludes menu pixel comparisons and widescreen-only checks. Actual compiler configuration now recorded in build metadata. Historical macOS/Linux gates retain their own dates.",
+      "remaining": "Clean revision installer build, update validation and release publication pending.",
       "evidence": [
         "VERIFICATION.md",
         "RUN_NATIVE.md",
@@ -18,9 +18,10 @@
     {
       "area": "Simulation parity",
       "implementation": "Original live rider/car scheduler, native countdown, scene construction, AI combat/relationships, car callbacks, marking lifetimes and single-anchor replay",
-      "verification": "Windows November12: strict completed human replays match Hiway L1/seed1 14084, Napa L1/seed1 29055, Canyn L1/seed1 29620, City L1/seed1 33819, Medly L1/seed2 37186 including RNG with one anchor. All19 City police coverage fields compared. Strict5/5 whole races and4/4 prefixes pass; MSVC Release/SDL native104 pass,35 explicit skips,2 unavailable Direct3D exclusions.",
-      "remaining": "Other levels/branches and behavior outside these recordings remain unverified. Multiplayer held.",
+      "verification": "Optimized five Level1 human races match143764 ticks from tick1 through finish with one RNG anchor. HighwayLevel5 matches94929ticks through arrest. Ten required police/crash cases match35916ticks. Initial-slot geometry and both normal/crashed finish-result integration verified.",
+      "remaining": "Higher-level/branch finish combinations remain unmeasured. Installer upgrade/release pending. Menu and widescreen-only parity excluded by owner. Multiplayer held.",
       "evidence": [
+        "agent-handoffs/skip-removal-20261112.md",
         "agent-handoffs/parity-resource-lookup-20261112.md",
         "agent-handoffs/parity-city-visibility-20261112.md",
         "agent-handoffs/parity-projected-velocity-20261112.md",
@@ -52,7 +53,7 @@
     {
       "area": "Other courses",
       "implementation": "Course data supported; composed renderer work pending",
-      "verification": "Hiway L1/seed1 human full race14084 exact including RNG; completed City33819 recording exact through18307 (Windows November12)",
+      "verification": "Strict human full-race replays match Hiway14084, Napa29055, Canyn29620, City33819 and Medly37186 ticks including RNG from one anchor (Windows November12; Level1, Medly seed2, others seed1)",
       "remaining": "Five completed L1 human recordings pass strict whole-race acceptance; other levels/branches and unexercised behavior remain unverified.",
       "evidence": [
         "agent-handoffs/parity-resource-lookup-20261112.md",
@@ -65,9 +66,10 @@
     {
       "area": "Frontend/settings",
       "implementation": "Menus, career, saves, jukebox, sound mix and controls implemented; online mano-a-mano (plan 34) live through `rr-netd` with room codes, invite links and six-platform CI cross-play",
-      "verification": "Seeded original-writer save byte identity; main-menu capture and 1x/2x/4x layout checks; menu pictures bit-exact vs 226 original decoded-image caches; dark fills and text colours RGB565-exact; menu text Wine-GDI exact (FreeType 2.13.3 smoothed glyphs 8448/8448, 16-bit blend 491520/491520, word wrap); host Wingdings/Courier New Bold with Wine VDMX/gasp rules 667/667; 18 of 20 acceptance screens pixel-exact full frame (graphics: port-only Display row; main: network-gated Mano row)",
-      "remaining": "Driven-career original-save round trip; plan 34 device cross-play and soak (Tasks 10-11); AWE/EMU8000 music timbre",
+      "verification": "Windows GDI memory components match9856 disc glyphs per surface,672 system glyphs per surface,196608 RGB565 blends,292 line heights,7 extents and6 wrapped rectangles. Functional menu/network-menu components pass. Historical Wine screen counts are not current Windows acceptance.",
+      "remaining": "Menu pixel parity excluded by owner. Native original finished-City RRS equals its152-byte memory payload; native parser/writer byte identity and memory place/cash checks pass.",
       "evidence": [
+        "agent-handoffs/skip-removal-20261112.md",
         "plans/18-settings-and-options.md",
         "plans/13-music-and-frontend-completion.md",
         "agent-handoffs/frontend-layout-20261026.md",

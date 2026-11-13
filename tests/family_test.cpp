@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "family.hpp"
 #include "assets.hpp"
 #include "resource.hpp"
@@ -152,7 +153,7 @@ int main() {
         check(false, "overflowing family accepted");
     } catch (const std::runtime_error&) {
     }
-    rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+    rr::Assets assets(rr::test::assets_root());
     if (assets.exists("DATA/FAMILIES.RSC")) {
         const auto file = assets.read("DATA/FAMILIES.RSC");
         size_t families = 0, groups = 0, cells = 0;

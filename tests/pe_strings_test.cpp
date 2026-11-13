@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "pe_strings.hpp"
 #include <iostream>
@@ -124,7 +125,7 @@ int main(int argc, char** argv) {
           "language rule");
 
     if (argc > 1 && std::string(argv[1]) == "--corpus") {
-        const std::string root = argc > 2 ? argv[2] : RR_SOURCE_DIR "/../cdrom/ROADRASH";
+        const std::string root = argc > 2 ? argv[2] : rr::test::assets_root();
         rr::Assets assets(root);
         if (!assets.exists("TEXT/ENU.DLL")) {
             std::cout << "skip: no disc\n";

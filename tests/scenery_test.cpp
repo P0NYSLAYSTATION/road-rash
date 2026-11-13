@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         if (std::filesystem::exists(path)) {
             const auto capture = rr::golden::load(path);
             const auto& fields = capture.frames.at(0);
-            if (capture.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2")
+            if (!rr::golden::original_executable(capture.exe))
                 throw std::runtime_error("Wrong scenery oracle");
             for (int c = 0; c < 32; ++c) {
                 const std::string prefix = "scenery." + std::to_string(c) + ".";

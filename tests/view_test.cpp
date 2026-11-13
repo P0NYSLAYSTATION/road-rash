@@ -63,11 +63,11 @@ int main() {
         } catch (const std::runtime_error&) {
         }
     }
-    const auto path = rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const auto path = rr::golden::raster_fixture();
     if (std::filesystem::exists(path)) {
         try {
             const auto golden = rr::golden::load(path);
-            if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(golden.exe) ||
                 golden.frames.empty())
                 throw std::runtime_error("Empty mapping capture");
             for (int mode = 0; mode < 2; ++mode)

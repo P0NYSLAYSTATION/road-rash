@@ -23,15 +23,44 @@ int rr_patch_call(uint8_t* site, uint32_t expected_target, void* hook) {
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "drive_progress.h"
 
 static FILE* g_out;
+static int g_fixture_error;
+static FILE* fixture_open(const char* path) {
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        g_fixture_error = 1;
+        if (g_out) fprintf(g_out, "# required fixture asset missing: %s\n", path);
+    }
+    return file;
+}
 static char g_scenario[256] = "unnamed";
 static int g_capture_course;
 static int g_frontend_probe;
+static int g_frontend_trace;
+static RRDriveProgress g_drive_progress;
+static uint32_t g_recovery_tick;
+static int32_t g_recovery_position, g_recovery_lateral;
+static int g_recovering;
 /* Display level 1..5 selected through the original level popup setter
  * (0x004453f0); 0 leaves the bootstrapped startup level (display 1) alone. */
 static int g_capture_level;
 static int g_groups;
+static int g_ground_fixture;
+static int g_ground_trace;
+static DWORD WINAPI fixture_exit_thread(LPVOID code) {
+    ExitProcess((UINT)(uintptr_t)code);
+    return 0;
+}
+static BOOL defer_fixture_exit(UINT code) {
+    // A thread created during attach starts after DLL initialization releases
+    // the loader lock. Component-only captures must not leave a menu running.
+    HANDLE thread = CreateThread(NULL, 0, fixture_exit_thread, (LPVOID)(uintptr_t)code, 0, NULL);
+    if (!thread) return FALSE;
+    CloseHandle(thread);
+    return TRUE;
+}
 static int g_drive;
 static int readable(uintptr_t p, size_t size);
 
@@ -61,6 +90,7 @@ static int g_human;
 /* RR_ORACLE_KNOCK=<tick>: knock the player off through the original crash
  * entry 0x00403d60 (reason 1, default vectors) before that tick runs. */
 static int g_knock_tick;
+static int g_knock_initial_tick, g_knock_applied_tick;
 /* RR_ORACLE_ORDER=1: per tick, the scheduler-ring order of nodes
  * within 0x1000 of the player (ord.<k> address, .t type, .p position, .l
  * lateral, .s slice, .v +0x108) and the
@@ -73,6 +103,8 @@ static int g_police_probe;
 static int g_terrain_seeded;
 static int g_terrain_trace;
 static int g_slice_probe = -1;
+/* Explicit render-only boundary fixture; never enabled for simulation replay. */
+static int g_view_pose = -1, g_view_pose_applied, g_view_pose_row_ok;
 static int g_ai_probe_tick = -1;
 static void capture_terrain_seeded_and_exit(void);
 static void palette_hook_install(void);
@@ -185,7 +217,7 @@ static uint32_t __cdecl hook_controls(void) {
     if (!g_drive) return ((uint32_t(__cdecl*)(void))0x0044f800)();
     uint32_t controls = 1;          // original accelerate bit
     if (g_drive == 3) return 1 | 4; // plan 11a Task 3 Step 5: accelerate + hold left (crest hunting)
-    if (g_drive == 4) {
+    if (g_drive == 4 || g_drive == 5) {
         //Conservative human inputs for sustained captures, without touching
         //simulation state: predict lateral drift and limit speed in curves.
         const uintptr_t rider = (uint32_t)RD32(0x004642d8);
@@ -193,17 +225,79 @@ static uint32_t __cdecl hook_controls(void) {
         uintptr_t slice = (uint32_t)RD32(rider + 0x2c);
         if (!readable(slice, 0xe8)) slice = (uint32_t)RD32(rider + 0x140);
         if (!readable(slice, 0xe8)) return controls;
-        const int64_t centre = ((int64_t)(int32_t)RD32(slice + 0xe0) +
-                                (int32_t)RD32(slice + 0xe4)) * 128;
+        const int32_t left = (int32_t)RD32(slice + 0xe0), right = (int32_t)RD32(slice + 0xe4);
+        int64_t centre = ((int64_t)left + right) * 128;
+        if (g_drive == 5 && right - left >= 120) {
+            // Ordinary human controls: prefer the forward lane, rather than
+            // riding the centre line into oncoming traffic. +cc is the road
+            // origin even when its two sides have different widths.
+            int32_t lane = (int32_t)RD32(slice + 0xcc) + 125;
+            if (lane < left + 60) lane = left + 60;
+            if (lane > right - 60) lane = right - 60;
+            centre = (int64_t)lane * 256;
+        }
         const int64_t predicted = (int32_t)RD32(rider + 0x28) +
                                   (int64_t)(int32_t)RD32(rider + 0x10c) * 8;
         const int32_t bend = (int32_t)RD32(slice + 0xb4);
-        int32_t target = abs(bend) >= 6 ? 4000 : 6000;
+        // +b4 is16.16. Preserve mode4's old conservative threshold so every
+        // accepted control stream remains reproducible; mode5 uses six units.
+        int32_t target = abs(bend) >= (g_drive == 5 ? 6 * 65536 : 6) ? 4000 : 6000;
         if (llabs(centre - predicted) > 100 * 256) target = 2500;
         const int32_t speed = (int32_t)RD32(rider + 0xec);
         controls = speed < target - 200 ? 1 : speed > target + 200 ? 2 : 0;
         if (centre - predicted > 10 * 256) controls |= 0x200;
         if (centre - predicted < -10 * 256) controls |= 4;
+        if (g_drive == 5) {
+            const uintptr_t cop = (uint32_t)RD32(0x004642dc);
+            if (readable(cop, 0x144) &&
+                llabs((int64_t)(int32_t)RD32(cop + 0x1c) - (int32_t)RD32(rider + 0x1c)) < 3 * 256 &&
+                llabs((int64_t)(int32_t)RD32(cop + 0x28) - (int32_t)RD32(rider + 0x28)) < 180 * 256)
+                controls |= 0x40; // original kick bit; no game-state writes
+        }
+        const uint32_t tick = RD32(0x004b7ecc);
+        int32_t margin = (right - left) / 4;
+        if (margin > 60) margin = 60;
+        if (margin < 0) margin = 0;
+        const int32_t position = (int32_t)RD32(rider + 0x1c);
+        const int can_drive = g_race_started && RD32(0x004753c0) == 0 &&
+                              RD32(rider + 0x2f4) == 0 && RD32(0x004c5d7c) <= 1;
+        if (!can_drive) g_recovering = 0;
+        if (rr_drive_stalled(&g_drive_progress, tick, position, can_drive)) {
+            const int32_t lateral = (int32_t)RD32(rider + 0x28);
+            const int64_t room_left = (int64_t)lateral - (int64_t)(left + margin) * 256;
+            const int64_t room_right = (int64_t)(right - margin) * 256 - lateral;
+            int direction = room_right >= room_left ? 1 : -1;
+            // Try the other side on a repeated obstruction if it has room.
+            if ((g_drive_progress.stalls & 1) == 0 &&
+                (direction > 0 ? room_left : room_right) > 150 * 256) direction = -direction;
+            g_recovery_lateral = lateral + direction * 180 * 256;
+            g_recovery_tick = tick;
+            g_recovery_position = position;
+            g_recovering = 1;
+            if (g_out) {
+                fprintf(g_out, "# driver stalled after 300 ticks: tick=%u position=%d recovery=%s\n",
+                        tick, position, direction > 0 ? "right" : "left");
+                fflush(g_out);
+            }
+        }
+        if (g_recovering) {
+            const int64_t distance = (int64_t)position - g_recovery_position;
+            if (tick < g_recovery_tick || tick - g_recovery_tick >= 150 || llabs(distance) >= 512) {
+                if (g_out) {
+                    fprintf(g_out, "# driver recovery ended: tick=%u movement=%lld\n", tick,
+                            (long long)distance);
+                    fflush(g_out);
+                }
+                g_recovering = 0;
+            } else {
+                int64_t target_lateral = g_recovery_lateral;
+                if (target_lateral < (int64_t)(left + margin) * 256) target_lateral = (int64_t)(left + margin) * 256;
+                if (target_lateral > (int64_t)(right - margin) * 256) target_lateral = (int64_t)(right - margin) * 256;
+                controls = tick - g_recovery_tick < 12 ? 2 : 1;
+                if (target_lateral - predicted > 8 * 256) controls |= 0x200;
+                if (target_lateral - predicted < -8 * 256) controls |= 4;
+            }
+        }
         return controls;
     }
     if (g_drive == 2) {
@@ -396,6 +490,7 @@ static void dump_sim_tick(void) {
         rr_log("character", -1);
         rr_log("seed", g_seed);
         rr_log("solo", g_solo);
+        if (g_knock_initial_tick) rr_log("input.knock_tick", g_knock_initial_tick);
         rr_log("ring.car_schema", 2); // byte offsets corrected from decompiler element indices
         rr_log("rng.counter_enabled", g_rand_counter_installed);
         rr_log("input.joystick", RD8(0x00476c98));
@@ -423,7 +518,7 @@ static void dump_sim_tick(void) {
         fprintf(g_record, "%x\n", (uint32_t)RD32(0x004b7ed0));
         fflush(g_record); // the replay reader consumes one hexadecimal word per tick
     }
-    if ((g_drive == 2 || g_drive == 4 || g_input) && getenv("RR_ORACLE_DRIVER_TRACE")) {
+    if ((g_drive == 2 || g_drive == 4 || g_drive == 5 || g_input) && getenv("RR_ORACLE_DRIVER_TRACE")) {
         const uintptr_t bike = (uint32_t)RD32(0x004642d8);
         if (readable(bike, 0x144)) {
             const uintptr_t active = (uint32_t)RD32(bike + 0x2c);
@@ -455,9 +550,10 @@ static void dump_sim_tick(void) {
     rr_log("ring.camera", (long long)(int32_t)RD32(0x004b6e5c));
     rr_log("traffic.cruise", (int8_t)RD8(0x004b7e8c));
     rr_log("traffic.rate", RD32(0x004b7e84));
+    rr_log("race.outcome", (long long)(int32_t)RD32(0x004c5d7c));
+    if (g_knock_initial_tick) rr_log("input.knock_applied", g_knock_applied_tick);
     if (g_order) { /* race-end timer (0x00416010/0x00442e10) and outcome code; 4 = arrest */
         rr_log("race.end_timer", (long long)(int32_t)RD32(0x004753c4));
-        rr_log("race.outcome", (long long)(int32_t)RD32(0x004c5d7c));
     }
     if (g_terrain_trace) {
         dump_terrain_walker("back", 0x0049ea20);
@@ -499,12 +595,17 @@ static void dump_sim_tick(void) {
                         RD32(node + 0x178), RD32(node + 0x17c), (unsigned)sl,
                         sl && readable(sl, 0x37) ? RD8(sl + 0x36) : 0);
             }
-            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) &&
+            const uintptr_t ground_slice = readable(node, 0x144) ? (uint32_t)RD32(node + 0x140) : 0;
+            const int ground_trace = g_ground_trace && node == player && readable(ground_slice, 0x14a) &&
+                (((int32_t)RD32(node + 0x28) >> 8) < RD32(ground_slice + 0xe0) ||
+                 ((int32_t)RD32(node + 0x28) >> 8) > RD32(ground_slice + 0xe4));
+            if (ground_trace || (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x144) &&
                 RD32(node + 0xc4) == 4 && g_slice_probe >= 0 &&
-                ((int32_t)RD32(node + 0x1c) >> 8) == g_slice_probe) {
+                ((int32_t)RD32(node + 0x1c) >> 8) == g_slice_probe)) {
                 uintptr_t sl = (uint32_t)RD32(node + 0x140);
-                fprintf(g_out, "# ground-actor tick=%d actor=%u pos=%d lateral=%d ground=%d\n", tick,
-                        (unsigned)node, RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x24));
+                fprintf(g_out, "# ground-actor tick=%d actor=%u pos=%d lateral=%d ground=%d previous=%d swept=%d road_move=%d\n", tick,
+                        (unsigned)node, RD32(node + 0x1c), RD32(node + 0x28), RD32(node + 0x24),
+                        RD32(node + 0x38), RD32(node + 0x138), RD32(node + 0x12c));
                 if (sl && readable(sl, 0x64)) {
                     fprintf(g_out, "# static-input actor=%u slice=%u billboards=%u flags=%u\n",
                             (unsigned)node, (unsigned)sl, RD8(sl + 0x3d), RD8(sl + 0x64));
@@ -515,9 +616,10 @@ static void dump_sim_tick(void) {
                     }
                 }
                 for (int k = 0; k < 2 && sl && readable(sl, 0x14a); ++k) {
-                    fprintf(g_out, "# ground-slice side=%d slice=%u node=%u local=%d type=%u flags=%u centre=%d edges=%d/%d shoulders=%d/%d selectors=%u/%u points=",
+                    fprintf(g_out, "# ground-slice side=%d slice=%u node=%u local=%d type=%u flags=%u centre=%d edges=%d/%d shoulders=%d/%d heights=%d/%d selectors=%u/%u points=",
                             k, (unsigned)sl, RD32(sl), RD32(sl + 4), RD8(sl + 0x3c), RD8(sl + 0x37),
                             RD32(sl + 0xcc), RD32(sl + 0xe0), RD32(sl + 0xe4), RD32(sl + 0xe8), RD32(sl + 0xec),
+                            RD32(sl + 0x140), RD32(sl + 0x144),
                             RD8(sl + 0x148), RD8(sl + 0x149));
                     for (int p = 0; p < 12; ++p) fprintf(g_out, "%s%d", p ? "," : "", RD32(sl + 0xf0 + p * 4));
                     fputc('\n', g_out);
@@ -778,6 +880,8 @@ static void dump_sim_tick(void) {
                 /* Rider-half raw window: the brain lives at *(bike+0x2fc)
                  * (weapon +0x1d4, invuln +0x1d0, AI words, lookahead +0x1dc..+0x1f0).
                  * Values are compared across runs; pointers are stable in practice. */
+                snprintf(key, sizeof key, "rider.%d.terrain_ground", slot);
+                rr_log(key, sim_field_value(node, 0x24, 4, 1));
                 const uintptr_t rh = readable(node + 0x2fc, 4) ? (uint32_t)*(uint32_t*)(node + 0x2fc) : 0;
                 /* Stamina lives in the rider-table row *(half+0x1e0)
                  * (0x004050c0: +0x38 maximum, +0x3c current). */
@@ -852,7 +956,8 @@ static void dump_sim_tick(void) {
                 }
             } else {
                 if (sim_field_value(node, 0xc4, 4, 0) == 0x20) {
-                    static const uint32_t offsets[] = {0x1c, 0x28, 0x18, 0xc, 0x10, 0x14,
+                    static const uint32_t offsets[] = {0x1c, 0x20, 0x24, 0x28, 0x30, 0x34, 0x38, 0x3c,
+                        0xf4, 0x18, 0xc, 0x10, 0x14,
                         0x104, 0x108, 0x10c, 0x128, 0x1c4, 0x1c8, 0x1d4, 0x1dc, 0x1e0,
                         0x1e4, 0x1e8, 0x1ec, 0x1f4, 0x1f8, 0x1fc, 0x208, 0x21c};
                     for (unsigned i = 0; i < sizeof offsets / sizeof offsets[0]; ++i) {
@@ -1337,7 +1442,7 @@ static void __cdecl hook_step(void) {
             if (g_input_exhausted_tick < 0) g_input_exhausted_tick = RD32(0x004b7ecc);
         }
     }
-    if (g_sim && g_race_started && (g_drive || g_input))
+    if ((g_sim || g_frontend_probe) && g_race_started && (g_drive || g_input))
         capture_keyboard_axes(RD32(0x004b7ed0));
     if (g_knock_tick && g_sim && g_race_started && RD32(0x004b7ecc) == g_knock_tick) {
         static int32_t rider_impulse[3] = {-256, 0, 1792}, bike_impulse[3] = {0, 0, 1024};
@@ -1345,6 +1450,7 @@ static void __cdecl hook_step(void) {
         if (readable(player, 0x32c))
             ((void(__fastcall*)(uintptr_t, int32_t*, int32_t*, int))0x00403d60)(player, rider_impulse,
                                                                                 bike_impulse, 1);
+        g_knock_applied_tick = RD32(0x004b7ecc);
         g_knock_tick = 0;
     }
     if (g_police_probe && g_race_started && g_out) capture_police_spawn();
@@ -2941,7 +3047,7 @@ static void capture_actor_animation(void) {
 static void capture_terrain_ground(void) {
     int current[96], next[96];
     char key[128];
-    for (int c = 0; c < 32; ++c) {
+    for (int c = 0; c < 33; ++c) {
         memset(current, 0, sizeof current);
         memset(next, 0, sizeof next);
         current[3] = (int)(uintptr_t)next;
@@ -2969,6 +3075,21 @@ static void capture_terrain_ground(void) {
                 next[offset / 4] = sign * (630 + band * 610 + c % 5 * 25);
                 next[offset / 4 + 1] = (c % 5 - 2) * (band + 1) * 35;
             }
+        if (c == 32) {
+            // Synthetic split-side boundary: zero-width right lane, opening
+            // inner shoulder and a descending first terrain band.
+            current[0xe0 / 4] = next[0xe0 / 4] = -500;
+            current[0xe4 / 4] = next[0xe4 / 4] = 0;
+            current[0xe8 / 4] = next[0xe8 / 4] = -750;
+            current[0xec / 4] = 0;
+            next[0xec / 4] = 2;
+            current[0x140 / 4] = next[0x140 / 4] = 0;
+            current[0x144 / 4] = next[0x144 / 4] = 0;
+            current[0xf8 / 4] = 1000;
+            next[0xf8 / 4] = 960;
+            current[0xfc / 4] = -90;
+            next[0xfc / 4] = -113;
+        }
 #define GROUND_LOG(label, value)                                                                             \
     do {                                                                                                     \
         snprintf(key, sizeof key, "ground.%d.%s", c, label);                                                 \
@@ -2987,7 +3108,8 @@ static void capture_terrain_ground(void) {
             rr_log(key, next[offsets[i] / 4]);
         }
         for (int i = 0; i < 64; ++i) {
-            const int x = (i - 32) * 75 * 256 + c * 3, frac = (i * 13 + c * 7) & 255;
+            const int x = c == 32 ? i * 256 : (i - 32) * 75 * 256 + c * 3;
+            const int frac = c == 32 ? 146 : (i * 13 + c * 7) & 255;
             snprintf(key, sizeof key, "ground.%d.%d.x", c, i);
             rr_log(key, x);
             snprintf(key, sizeof key, "ground.%d.%d.fraction", c, i);
@@ -2997,7 +3119,7 @@ static void capture_terrain_ground(void) {
         }
 #undef GROUND_LOG
     }
-    rr_log("ground.count", 32);
+    rr_log("ground.count", 33);
 }
 static void terrain_word(unsigned char*, int, uint32_t);
 static void capture_scenery(void) {
@@ -3062,7 +3184,7 @@ static void capture_scenery(void) {
 }
 
 static void capture_napa_events(void) {
-    FILE* input = fopen("D:\\ROADRASH\\DATA\\COURSES\\NAPA.CRS", "rb");
+    FILE* input = fixture_open("DATA\\COURSES\\NAPA.CRS");
     if (!input) return;
     fseek(input, 0, SEEK_END);
     const long size = ftell(input);
@@ -3214,7 +3336,13 @@ static void snapshot(snap_region* out, uint32_t* n) {
 // on the heap and is never inside the two-level closure, so walk it here and
 // append full bike (0x340) + rider-half bytes per scheduler node to the
 // scene file. Version 4 = v3 regions + node blobs + rider blobs.
+static struct {
+    uint32_t address, sub, fraction;
+    int32_t lateral, height;
+} g_ground_queries[512];
+static uint32_t g_ground_query_count;
 static void dump_rider_objects(FILE* out) {
+    g_ground_query_count = 0;
     uint32_t count = 0;
     if (readable(0x0046dcc8, 4)) {
         const uintptr_t S = (uint32_t)RD32(0x0046dcc8);
@@ -3243,6 +3371,26 @@ static void dump_rider_objects(FILE* out) {
         unsigned char bike[0x340];
         memcpy(bike, (void*)(uintptr_t)node, 0x340);
         fwrite(bike, 1, 0x340, out);
+        const uintptr_t sub = (uint32_t)RD32(node + 0x140);
+        if (readable(sub, 0x164) && g_ground_query_count < 512) {
+            uint32_t* random = sim_rand_state();
+            const uint32_t before = random ? *random : 0;
+            const int32_t lateral = RD32(node + 0x28);
+            const uint32_t fraction = (uint32_t)RD32(node + 0x138);
+            const int32_t height = ((int(__fastcall*)(int*, int, uint32_t))0x439b10)(
+                (int*)sub, lateral, fraction);
+            if (random && *random != before) {
+                fputs("# instrumentation failure: ground query consumed RNG\n", g_out);
+                fflush(g_out);
+                ExitProcess(1);
+            }
+            const uint32_t index = g_ground_query_count++;
+            g_ground_queries[index].address = (uint32_t)node;
+            g_ground_queries[index].sub = (uint32_t)sub;
+            g_ground_queries[index].lateral = lateral;
+            g_ground_queries[index].fraction = fraction;
+            g_ground_queries[index].height = height;
+        }
         fwrite(&half_ok, 4, 1, out);
         if (half_ok) {
             unsigned char rh[0x340];
@@ -3256,6 +3404,25 @@ static int capture_frame(void) {
     return g_out && g_pixels && !(g_frame % (uint32_t)g_pixel_every);
 }
 static void __fastcall hook_project(uint32_t a, int* b, int c, int* d, int e) {
+    if (g_view_pose >= 0 && g_race_started) {
+        if (g_sim) ExitProcess(2); /* a posed component cannot be simulation evidence */
+        const int target = g_view_pose + 256;
+        int steps = 0;
+        while (RD32(0x004b6e5c) != target && steps++ < 512) {
+            const int gap = target - RD32(0x004b6e5c);
+            ((void(__fastcall*)(int))0x00454120)(gap > 256 ? 256 : gap < -256 ? -256 : gap);
+        }
+        if (RD32(0x004b6e5c) != target) ExitProcess(3);
+        const uintptr_t row = (uint32_t)RD32(0x0049e820 + ((g_view_pose & 0x7f00) >> 6));
+        g_view_pose_row_ok = readable(row, 12) && RD32(row + 8) == (g_view_pose & ~255);
+        g_view_pose_applied = 1;
+        a = g_view_pose;
+        RD32(0x004bc7e4) = a;
+        d[0] = RD32(0x004bc7d8) = 0;
+        d[1] = RD32(0x004bc7dc) = 150;
+        e = 0;
+        RD8(0x00473498) = 0;
+    }
     if (capture_frame()) {
         snapshot(g_pre, &g_npre);
         g_pre_frame = (int)g_frame;
@@ -3978,8 +4145,8 @@ static void capture_cels(void) {
     int count = 0;
     for (int file = 0; file < 6; ++file) {
         char source_path[256];
-        snprintf(source_path, sizeof source_path, "D:\\ROADRASH\\DATA\\%s", files[file]);
-        FILE* in = fopen(source_path, "rb");
+        snprintf(source_path, sizeof source_path, "DATA\\%s", files[file]);
+        FILE* in = fixture_open(source_path);
         if (!in) continue;
         fseek(in, 0, SEEK_END);
         long size = ftell(in);
@@ -4232,7 +4399,7 @@ static void capture_road_panels(void) {
     ((void(__cdecl*)(void))0x44fb10)();
     unsigned char* global = NULL;
     int* real_ccb[8] = {0};
-    FILE* input = fopen("D:\\ROADRASH\\DATA\\GLOBAL.RSC", "rb");
+    FILE* input = fixture_open("DATA\\GLOBAL.RSC");
     if (input) {
         fseek(input, 0, SEEK_END);
         long size = ftell(input);
@@ -4518,6 +4685,11 @@ static void dump_frame(uint32_t site) {
     rr_log("camera.x", RD32(0x004bc7d8));
     rr_log("camera.height", RD32(0x004bc7dc));
     rr_log("camera.half", RD8(0x00473498));
+    if (g_view_pose >= 0) {
+        rr_log("component.pose.requested", g_view_pose);
+        rr_log("component.pose.applied", g_view_pose_applied);
+        rr_log("component.pose.row_valid", g_view_pose_row_ok);
+    }
     rr_log("view.coordinate_shift", RD32(0x00481fa8));
     rr_log("view.coordinate_mask", (uint32_t)RD32(0x00481ff4));
     if (g_frame == 0) {
@@ -4534,6 +4706,16 @@ static void dump_frame(uint32_t site) {
     if (g_scene_written) {
         rr_log("scene.file", g_frame);
         rr_log("scene.nodes", g_scene_nodes);
+        rr_log("terrain.query.count", g_ground_query_count);
+        for (uint32_t i = 0; i < g_ground_query_count; ++i) {
+            char key[128];
+#define QUERY_LOG(name, value) do { snprintf(key, sizeof key, "terrain.query.%u.%s", g_ground_queries[i].address, name); rr_log(key, value); } while(0)
+            QUERY_LOG("sub", g_ground_queries[i].sub);
+            QUERY_LOG("lateral", g_ground_queries[i].lateral);
+            QUERY_LOG("fraction", g_ground_queries[i].fraction);
+            QUERY_LOG("height", g_ground_queries[i].height);
+#undef QUERY_LOG
+        }
         g_scene_written = 0;
     }
     // Dispatch records buffered during this frame's projection/draw.
@@ -4606,7 +4788,7 @@ static void dump_frame(uint32_t site) {
         reset_actor_records();                                                                               \
         palette_hook_install();                                                                              \
         orig_frame();                                                                                        \
-        if (g_out && !g_sim) dump_frame(site);                                                               \
+        if (g_out && !g_sim && (!g_frontend_probe || g_frontend_trace)) dump_frame(site);                     \
         post_scripted_keys();                                                                                \
         ++g_frame;                                                                                           \
         if (!g_sim && g_quit_after > 0 && g_frame >= (uint32_t)g_quit_after) {                               \
@@ -4626,7 +4808,7 @@ FRAME_HOOK(3, 0x00443249)
 /* Original save-file writer capture (RR_ORACLE_SAVE=1, plan 13 Task 6 Step 1).
    Isolated call at attach time: seeds the 32-byte game state (0x004b8a10)
    and the 10 personality triples for rider index 2 (0x004c6b40,
-   0x00467a6c), points the dialog path (0x004b8900) at C:\save-seed.RRS and
+   0x00467a6c), points the dialog path (0x004b8900) at a capture-owned RRS and
    calls the original writer 0x0042f000, then hex-dumps its 0xa0-byte buffer
    (0x00497090). The reader 0x0042f110 is not called here: it runs the UI
    string setter 0x00444fb0, which is unsafe before a window exists. */
@@ -4649,7 +4831,10 @@ static void capture_save(void) {
         }
     char oldpath[260];
     for (int i = 0; i < 260; ++i) oldpath[i] = (char)RD8(0x004b8900 + i);
-    const char* sp = "C:\\save-seed.RRS";
+    char savepath[MAX_PATH];
+    const int length = snprintf(savepath, sizeof savepath, "%s-save.rrs", g_output);
+    if (length < 0 || length >= MAX_PATH) return;
+    const char* sp = savepath;
     int i = 0;
     while (sp[i]) {
         RD8(0x004b8900 + i) = (uint8_t)sp[i];
@@ -4659,9 +4844,9 @@ static void capture_save(void) {
     ((void(__cdecl*)(void))0x0042f000)();
     for (int j = 0; j < 260; ++j) RD8(0x004b8900 + j) = (uint8_t)oldpath[j];
     if (g_out) {
-        fputs("save.begin\n", g_out);
-        for (int j = 0; j < 0xa0; ++j) fprintf(g_out, "%02x", RD8(0x00497090 + j));
-        fputs("\nsave.end\n", g_out);
+        fputs("frame\t0\nsave.size\t160\n", g_out);
+        for (int j = 0; j < 0xa0; ++j)
+            fprintf(g_out, "save.byte.%d\t%u\n", j, (unsigned)RD8(0x00497090 + j));
         fflush(g_out);
     }
 }
@@ -4785,13 +4970,16 @@ static DWORD WINAPI menu_watchdog(LPVOID arg) {
 static int rr_install_hooks(void) {
     char buf[32], path[MAX_PATH];
     if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND", buf, sizeof buf)) g_frontend_probe = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND_TRACE", buf, sizeof buf)) g_frontend_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_FRAMES", buf, sizeof buf)) g_quit_after = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_UNTIL_FINISH", buf, sizeof buf)) g_until_finish = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_PIXELS", buf, sizeof buf)) g_pixels = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_GROUND_FIXTURE", buf, sizeof buf)) g_ground_fixture = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_GROUND_TRACE", buf, sizeof buf)) g_ground_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_DRIVE", buf, sizeof buf)) {
         g_drive = atoi(buf);
-        if (g_drive < 0 || g_drive > 4) return 0;
+        if (g_drive < 0 || g_drive > 5) return 0;
     }
     if (GetEnvironmentVariableA("RR_ORACLE_SIM", buf, sizeof buf)) g_sim = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_SEED", buf, sizeof buf)) g_seed = atoi(buf);
@@ -4806,10 +4994,12 @@ static int rr_install_hooks(void) {
         g_terrain_seeded = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_TRACE", buf, sizeof buf)) g_terrain_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_SLICE_SAMPLE", buf, sizeof buf)) g_slice_probe = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_VIEW_POSE", buf, sizeof buf)) g_view_pose = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_AI_TARGET_TICK", buf, sizeof buf)) g_ai_probe_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_SOLO", buf, sizeof buf)) g_solo = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_HUMAN", buf, sizeof buf)) g_human = atoi(buf) != 0;
-    if (GetEnvironmentVariableA("RR_ORACLE_KNOCK", buf, sizeof buf)) g_knock_tick = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_KNOCK", buf, sizeof buf))
+        g_knock_initial_tick = g_knock_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_ORDER", buf, sizeof buf)) g_order = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_ORDER_RANGE", buf, sizeof buf))
         g_order_range = (int32_t)strtol(buf, 0, 0);
@@ -5031,6 +5221,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
             }
             return FALSE;
         }
+        if (g_ground_fixture && g_out) {
+            fputs("frame\t0\n", g_out);
+            capture_terrain_ground();
+            fputs("end\n", g_out);
+            fclose(g_out);
+            g_out = NULL;
+            return defer_fixture_exit(g_fixture_error ? 1 : 0);
+        }
         if (g_raster == 2 && g_out) {
             const int width = 640, height = 480;
             void* pixels = malloc((size_t)width * height);
@@ -5057,12 +5255,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved) {
                 fclose(g_out);
                 g_out = NULL;
             }
+            return defer_fixture_exit(g_out || g_fixture_error ? 1 : 0);
         }
         if (g_save && g_out) {
             capture_save();
             fputs("end\n", g_out);
             fclose(g_out);
             g_out = NULL;
+            return defer_fixture_exit(g_fixture_error ? 1 : 0);
         }
         if (g_frontend_probe) {
             HANDLE thread = CreateThread(NULL, 0, frontend_probe, NULL, 0, NULL);

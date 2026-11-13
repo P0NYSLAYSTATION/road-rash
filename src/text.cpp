@@ -1,11 +1,18 @@
 #include "text.hpp"
 #include "assets.hpp"
 #include "pe_strings.hpp"
+#include "utf8_path.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ADVANCES_H
@@ -40,6 +47,173 @@ struct TextRenderer::FontData {
     };
     std::vector<Vdmx> vdmx; // VDMX group for the 1:1 aspect ratio, by ascending ppem (system faces)
     std::vector<std::pair<int, int>> gasp; // (rangeMaxPPEM, behaviour); empty: grid-fit and gray
+#ifdef _WIN32
+    HANDLE registration = nullptr;
+    std::wstring native_file;
+    struct NativeFont {
+        HDC dc = nullptr;
+        HFONT handle = nullptr;
+        HGDIOBJ previous_font = nullptr, previous_bitmap = nullptr;
+        HBITMAP mono = nullptr, menu = nullptr;
+        void* mono_bits = nullptr;
+        void* menu_bits = nullptr;
+        int mono_width = 0, mono_height = 0, mono_stride = 0, pad = 0;
+        int menu_width = 0, menu_height = 0;
+        std::vector<uint16_t> painted;
+        TEXTMETRICA metrics{};
+        ~NativeFont() {
+            if (dc && previous_bitmap) SelectObject(dc, previous_bitmap);
+            if (dc && previous_font) SelectObject(dc, previous_font);
+            if (mono) DeleteObject(mono);
+            if (menu) DeleteObject(menu);
+            if (handle) DeleteObject(handle);
+            if (dc) DeleteDC(dc);
+        }
+        void mono_surface(int width, int height) {
+            if (mono && mono_width >= width && mono_height >= height) return;
+            const bool selected = mono && GetCurrentObject(dc, OBJ_BITMAP) == mono;
+            if (selected) SelectObject(dc, previous_bitmap);
+            if (mono) {
+                DeleteObject(mono);
+                mono = nullptr;
+            }
+            mono_width = std::max(width, mono_width);
+            mono_height = std::max(height, mono_height);
+            mono_stride = ((mono_width + 31) / 32) * 4;
+            struct {
+                BITMAPINFOHEADER header;
+                RGBQUAD colours[2];
+            } info{};
+            info.header.biSize = sizeof(BITMAPINFOHEADER);
+            info.header.biWidth = mono_width;
+            info.header.biHeight = -mono_height;
+            info.header.biPlanes = 1;
+            info.header.biBitCount = 1;
+            info.colours[1].rgbRed = info.colours[1].rgbGreen = info.colours[1].rgbBlue = 255;
+            mono = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&info), DIB_RGB_COLORS, &mono_bits,
+                                    nullptr, 0);
+            if (!mono) throw std::runtime_error("Cannot allocate native GDI glyph surface");
+            if (selected) SelectObject(dc, mono);
+        }
+        void menu_surface(int width, int height) {
+            if (menu && menu_width >= width && menu_height >= height) return;
+            const bool selected = menu && GetCurrentObject(dc, OBJ_BITMAP) == menu;
+            if (selected) SelectObject(dc, mono ? static_cast<HGDIOBJ>(mono) : previous_bitmap);
+            if (menu) {
+                DeleteObject(menu);
+                menu = nullptr;
+            }
+            menu_width = std::max(width, menu_width);
+            menu_height = std::max(height, menu_height);
+            struct {
+                BITMAPINFOHEADER header;
+                DWORD masks[3];
+            } info{};
+            info.header.biSize = sizeof(BITMAPINFOHEADER);
+            info.header.biWidth = menu_width;
+            info.header.biHeight = -menu_height;
+            info.header.biPlanes = 1;
+            info.header.biBitCount = 16;
+            info.header.biCompression = BI_BITFIELDS;
+            info.masks[0] = 0xf800;
+            info.masks[1] = 0x07e0;
+            info.masks[2] = 0x001f;
+            menu = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&info), DIB_RGB_COLORS, &menu_bits,
+                                    nullptr, 0);
+            if (!menu) throw std::runtime_error("Cannot allocate native GDI menu surface");
+            if (selected) SelectObject(dc, menu);
+        }
+        static uint16_t pack565(uint32_t p) {
+            return uint16_t(((p >> 19) << 11) | (((p >> 10) & 63) << 5) | ((p >> 3) & 31));
+        }
+        static uint32_t unpack565(uint16_t p) {
+            const uint32_t r = p >> 11, g = (p >> 5) & 63, b = p & 31;
+            return ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);
+        }
+        template <class Paint>
+        int paint565(RgbImage& image, const TextRect& area, uint32_t colour, Paint&& paint) {
+            const int w = area.right - area.left, h = area.bottom - area.top;
+            menu_surface(w, h);
+            auto* bits = static_cast<uint16_t*>(menu_bits);
+            const int stride = (menu_width + 1) & ~1;
+            bool transparent = false;
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const auto p = image.at(area.left + x, area.top + y);
+                    transparent |= p == 0x01000000;
+                    bits[size_t(y) * stride + x] = pack565(p);
+                }
+            const HGDIOBJ previous = SelectObject(dc, menu);
+            SetTextColor(dc, RGB((colour >> 16) & 255, (colour >> 8) & 255, colour & 255));
+            const int result = paint();
+            GdiFlush();
+            if (transparent) {
+                // The HUD uses a transparency sentinel outside glyph ink.
+                // A white-on-black pass identifies ink even for black text
+                // whose output is identical to the sentinel's black RGB.
+                if (painted.size() < size_t(w) * h) painted.resize(size_t(w) * h);
+                for (int y = 0; y < h; ++y) {
+                    std::copy_n(bits + size_t(y) * stride, w, painted.data() + size_t(y) * w);
+                    std::fill_n(bits + size_t(y) * stride, w, uint16_t(0));
+                }
+                SetTextColor(dc, RGB(255, 255, 255));
+                const int mask_result = paint();
+                GdiFlush();
+                if (mask_result != result) {
+                    SelectObject(dc, previous);
+                    throw std::runtime_error("Native GDI text coverage failed");
+                }
+            }
+            SelectObject(dc, previous);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    auto& p = image.at(area.left + x, area.top + y);
+                    const auto value = bits[size_t(y) * stride + x];
+                    if (transparent) {
+                        if (value) p = unpack565(painted[size_t(y) * w + x]);
+                    } else if (value != pack565(p))
+                        p = unpack565(value);
+                }
+            return result;
+        }
+    };
+    mutable std::map<int, std::unique_ptr<NativeFont>> native_fonts;
+    NativeFont& native_font(Face requested, int height, TextSurface surface) const {
+        if (height <= 0 || height > 4096) throw std::runtime_error("Invalid text cell height");
+        if (const auto it = native_fonts.find(height); it != native_fonts.end()) return *it->second;
+        auto n = std::make_unique<NativeFont>();
+        n->dc = CreateCompatibleDC(nullptr);
+        const bool system = requested == Face::wingdings || requested == Face::courier_new_bold;
+        // The Bold face shares its family name with Regular. Request the
+        // original full name so a weight-zero LOGFONT cannot select Regular.
+        static constexpr const char* requests[] = {
+            "Badloc",    "Futura Condensed Regular", "Futura Condensed Bold", "Futura Condensed Demi Regular",
+            "Wingdings", "New Courier Bold"};
+        const char* name = requests[static_cast<size_t>(requested)];
+        if (!n->dc) throw std::runtime_error("Cannot create native GDI font DC");
+        n->pad = std::max(96, height * 2);
+        n->mono_width = std::max(320, height * 8);
+        n->mono_height = std::max(288, height * 8);
+        n->mono_stride = ((n->mono_width + 31) / 32) * 4;
+        if (surface == TextSurface::rgb565) {
+            n->menu_surface(n->mono_width, n->mono_height);
+            n->previous_bitmap = SelectObject(n->dc, n->menu);
+        } else {
+            n->mono_surface(n->mono_width, n->mono_height);
+            n->previous_bitmap = SelectObject(n->dc, n->mono);
+        }
+        n->handle =
+            CreateFontA(height, 0, 0, 0, system ? (symbol ? 400 : 700) : 0, 0, 0, 0,
+                        symbol ? SYMBOL_CHARSET : ANSI_CHARSET, system ? OUT_TT_PRECIS : OUT_TT_ONLY_PRECIS,
+                        0, DEFAULT_QUALITY, system ? (symbol ? 4 : 5) : 0, name);
+        if (!n->handle) throw std::runtime_error("Cannot create native GDI font");
+        n->previous_font = SelectObject(n->dc, n->handle);
+        SetBkMode(n->dc, TRANSPARENT);
+        SetTextAlign(n->dc, TA_TOP | TA_LEFT | TA_NOUPDATECP);
+        if (!GetTextMetricsA(n->dc, &n->metrics)) throw std::runtime_error("Cannot measure native GDI font");
+        return *native_fonts.emplace(height, std::move(n)).first->second;
+    }
+#endif
     GdiSize size(int height) const;
     bool gray(int ppem) const {
         for (const auto& [max_ppem, flags] : gasp)
@@ -47,6 +221,11 @@ struct TextRenderer::FontData {
         return gasp.empty();
     }
     ~FontData() {
+#ifdef _WIN32
+        native_fonts.clear();
+        if (registration) RemoveFontMemResourceEx(registration);
+        if (!native_file.empty()) RemoveFontResourceExW(native_file.c_str(), 0, nullptr);
+#endif
         if (face) FT_Done_Face(face);
         if (library) FT_Done_FreeType(library);
     }
@@ -77,7 +256,8 @@ GdiSize TextRenderer::FontData::size(int height) const {
 // Opens the face. use_os2 selects OS/2 win metrics (the game faces); without
 // it, or without an OS/2 table, the hhea ascender/descender stand in.
 std::unique_ptr<TextRenderer::FontData> TextRenderer::open_font(std::vector<uint8_t> bytes, bool use_os2,
-                                                                const std::string& what) {
+                                                                const std::string& what,
+                                                                bool register_native) {
     auto f = std::make_unique<TextRenderer::FontData>();
     f->bytes = std::move(bytes);
     if (FT_Init_FreeType(&f->library)) throw std::runtime_error("FreeType initialisation failed");
@@ -139,6 +319,16 @@ std::unique_ptr<TextRenderer::FontData> TextRenderer::open_font(std::vector<uint
             break;
         }
     }
+#ifdef _WIN32
+    if (register_native) {
+        DWORD count = 0;
+        f->registration = AddFontMemResourceEx(f->bytes.data(), DWORD(f->bytes.size()), nullptr, &count);
+        if (!f->registration || !count)
+            throw std::runtime_error("Cannot register original TrueType font" + what);
+    }
+#else
+    (void)register_native;
+#endif
     return f;
 }
 
@@ -188,8 +378,21 @@ void TextRenderer::load_disc_faces(const Assets& assets) {
                                                   {Face::futura_bold, "TEXT/FUTB.DLL"},
                                                   {Face::futura_demi, "TEXT/FUTD.DLL"},
                                                   {Face::futura_regular, "TEXT/FUTR.DLL"}};
-    for (const auto& [face, path] : files)
+    for (const auto& [face, path] : files) {
+#ifdef _WIN32
+        // Match the original's AddFontResource registration. Private memory
+        // fonts change GDI's fallback metrics even for installed system faces:
+        // Courier New Bold DEL at height 18 becomes 5 rather than 10 on RGB565.
+        auto loaded = open_font(assets.read(path), true, std::string(" ") + path, false);
+        const auto native_path = path_from_utf8(assets.root() + "/" + path).wstring();
+        if (!AddFontResourceExW(native_path.c_str(), 0, nullptr))
+            throw std::runtime_error(std::string("Cannot register original font ") + path);
+        loaded->native_file = native_path;
+        fonts_[face] = std::move(loaded);
+#else
         fonts_[face] = open_font(assets.read(path), true, std::string(" ") + path);
+#endif
+    }
 }
 
 TextRenderer::TextRenderer(const Assets& assets, TextSurface surface) : surface_(surface) {
@@ -199,7 +402,9 @@ TextRenderer::TextRenderer(const Assets& assets, TextSurface surface) : surface_
             std::vector<uint8_t> bytes = read_file(path);
             if (bytes.empty()) continue;
             try {
-                fonts_[face] = open_font(std::move(bytes), true, " " + path);
+                // Installed system faces retain Windows' font linking. A
+                // second private registration changes fallback advances.
+                fonts_[face] = open_font(std::move(bytes), true, " " + path, false);
                 break;
             } catch (const std::runtime_error&) {
             }
@@ -216,7 +421,7 @@ TextRenderer::TextRenderer(const Assets& assets, TextSurface surface,
     load_disc_faces(assets);
     for (const auto& [face, path] : system_fonts)
         fonts_[face] = path.empty() ? open_font(builtin_wine_wingdings(), true, " (built-in Wine Wingdings)")
-                                    : open_font(read_file(path), true, " " + path);
+                                    : open_font(read_file(path), true, " " + path, false);
 }
 
 TextRenderer::TextRenderer(Face face, std::vector<uint8_t> ttf) {
@@ -253,6 +458,56 @@ const TextRenderer::Glyph& TextRenderer::glyph(Face face, int height, uint8_t ch
     const auto it = cache_.find(key);
     if (it != cache_.end()) return it->second;
     const FontData& f = font(face);
+#ifdef _WIN32
+    // TextOut on the original indexed race surface uses Windows' monochrome
+    // rasterizer, including its byte mapping, fallback glyphs and cell metrics.
+    // Keep FreeType for other hosts; a Wine bitmap is not a Windows golden.
+    auto& n = f.native_font(face, height, surface_);
+    Glyph native;
+    const char byte = char(ch);
+    SIZE extent{};
+    // Windows' ANSI width cache can retain a monochrome fallback advance on
+    // a colour DC (Courier New Bold DEL: 5 versus the original RGB565 probe's
+    // 10). For fixed-pitch colour text, explicit CP1252-to-Unicode measurement
+    // preserves the original cell advance. Proportional and symbol faces keep
+    // their ANSI fallback/byte behavior, which the probes also distinguish.
+    const wchar_t code = wchar_t(cp1252_codepoint(ch));
+    const bool measured =
+        (surface_ == TextSurface::rgb565 && !f.symbol && !(n.metrics.tmPitchAndFamily & TMPF_FIXED_PITCH))
+            ? GetTextExtentPoint32W(n.dc, &code, 1, &extent) != 0
+            : GetTextExtentPoint32A(n.dc, &byte, 1, &extent) != 0;
+    if (!measured) throw std::runtime_error("Cannot measure native GDI glyph");
+    native.advance = extent.cx;
+    if (surface_ == TextSurface::rgb565) return cache_.emplace(key, std::move(native)).first->second;
+    memset(n.mono_bits, 0, size_t(n.mono_stride) * n.mono_height);
+    SetTextColor(n.dc, RGB(255, 255, 255));
+    if (!TextOutA(n.dc, n.pad, n.pad, &byte, 1)) throw std::runtime_error("Cannot draw native GDI glyph");
+    GdiFlush();
+    auto ink = [&](int x, int y) {
+        return (static_cast<const uint8_t*>(n.mono_bits)[size_t(y) * n.mono_stride + x / 8] &
+                (0x80u >> (x & 7))) != 0;
+    };
+    int left = n.mono_width, top = n.mono_height, right = -1, bottom = -1;
+    for (int y = 0; y < n.mono_height; ++y)
+        for (int x = 0; x < n.mono_width; ++x)
+            if (ink(x, y)) {
+                left = std::min(left, x);
+                right = std::max(right, x);
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+    if (right >= left) {
+        native.x0 = left - n.pad;
+        native.y0 = top - n.pad;
+        native.w = right - left + 1;
+        native.h = bottom - top + 1;
+        native.ink.resize(size_t(native.w) * native.h);
+        for (int y = 0; y < native.h; ++y)
+            for (int x = 0; x < native.w; ++x)
+                native.ink[size_t(y) * native.w + x] = ink(left + x, top + y) ? 16 : 0;
+    }
+    return cache_.emplace(key, std::move(native)).first->second;
+#else
     // Wine-GDI TextOutA glyphs (tools/glyphprobe.c, all four faces at 11 heights):
     // FreeType at the integer GDI ppem with v40 hinting; the hinted metric box
     // floored and ceiled to whole pixels; top at tmAscent - ceil(bearingY), rows
@@ -310,6 +565,7 @@ const TextRenderer::Glyph& TextRenderer::glyph(Face face, int height, uint8_t ch
         }
     }
     return cache_.emplace(key, std::move(g)).first->second;
+#endif
 }
 
 int TextRenderer::width(Face face, int height, const std::string& text) const {
@@ -319,6 +575,9 @@ int TextRenderer::width(Face face, int height, const std::string& text) const {
 }
 
 int TextRenderer::line_height(Face face, int height) const {
+#ifdef _WIN32
+    return font(face).native_font(face, height, surface_).metrics.tmHeight;
+#else
     // GDI multiline pitch: tmAscent + tmDescent at the ppem scale (textprobe
     // TEXTMETRIC sweeps; e.g. 32px Futura Regular advances 33, not 32).
     const FontData& f = font(face);
@@ -327,6 +586,7 @@ int TextRenderer::line_height(Face face, int height) const {
     const int ppem = size.ppem;
     return (f.win_ascent * ppem + f.units_per_em / 2) / f.units_per_em +
            (f.win_descent * ppem + f.units_per_em / 2) / f.units_per_em;
+#endif
 }
 
 namespace {
@@ -369,6 +629,35 @@ void TextRenderer::draw(RgbImage& image, Face face, int height, int x, int y, ui
 
 void TextRenderer::draw_clipped(RgbImage& image, const TextRect* clip, Face face, int height, int x, int y,
                                 uint32_t rgb, const std::string& text) const {
+#ifdef _WIN32
+    if (surface_ == TextSurface::rgb565 && !text.empty()) {
+        // Let Windows blend into the actual 16-bit surface. Coverage from a
+        // 32-bit ClearType DIB cannot be reduced to Wine's 17-level gray ramp.
+        auto& n = font(face).native_font(face, height, surface_);
+        int left = std::max(0, x - height * 2), top = std::max(0, y - height * 2);
+        int right = std::min(image.width, x + width(face, height, text) + height * 2);
+        int bottom = std::min(image.height, y + height * 3);
+        if (clip) {
+            left = std::max(left, clip->left);
+            right = std::min(right, clip->right);
+            top = std::max(top, clip->top);
+            bottom = std::min(bottom, clip->bottom);
+        }
+        if (right <= left || bottom <= top) return;
+        const int result = n.paint565(image, {left, top, right, bottom}, rgb, [&] {
+            int pen = x;
+            bool ok = true;
+            for (unsigned char ch : text) {
+                const char byte = char(ch);
+                ok &= TextOutA(n.dc, pen - left, y - top, &byte, 1) != 0;
+                pen += glyph(face, height, ch).advance;
+            }
+            return ok ? 1 : 0;
+        });
+        if (!result) throw std::runtime_error("Cannot draw native GDI menu text");
+        return;
+    }
+#endif
     const bool smooth = surface_ == TextSurface::rgb565;
     if (smooth) rgb = expand565(rgb);
     for (unsigned char c : text) {
@@ -390,6 +679,46 @@ void TextRenderer::draw_clipped(RgbImage& image, const TextRect* clip, Face face
 
 int TextRenderer::draw_box(RgbImage* image, Face face, int height, TextRect& rect, uint32_t rgb,
                            const std::string& text, unsigned flags) const {
+#ifdef _WIN32
+    auto& n = font(face).native_font(face, height, surface_);
+    std::vector<char> buffer(text.begin(), text.end());
+    buffer.resize(text.size() + 5, 0); // DrawTextEx permits four appended characters.
+    RECT measured{rect.left, rect.top, rect.right, rect.bottom};
+    const int measured_height =
+        DrawTextExA(n.dc, buffer.data(), int(text.size()), &measured, flags | DT_CALCRECT, nullptr);
+    if (flags & dt::calcrect) {
+        rect = {measured.left, measured.top, measured.right, measured.bottom};
+        return measured_height;
+    }
+    if (!image || text.empty()) return measured_height;
+    TextRect area{0, 0, image->width, image->height};
+    if (!(flags & dt::noclip)) {
+        area.left = std::max(area.left, rect.left);
+        area.top = std::max(area.top, rect.top);
+        area.right = std::min(area.right, rect.right);
+        area.bottom = std::min(area.bottom, rect.bottom);
+    }
+    if (area.right <= area.left || area.bottom <= area.top) return measured_height;
+    auto paint = [&] {
+        RECT box{rect.left - area.left, rect.top - area.top, rect.right - area.left, rect.bottom - area.top};
+        std::copy(text.begin(), text.end(), buffer.begin());
+        std::fill(buffer.begin() + text.size(), buffer.end(), 0);
+        return DrawTextExA(n.dc, buffer.data(), int(text.size()), &box, flags, nullptr);
+    };
+    if (surface_ == TextSurface::rgb565) return n.paint565(*image, area, rgb, paint);
+    const int w = area.right - area.left, h = area.bottom - area.top;
+    n.mono_surface(w, h);
+    memset(n.mono_bits, 0, size_t(n.mono_stride) * n.mono_height);
+    SetTextColor(n.dc, RGB(255, 255, 255));
+    const int result = paint();
+    GdiFlush();
+    const auto* bits = static_cast<const uint8_t*>(n.mono_bits);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            if (bits[size_t(y) * n.mono_stride + x / 8] & (0x80u >> (x & 7)))
+                image->at(area.left + x, area.top + y) = rgb;
+    return result;
+#else
     // Split into lines: hard breaks on '\n' ("\r" ignored); word wrap at spaces when requested.
     std::vector<std::string> lines;
     const int max_width = rect.right - rect.left;
@@ -486,5 +815,6 @@ int TextRenderer::draw_box(RgbImage* image, Face face, int height, TextRect& rec
         y += pitch;
     }
     return total;
+#endif
 }
 } // namespace rr

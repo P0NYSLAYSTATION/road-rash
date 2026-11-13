@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "actor_render.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -6,7 +7,7 @@
 #include <iostream>
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Imported actor projection corpus absent\n";
             return 0;

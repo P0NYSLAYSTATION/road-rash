@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "course.hpp"
 #include "exe_tables.hpp"
@@ -90,7 +91,7 @@ int main() {
                   "Opposite-half intersection endpoint survives the route annotation");
         }
     }
-    rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+    rr::Assets assets(std::getenv("RR_ASSETS") ? std::getenv("RR_ASSETS") : rr::test::assets_root());
     if (!assets.exists("DATA/COURSES/NAPA.CRS")) {
         std::cout << "No imported course corpus\n";
         return failures ? 1 : 0;
@@ -313,7 +314,7 @@ int main() {
     if (std::filesystem::exists(path)) {
         try {
             const auto capture = rr::golden::load(path);
-            if (capture.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+            if (!rr::golden::original_executable(capture.exe) ||
                 capture.frames.size() != 1)
                 throw std::runtime_error("Wrong course event oracle");
             const auto& fields = capture.frames.at(0);

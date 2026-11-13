@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "frontend.hpp"
 #include "native_screens.hpp"
@@ -105,8 +106,7 @@ int main(int argc, char** argv) {
     check(quantise565(0xffffff) == 0xffffff && quantise565(0x070707) == 0x000400, "quantise565");
     check(darken555(0xffffff) == 0x7b797b && darken555(0x080808) == 0, "darken555");
 
-    const std::string root =
-        argc > 1 && std::string(argv[1]) != "--dump" ? argv[1] : RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root = argc > 1 && std::string(argv[1]) != "--dump" ? argv[1] : rr::test::assets_root();
     std::string dump, menu_corpus;
     auto usage = [&](const char* flag) -> std::string {
         for (int i = 1; i + 1 < argc; ++i)
@@ -116,12 +116,43 @@ int main(int argc, char** argv) {
     dump = usage("--dump");
     menu_corpus = usage("--menu-corpus");
     if (menu_corpus.empty()) menu_corpus = RR_SOURCE_DIR "/analysis/oracle";
-    Assets assets(root);
+    Assets assets(root, rr::test::media_root());
     if (!assets.exists("ROADRASH.EXE")) {
         std::cout << "skip: no disc\n";
         return failures ? 1 : 77;
     }
+    if (rr::test::require_frontend_reference() && rr::test::frontend_reference("").empty()) {
+        std::cerr << "FAIL original frontend acceptance requires RR_TEST_FRONTEND_REFERENCE pointing to a "
+                     "completed capture run\n";
+        return 1;
+    }
     const auto exe = assets.read("ROADRASH.EXE");
+    std::array<char, 20> reference_alias{};
+    if (rr::test::require_frontend_reference()) {
+        std::ifstream state(rr::test::frontend_reference("") + "fe-career-start.state", std::ios::binary);
+        std::array<char, 32> bytes{};
+        if (state.read(bytes.data(), bytes.size()))
+            std::copy_n(bytes.begin() + 12, reference_alias.size(), reference_alias.begin());
+        else
+            check(false, "original frontend profile state is present");
+    }
+    auto reference_picture = [&](const std::string& label, const std::string& prefix, int fallback) {
+        if (!rr::test::require_frontend_reference()) return fallback;
+        std::ifstream trace(rr::test::frontend_reference("") + "trace.log");
+        std::string line, selected;
+        while (std::getline(trace, line)) {
+            if (line.rfind("# fe command capture ", 0) == 0) selected = line.substr(21);
+            if (selected != label) continue;
+            unsigned slot;
+            char name[128];
+            if (std::sscanf(line.c_str(), "# fe cache %u %127s", &slot, name) == 2 &&
+                std::string(name).rfind(prefix, 0) == 0) {
+                const int number = std::atoi(name + prefix.size());
+                if (number >= 1 && number <= 6) return number;
+            }
+        }
+        return fallback;
+    };
     const TextRenderer text(assets, TextSurface::rgb565);
     // Picture pipeline vs the original's decoded RGB555 image cache
     // (0x004859c0 rows, dumped by oracle/frontend_probe.h after each capture;
@@ -133,44 +164,52 @@ int main(int argc, char** argv) {
         size_t compared = 0;
         const std::filesystem::path acc_root = RR_SOURCE_DIR "/analysis/frontend";
         std::error_code ec;
-        for (const auto& day : std::filesystem::directory_iterator(acc_root, ec)) {
-            if (day.path().filename().string().rfind("acceptance-", 0) != 0) continue;
-            for (const auto& run : std::filesystem::directory_iterator(day.path(), ec)) {
-                std::ifstream trace(run.path() / "trace.log");
-                std::string line, label;
-                std::map<std::string, std::string> done; // raw file -> picture
-                while (std::getline(trace, line)) {
-                    if (line.rfind("# fe c", 0) != 0) continue;
-                    if (line.rfind("# fe command capture ", 0) == 0) label = line.substr(21);
-                    unsigned slot = 0;
-                    char name[128] = {};
-                    if (label.empty() || std::sscanf(line.c_str(), "# fe cache %u %127s", &slot, name) != 2)
-                        continue;
-                    const std::string raw =
-                        (run.path() / ("fe-" + label + "-cache" + std::to_string(slot) + ".raw")).string();
-                    if (done.count(raw) || !std::filesystem::exists(raw)) continue;
-                    done[raw] = name;
-                }
-                for (const auto& [raw, name] : done) {
-                    std::ifstream f(raw, std::ios::binary);
-                    std::vector<uint16_t> px(640 * 480);
-                    f.read(reinterpret_cast<char*>(px.data()), std::streamsize(px.size() * 2));
-                    if (!f) continue;
-                    const RgbImage pic = compose_menu_picture(assets, name);
-                    size_t bad = 0;
-                    for (int y = 0; y < 480; ++y)
-                        for (int x = 0; x < 640; ++x) {
-                            const uint32_t p = pic.at(x, y), q = px[size_t(y) * 640 + x];
-                            if ((p >> 19 & 31) != (q >> 10 & 31) || (p >> 11 & 31) != (q >> 5 & 31) ||
-                                (p >> 3 & 31) != (q & 31))
-                                ++bad;
-                        }
-                    check(bad == 0, "picture " + name + " bit-exact vs original cache (" +
-                                        std::to_string(bad) + " px differ) " + raw);
-                    ++compared;
-                }
+        std::vector<std::filesystem::path> runs;
+        if (rr::test::require_frontend_reference())
+            runs.emplace_back(rr::test::frontend_reference(""));
+        else
+            for (const auto& day : std::filesystem::directory_iterator(acc_root, ec)) {
+                if (day.path().filename().string().rfind("acceptance-", 0) != 0) continue;
+                for (const auto& run : std::filesystem::directory_iterator(day.path(), ec))
+                    runs.push_back(run.path());
+            }
+        for (const auto& run : runs) {
+            std::ifstream trace(run / "trace.log");
+            std::string line, label;
+            std::map<std::string, std::string> done; // raw file -> picture
+            while (std::getline(trace, line)) {
+                if (line.rfind("# fe c", 0) != 0) continue;
+                if (line.rfind("# fe command capture ", 0) == 0) label = line.substr(21);
+                unsigned slot = 0;
+                char name[128] = {};
+                if (label.empty() || std::sscanf(line.c_str(), "# fe cache %u %127s", &slot, name) != 2)
+                    continue;
+                const std::string raw =
+                    (run / ("fe-" + label + "-cache" + std::to_string(slot) + ".raw")).string();
+                if (done.count(raw) || !std::filesystem::exists(raw)) continue;
+                done[raw] = name;
+            }
+            for (const auto& [raw, name] : done) {
+                std::ifstream f(raw, std::ios::binary);
+                std::vector<uint16_t> px(640 * 480);
+                f.read(reinterpret_cast<char*>(px.data()), std::streamsize(px.size() * 2));
+                if (!f) continue;
+                const RgbImage pic = compose_menu_picture(assets, name);
+                size_t bad = 0;
+                for (int y = 0; y < 480; ++y)
+                    for (int x = 0; x < 640; ++x) {
+                        const uint32_t p = pic.at(x, y), q = px[size_t(y) * 640 + x];
+                        if ((p >> 19 & 31) != (q >> 10 & 31) || (p >> 11 & 31) != (q >> 5 & 31) ||
+                            (p >> 3 & 31) != (q & 31))
+                            ++bad;
+                    }
+                check(bad == 0, "picture " + name + " bit-exact vs original cache (" + std::to_string(bad) +
+                                    " px differ) " + raw);
+                ++compared;
             }
         }
+        check(!rr::test::require_frontend_reference() || compared > 0,
+              "configured frontend corpus contains original picture caches");
         std::cout << "original picture caches compared bit-exact: " << compared << "\n";
     }
     const auto tables = read_career_tables(exe);
@@ -242,6 +281,7 @@ int main(int argc, char** argv) {
             .string();
     std::filesystem::remove_all(saves);
     Career career;
+    if (rr::test::require_frontend_reference()) career.state.name = reference_alias;
     Settings settings;
     settings.video_mode = 2;
     const auto res = read_string_resources(assets.read("TEXT/ENU.DLL"));
@@ -381,7 +421,10 @@ int main(int argc, char** argv) {
                                     double exact_min = 0.12, double big_max = 0.05, double cover_max = 0.75) {
         RgbImage gold;
         if (!read_bmp_24(golden_path, gold)) {
-            std::cout << "skip: no " << name << " golden\n";
+            if (rr::test::require_frontend_reference())
+                check(false, "missing configured original frontend reference: " + golden_path);
+            else
+                std::cout << "skip: no " << name << " golden\n";
             return;
         }
         auto masked = [&](int x, int y) {
@@ -400,7 +443,10 @@ int main(int argc, char** argv) {
                             int max_diff) {
         RgbImage gold;
         if (!read_bmp_24(golden_path, gold)) {
-            std::cout << "skip: no " << name << " golden\n";
+            if (rr::test::require_frontend_reference())
+                check(false, "missing configured original frontend reference: " + golden_path);
+            else
+                std::cout << "skip: no " << name << " golden\n";
             return;
         }
         check(gold.width == frame.width && gold.height == frame.height, name + " full-frame size");
@@ -419,6 +465,19 @@ int main(int argc, char** argv) {
         rr::system_font_paths(rr::Face::wingdings).front().find("/System/Library/Fonts/") == 0;
     // Elsewhere the focus arrow (at most 119 pixels) may differ from the goldens.
     const int arrow_slack = host_wingdings ? 0 : 119;
+    RgbImage enabled_main;
+    if (rr::test::require_frontend_reference()) {
+        Career original_career = career;
+        Settings original_settings = settings;
+        Frontend original_main(assets, text, strings, credits, data, tables, original_career,
+                               original_settings, saves);
+        // The actual Windows game attaches its transport before presenting
+        // this screen. Compare the same enabled multiplayer capability.
+        original_main.net_attach([] { return std::unique_ptr<net::Channel>{}; }, {});
+        original_main.enter(screen_id::main_menu);
+        original_main.draw(enabled_main);
+    }
+    const RgbImage& main_frame = rr::test::require_frontend_reference() ? enabled_main : img;
     { // Plan 13 Task 6 Step 2, first slice: screen 9 vs the original
         // RR_ORACLE_MENU=9 capture (menu-09-<date>.bmp, git-ignored, skip 77).
         // Masked: title, description box and button row (text/chrome: GDI
@@ -426,7 +485,11 @@ int main(int argc, char** argv) {
         // fills compare directly; thresholds are characterization pins, since
         // JPEG-decoder deltas keep full-pixel acceptance open.
         RgbImage gold;
-        if (!read_bmp_24(menu_corpus + "/menu-09-20261026.bmp", gold)) {
+        const std::string main_reference = rr::test::require_frontend_reference()
+                                               ? rr::test::frontend_reference("") + "fe-main.bmp"
+                                               : menu_corpus + "/menu-09-20261026.bmp";
+        if (!read_bmp_24(main_reference, gold)) {
+            check(!rr::test::require_frontend_reference(), "missing configured original main-menu reference");
             std::cout << "skip: no menu-09 golden\n";
         } else {
             auto masked = [&](int x, int y) {
@@ -435,17 +498,19 @@ int main(int argc, char** argv) {
                 if (y >= 405) return true;                       // button row
                 return false;
             };
-            masked_compare("menu-09", img, gold, masked, 0.65);
+            masked_compare("menu-09", main_frame, gold, masked, 0.65);
             // Full frame: only Mano-A-Mano differs, greyed because this
             // frontend has no network transport (rr-game enables the row).
-            full_compare("menu-09", menu_corpus + "/menu-09-20261026.bmp", img, 852 + arrow_slack);
+            full_compare("menu-09", main_reference, main_frame,
+                         rr::test::require_frontend_reference() ? 0 : 852 + arrow_slack);
         }
     }
     { // Screen 9 again: the Wine frontend-acceptance main-menu capture.
         RgbImage gold;
-        const std::string dir = std::string(
+        const std::string dir = rr::test::frontend_reference(
             RR_SOURCE_DIR "/analysis/frontend/acceptance-20261026/1f1e79684e344a44af2e1e99dc1b9509/");
         if (!read_bmp_24(dir + "fe-main.bmp", gold)) {
+            check(!rr::test::require_frontend_reference(), "missing configured fe-main reference");
             std::cout << "skip: no fe-main golden\n";
         } else {
             auto masked = [&](int x, int y) {
@@ -454,9 +519,10 @@ int main(int argc, char** argv) {
                 if (y >= 405) return true;
                 return false;
             };
-            masked_compare("fe-main", img, gold, masked);
+            masked_compare("fe-main", main_frame, gold, masked);
             // Only Mano-A-Mano differs (greyed without a network transport).
-            full_compare("fe-main", dir + "fe-main.bmp", img, 852 + arrow_slack);
+            full_compare("fe-main", dir + "fe-main.bmp", main_frame,
+                         rr::test::require_frontend_reference() ? 0 : 852 + arrow_slack);
         }
     }
     // Plan 19 Task 5: draw at scale 2 â€” focus rectangles double exactly and
@@ -572,12 +638,16 @@ int main(int argc, char** argv) {
           "Cydney starts on the street with $1000");
     snap("street");
     masked_compare_items("fe-street",
-                         std::string(RR_SOURCE_DIR "/analysis/frontend/acceptance-20261026/34069bf326"
-                                                   "2241b3bdf4efa59c500751/fe-career-start.bmp"),
+                         rr::test::frontend_reference(RR_SOURCE_DIR
+                                                      "/analysis/frontend/acceptance-20261026/34069bf326"
+                                                      "2241b3bdf4efa59c500751/") +
+                             "fe-career-start.bmp",
                          img, fe.items());
     full_compare("fe-street",
-                 std::string(RR_SOURCE_DIR "/analysis/frontend/acceptance-20261026/34069bf326"
-                                           "2241b3bdf4efa59c500751/fe-career-start.bmp"),
+                 rr::test::frontend_reference(RR_SOURCE_DIR
+                                              "/analysis/frontend/acceptance-20261026/34069bf326"
+                                              "2241b3bdf4efa59c500751/") +
+                     "fe-career-start.bmp",
                  img, arrow_slack);
     // Olley's -> Rat bikes -> first bike -> Buy.
     key("right");
@@ -1037,14 +1107,17 @@ int main(int argc, char** argv) {
         check(threw, "rebind range checked");
     }
     fe.reset_keys(false);
-    check(settings.controls == default_keyboard_controls() && settings.custom_controls,
+    check(settings.controls == modern_keyboard_controls() && settings.custom_controls,
           "keyboard defaults restore");
     fe.rebind_key(0, 0x001e);
     check(settings.controls[0] == 0x001e, "rebind stores code");
     fe.rebind_key(1, 0x001e); // conflict: action 0 unbound, not swapped
     check(settings.controls[1] == 0x001e && settings.controls[0] == 0, "rebind conflict unbinds");
+    settings.controller_bindings.fill(7);
     fe.reset_keys(true);
-    check(settings.controls == default_joystick_controls(), "joystick defaults restore");
+    check(settings.controls == modern_keyboard_controls() &&
+              settings.controller_bindings == default_settings().controller_bindings,
+          "controller defaults restore modern bindings and keyboard controls");
     // Press-a-key capture (plan 18 Task 7): select a 0x12 row, press W to bind,
     // Escape cancels with no change and disarms (focus moves on next Down).
     settings.custom_controls = false;
@@ -1187,11 +1260,12 @@ int main(int argc, char** argv) {
     // override; jukebox/graphics inherit it as the original does (trace
     // cache 1 keeps Restroom/Rest3 through all four screens).
     {
-        const std::string acc = std::string(
+        const std::string acc = rr::test::frontend_reference(
             RR_SOURCE_DIR "/analysis/frontend/acceptance-20261026/1f1e79684e344a44af2e1e99dc1b9509/");
         FrontendData data2 = read_frontend_data(exe);
         add_native_screens(data2, false);
         Career career2;
+        if (rr::test::require_frontend_reference()) career2.state.name = reference_alias;
         Settings settings2;
         settings2.video_mode = 2;
         Frontend fe2(assets, text, strings, credits, data2, tables, career2, settings2, saves);
@@ -1241,7 +1315,7 @@ int main(int argc, char** argv) {
         key2("select");
         check(fe2.screen() == 0x0f && career2.state.character == 3 && career2.state.cash == 1000,
               "acceptance replay reaches the street as Cydney");
-        fe2.set_rest_picture_for_test(3);
+        fe2.set_rest_picture_for_test(reference_picture("restroom", "Restroom/Rest", 3));
         fe2.enter(0x10);
         check(fe2.screen() == 0x10, "acceptance replay reaches the restroom");
         snap2("acc-restroom");
@@ -1273,11 +1347,11 @@ int main(int argc, char** argv) {
         // course/shop/result screens in script order so backgrounds chain
         // exactly like the oracle `enter` sequence. Result variants come
         // from the run-2 trace caches (Wreck4/Bust4/Win4/Lose1).
-        const std::string acc2 = std::string(
+        const std::string acc2 = rr::test::frontend_reference(
             RR_SOURCE_DIR "/analysis/frontend/acceptance-20261027/40c6e154036a4fac89e4101116bc7ed0/");
-        const std::string acc3 = std::string(
+        const std::string acc3 = rr::test::frontend_reference(
             RR_SOURCE_DIR "/analysis/frontend/acceptance-20261027/6fc8190a10464dc39bd7af9feb32cfe3/");
-        const std::string acc4 = std::string(
+        const std::string acc4 = rr::test::frontend_reference(
             RR_SOURCE_DIR "/analysis/frontend/acceptance-20261027/3e66c5e3d33d4f39b4732dad8805686c/");
         fe2.enter(0x0a);
         check(fe2.screen() == 0x0a, "acceptance replay reaches Thrash courses");

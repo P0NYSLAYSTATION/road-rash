@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "building_panels.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -67,7 +68,7 @@ int main(int argc, char** argv) {
             std::cout << values.at("building.count") << " original building cases, " << count
                       << " nodes match\n";
             const auto depths =
-                rr::read_depth_table(rr::Assets(RR_SOURCE_DIR "/../cdrom/ROADRASH").read("ROADRASH.EXE"));
+                rr::read_depth_table(rr::Assets(rr::test::assets_root()).read("ROADRASH.EXE"));
             size_t shoulders = 0;
             for (int c = 0; c < values.at("building.count"); ++c) {
                 const std::string prefix = "building.shoulder." + std::to_string(c) + ".";

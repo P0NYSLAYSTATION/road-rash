@@ -12,9 +12,6 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-if os.name == 'nt':  # plan 33b: deploy.py runs on the Linux VPS host only (fcntl locks)
-    print('net_deploy: skipped on Windows (Linux-only deploy tool)')
-    sys.exit(77)
 spec = importlib.util.spec_from_file_location('deploy_net', ROOT/'deploy/road-rash-net/deploy.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)

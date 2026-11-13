@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "hud.hpp"
 #include <algorithm>
 #include <cmath>
@@ -143,7 +144,7 @@ int main() {
             if (rr::fade_out_lut(63)[255] >= rr::fade_out_lut(62)[255] && rr::fade_out_lut(62)[255] != 0)
                 throw std::runtime_error("Fade-out not decreasing");
         }
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("ROADRASH.EXE")) {
             std::cout << "Meter levels pass; imported HUD corpus absent\n";
             return 0;

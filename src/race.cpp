@@ -1174,10 +1174,14 @@ void Race::set_ground_layout(const std::vector<uint32_t>& sizes) {
 
 void Race::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample& path,
                               const TerrainSlice& slice) {
-    if (!ground_base_ || slice.type != 1 && slice.type != 4 || section >= ground_base_->size()) return;
+    if (!ground_base_ || section >= ground_base_->size()) return;
     const size_t i = (*ground_base_)[section] + local;
     if (i >= ground_.size()) return;
     RingGround& g = ground_.mut(i);
+    if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
+        if (g.set) g.slice.side_heights.reset();
+        return;
+    }
     if (!g.set) {
         RouteSample s{};
         s.section = section;
@@ -2411,8 +2415,19 @@ void Race::walls(Rider& r, const Bike* owner) {
 void Race::vertical(Rider& r) {
     // 0x0043a190 with imported terrain ground height from 0x00439b10.
     Bike& b = r.bike;
-    const SliceEdges e = edges(r, r.sample);
-    const auto& s = route_of(r)[r.sample].path;
+    const auto& route = route_of(r);
+    auto physical = [&](size_t sample) {
+        const auto* ring = live_schedule_ ? nearest_ring(b.i32(0x1c)) : nullptr;
+        if (!ring) return std::min(sample, route.size() - 1);
+        const int64_t back = ring->back_q8() >> 8;
+        return size_t(std::clamp<int64_t>(back + ((int64_t(sample) - back) & 127),
+                                          0, int64_t(route.size() - 1)));
+    };
+    // A due actor can retain its slice pointer after that physical slot is
+    // rebuilt. Ground evaluation follows the same slot as wall response.
+    const size_t current_sample = physical(r.sample), next_sample = physical(r.sample + 1);
+    const SliceEdges e = edges(r, current_sample);
+    const auto& s = route[current_sample].path;
     const int32_t x = b.i32(0x28) >> 8;
     int32_t ground = 0;
     if (x < e.left || x > e.right) {
@@ -2422,22 +2437,22 @@ void Race::vertical(Rider& r) {
             ground = x <= e.left_shoulder ? ground_wall : s.height_left;
     }
     if (terrain_source_) {
-        const auto& route = route_of(r);
-        const auto& current = route[r.sample];
-        auto next = route[std::min(r.sample + 1, route.size() - 1)];
+        const auto& current = route[current_sample];
+        auto next = route[next_sample];
         // 0x00439b10 case4 follows sub-slice +0x0c. At a split
         // the common road's right-forward link is physical half1.
         if (next.dual && next.event == RoadEvent::split) next = route_half(next, 1);
-        ground = terrain_height(this->ground(current), slice_path(current, r.sample), this->ground(next),
-                                slice_path(next, std::min(r.sample + 1, route.size() - 1)),
-                                b.i32(0x28) - current.offset * 256, uint8_t(b.i32(0x1c)),
+        ground = terrain_height(this->ground(current), slice_path(current, current_sample), this->ground(next),
+                                slice_path(next, next_sample),
+                                b.i32(0x28) - current.offset * 256, uint8_t(b.i32(0x138)),
                                 next.offset - current.offset, current.offset);
         if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
-            std::fprintf(stderr, "ground-actor slot %d pos %d lateral %d sample %zu route %d ground %d\n",
-                         r.slot, int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)), r.sample, r.route, ground);
+            std::fprintf(stderr, "ground-actor slot %d pos %d lateral %d sample %zu route %d ground %d previous %d swept %d road_move %d\n",
+                         r.slot, int32_t(b.i32(0x1c)), int32_t(b.i32(0x28)), current_sample, r.route, ground,
+                         int32_t(b.i32(0x38)), int32_t(b.i32(0x138)), int32_t(b.i32(0x12c)));
             for (int k = 0; k < 2; ++k) {
                 const auto& at = k ? next : current;
-                const auto path = slice_path(at, std::min(r.sample + size_t(k), route.size() - 1));
+                const auto path = slice_path(at, k ? next_sample : current_sample);
                 const auto& t = this->ground(at);
                 std::fprintf(stderr, "ground-slice side %d section %u local %u type %u flags %u centre %d widths %d/%d shoulders %d/%d sideheights %d/%d points=",
                              k, at.section, at.local, unsigned(t.type), unsigned(path.marking_flags), at.offset,
@@ -3473,12 +3488,22 @@ void Race::ai_speed_steer(Rider& r) {
     if (steer_angle > 0x7fffff) steer_angle -= 0x1000000;
     if (b.i32(0x160) != 0 || std::abs(b.i32(0x60)) > 0xd) steer(b, tables_, steer_angle * 8, 0);
     const int32_t shown = ai_speed_units(b.i32(0xec)), want = ai.target_speed;
+    const bool ending_player = human(r) && (r.finish_controls_ended || r.busted);
+    const auto drive = [&](int mode) {
+        // 0040adc2..0040add2 redirects the player's throttle to full
+        // braking while DAT_004753c4 is positive. Keep DriveMode's
+        // negative-force coast path intact: it calls Brake(0) directly.
+        if (ending_player && (mode == 1 || (mode == 0 && b.i32(0x240) >= 0)))
+            brake(b, b.i32(0x27c));
+        else
+            drive_mode(b, mode);
+    };
     if (shown < want && (skid < 41 || shown < want / 2))
-        drive_mode(b, 1);
+        drive(1);
     else if (shown <= want)
-        drive_mode(b, 0);
+        drive(0);
     else
-        drive_mode(b, 2);
+        drive(2);
 }
 
 // 0x00449e90: nearest rider closing on self within the lateral window,
@@ -3582,7 +3607,8 @@ bool Race::ai_overtake(Rider& r) {
 void Race::ai_think(Rider& r) {
     // 0x00407bd0: transitions (0x00408ad0), state dispatch through 0x00465980,
     // the state's tick counter, then the replan accumulator (0x004082f0 once
-    // it passes 0x3b). The 0x0040a410 lookahead is not ported.
+    // it passes 0x3b). 0040a410 is the legacy network correction adapter;
+    // its packet-buffer gate has no offline effect (see RE evidence).
     if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK"))) {
         std::fprintf(stderr,
                      "ai %td state %d target %d anim %d frame %d queued %d deadline %u weapon %d until %d "
@@ -3812,7 +3838,9 @@ void Race::step_rider(Rider& r, uint32_t controls, bool player) {
     // 0x00434660 head: demo hold (or race-not-started) takes the AI branch;
     // the control word is ignored. fight() with zero controls is exactly the
     // branch's stamina regen with no attacks started.
-    const bool demo_player = demo_hold_ && player;
+    // 004346a1..004346b6 selects AI after any terminal outcome as
+    // well as during attract hold; player input ends before the result delay.
+    const bool demo_player = player && (demo_hold_ || r.finish_controls_ended || r.busted);
     // 0x00407a90 scenery-mark flash for the solo every-tick loop: the live
     // scheduler runs this in run_bike_node, and step_crash runs it for
     // crashed riders, but an uncrashed rider in solo otherwise never
@@ -3837,7 +3865,9 @@ void Race::step_rider(Rider& r, uint32_t controls, bool player) {
 // player controls, the crashed slide, then the riding animation.
 void Race::rider_think(Rider& r, uint32_t controls, bool player) {
     Bike& b = r.bike;
-    const bool demo_player = demo_hold_ && player;
+    // 004346a1..004346b6 selects AI after any terminal outcome as
+    // well as during attract hold; player input ends before the result delay.
+    const bool demo_player = player && (demo_hold_ || r.finish_controls_ended || r.busted);
     if (b.i32(0x2f4) == 0) {
         if (r.ai || demo_player)
             ai_think(r);
@@ -3845,6 +3875,11 @@ void Race::rider_think(Rider& r, uint32_t controls, bool player) {
             // 0x00434660: nitro activate/stop, then drive (0x0040acd0) and
             // steer (0x0040ad30). Boost multiplies the throttle force
             // (0x0040adb0); nitro_throttle records the post-boost force.
+            // 00434853..00434874: the finish bit forces braking, but
+            // player steering remains active until speed falls below 300.
+            // 00416010 then changes the outcome; AI starts next think.
+            if ((b.u8(0xc0) & 0x10) != 0 && b.i32(0xec) < 300)
+                r.finish_controls_ended = true;
             nitro_think(r, controls, player);
             const bool joy = player && joy_active_ && !net_ && &r == &riders_[size_t(human_rider(0))];
             if ((b.u8(0xc0) & 0x10) == 0) {

@@ -1,5 +1,51 @@
 # Port progress
 
+## November13 — initial-slot and finish-result branches
+
+Production gates exposed two additional cases. Unbuilt forward slots have initialized500-unit road edges and150-unit shoulders, so allocation-time hill interpolation now uses that original template. The original crashed-finish branch starts the result without waiting for the uncrashed braking threshold; normal and crashed finish integration checks now pass separately. Optimized strict Level5 Highway matches94929ticks through arrest. Renewed optimized native gate passes152selected tests with zero failures/CTest skips, and all five finish recordings match143764ticks. Earlier interrupted gates remain incomplete evidence; new complete reports supersede them. Installer/update/release work follows this verified milestone.
+
+## November12 — stationary probes and finish-control regression
+
+The user closed the zero-input Napa police/crash capture at1177/5030 ticks; the rider was intentionally parked and the crash was scheduled for4400. That incomplete trace was rejected. The runner now explicitly announces the zero-input policy and duration before capture. This was separate from the earlier City driving run that bypassed two cars and finished.
+
+The post-arrest regression failed all five completed Level1 recordings late in the race. The new control predicate had incorrectly treated the finish-line latch as the original global outcome. Original00434853..00434874 keeps steering active while braking until speed<300, then starts the outcome; AI starts on the next think. A separate finish-control latch now implements that timing. Build passed; renewed headless five-race verification passes all143764 ticks, including latest allocation-ground and finish-control changes. The optimized production build and native result-screen timing remain to verify.
+
+## November12 — driver recovery and required gameplay evidence
+
+The original recording driver now detects300 ticks (five seconds) without a sample of progress and uses ordinary braking/steering/throttle to bypass an obstruction. A real Big Game City run recovered from two cars and reached the finish at32999; original Save As produced a160-byte RRS equal to its captured152-byte payload. Native save-byte/memory checks pass. No menu pixels were compared.
+
+Fresh original component fixtures now load DATA relative to the exact E:/RR working installation, rejecting missing files. All nine raster/material/CEL checks pass. Original4547e0 forward-neighbor lane-grid rules fix four Medly road panels;4764 terrain nodes and2803 ground queries match. Five completed Level1 race recordings previously match143764 ticks; regression after latest simulation edits remains in progress.
+
+Mandatory police/crash gates replace absent historical partial fixtures. They exposed and measured original result-delay AI control and throttle-to-brake rules, plus original pedestrian allocation-ground initialization before previous-placement copying. Napa4730 ticks through the post-arrest delay, City4552 ticks through arrest and explicit crash300/700 ticks now match. All ten required police/crash scenarios now pass35916 exact ticks. Production optimized rebuild and integration acceptance remain pending; no release-completion claim. Original-resolution Canyon sample0 was measured: the original also draws7176 opaque black pixels; corrected dual-clear coverage passes with zero unwritten pixels. Menu and widescreen-only investigations are excluded by owner.
+
+
+## November 12, 2026 — native Windows text and required evidence checks
+
+Native Windows text now draws through GDI memory DIBs, with direct RGB565 menu
+blending and native DrawTextEx layout. Existing Windows probes match all9,856
+disc glyphs/advances in each format, all672 system glyphs/advances in each format,
+196,608 blend samples,292 line-height measurements,7 string extents and6 wrapped
+rectangles. The trailing-space layout mismatch and black HUD transparency are
+fixed. The ten-check offline component gate passes; the synthetic tooling suite
+passes27 tests with zero skips. These are component results, not a full native
+acceptance gate or a new completed-race claim.
+
+Windows deployment contracts run instead of skipping. Native capture contracts
+replace the two skipped Wine-only tooling cases. Original actor comparisons now
+require actual frame/node coverage, and Medly terrain acceptance includes rider
+grounds. Fresh scene/moving/terrain and frontend/save captures can be configured
+without impersonating old filenames. Required missing frontend/driven-save
+evidence now fails acceptance explicitly; those captures remain outstanding.
+No game or recorded simulation replay has run since the owner's PC-use pause.
+The native frontend helper and initial script are prepared but have not run.
+See [current handoff](agent-handoffs/skip-removal-20261112.md).
+
+## November 12, 2026 — higher-level coverage underway
+
+Release [1.1.18](https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.18) is published from clean commit `720b591`. The public installer checksum is verified; the isolated 1.1.17-to-1.1.18 update preserves 600 checked assets, settings and saves, and the installed SDL menu smoke passes. A new Hiway Level 5 human prefix matches all 2,400 ticks from one RNG anchor. Three additional completed collision/split prefixes also pass strict replay (Hiway 6,500, City 1,300, Napa 1,310 ticks). The Level 5 full original capture is still running; no full higher-level result is claimed.
+
+The next diagnostic capture measures pedestrian allocation ground height and its previous-position copy. The helper and replay comparison are extended; simulation behavior is unchanged pending that measurement. Longer replay deadlines are now configurable, while timeout remains a strict failure. See [handoff](agent-handoffs/parity-higher-levels-20261112.md).
+
 ## November 12, 2026 — all five completed human recordings
 
 Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
@@ -3415,3 +3461,8 @@ frame memory while preserving startup/green anchors and validating the
 entire file before replay. New malformed-input and memory/lifetime tests pass.
 Local simulation fixes advance City to1251 and Napa to1259; those differences
 remain open. See [continuation](agent-handoffs/full-track-parity-20261112.md).
+
+
+## November12 resumed gameplay verification
+
+User resumed captures and excluded menu parity and widescreen-only investigations. Five completed Level1 recordings reverified143764 ticks with zero skips/divergences. New Canyon3301 human ticks also match including stored ground; fresh Canyon/Medly ground evaluator queries and City scene/actor components match. Recovered original4547e0 forward-neighbor lane-grid correction fixes four Medly panel mismatches. See [resumed handoff](agent-handoffs/gameplay-resumed-20261112.md) for exact evidence and unresolved gameplay checks. No new release yet.

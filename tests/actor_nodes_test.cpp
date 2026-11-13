@@ -1,8 +1,9 @@
+#include "test_assets.hpp"
 #include "actor_nodes.hpp"
 #include <iostream>
 int main() {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/GLOBAL.RSC")) {
             std::cout << "Imported actor nodes corpus absent\n";
             return 0;

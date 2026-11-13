@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include <cstdlib>
 #include "bike.hpp"
@@ -374,7 +375,7 @@ static int replay_main(int argc, char** argv) {
     if (course_entry < 1 || course_entry > 5) throw std::runtime_error("course out of range");
     const int level = int(get("level"));
     const std::string assets_root =
-        args.size() > 1 ? args[1] : std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+        args.size() > 1 ? args[1] : rr::test::assets_root();
     if (!std::filesystem::exists(assets_root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;

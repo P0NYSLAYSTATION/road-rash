@@ -5,14 +5,14 @@
 #include <iterator>
 #include <limits>
 int main(int argc, char** argv) {
-    const std::filesystem::path path = argc > 1 ? argv[1] : rr::golden::oracle_dir() + "/raster-fixtures.tsv";
+    const std::filesystem::path path = argc > 1 ? argv[1] : rr::golden::raster_fixture();
     if (!std::filesystem::exists(path)) {
         std::cout << "SKIP raster oracle capture absent\n";
         return 77;
     }
     try {
         const auto file = rr::golden::load(path.string());
-        if (file.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+        if (!rr::golden::original_executable(file.exe) ||
             file.frames.empty())
             throw std::runtime_error("Invalid raster reference metadata");
         if (file.scenario.empty() ||

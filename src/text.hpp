@@ -41,7 +41,8 @@ constexpr unsigned center = 0x1, right = 0x2, vcenter = 0x4, bottom = 0x8, wordb
                    singleline = 0x20, noclip = 0x100, calcrect = 0x400;
 }
 
-// Surface the text is drawn on. Wine-GDI (DEFAULT_QUALITY, system smoothing on) draws 1-bit
+// Surface the text is drawn on. Windows uses GDI memory DIBs directly;
+// other hosts reproduce Wine-GDI. Wine-GDI (DEFAULT_QUALITY, system smoothing on) draws 1-bit
 // glyphs on <=8-bit DIBs (the race surface) and 17-level anti-aliased glyphs on the 16-bit
 // RGB565 menu surface.
 enum class TextSurface { indexed8, rgb565 };
@@ -51,10 +52,13 @@ enum class TextSurface { indexed8, rgb565 };
 uint32_t gdi_blend565(uint32_t dst, uint32_t text, int level);
 
 // Text drawing with the original's own TrueType fonts, read from the user's disc at runtime.
-// Reproduces Wine-GDI's TextOut: pinned FreeType 2.13.3 at the GDI ppem, v40 hinting, whole-pixel
+// Windows: native TextOut into monochrome/RGB565 memory DIBs, with cached fonts
+// and glyphs. No windows are created. Other hosts reproduce Wine-GDI's TextOut:
+// pinned FreeType 2.13.3 at the GDI ppem, v40 hinting, whole-pixel
 // advances and tmHeight line pitch. indexed8: mono-target 1-bit glyphs (glyphprobe 8446/8448).
 // rgb565: normal-target 17-level glyphs (8448/8448) blended as Wine's 16-bit DIB driver does
-// (blendprobe 491520/491520). Ground truth is Wine's renderer, not Windows'.
+// (blendprobe 491520/491520 in the original Wine capture). Windows and Wine
+// evidence are separate: their font metrics and smoothing can differ.
 class TextRenderer {
   public:
     explicit TextRenderer(const Assets&, TextSurface = TextSurface::indexed8);
@@ -79,7 +83,7 @@ class TextRenderer {
   private:
     struct FontData;
     static std::unique_ptr<FontData> open_font(std::vector<uint8_t> bytes, bool use_os2,
-                                               const std::string& what);
+                                               const std::string& what, bool register_native = true);
     void load_disc_faces(const Assets&);
     struct Glyph {
         int x0 = 0, y0 = 0, w = 0, h = 0, advance = 0;

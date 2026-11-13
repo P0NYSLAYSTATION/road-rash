@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "golden.hpp"
 #include "assets.hpp"
 #include "road.hpp"
@@ -13,9 +14,9 @@ int main(int argc, char** argv) {
     }
     try {
         const auto golden = rr::golden::load(file);
-        if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2")
+        if (!rr::golden::original_executable(golden.exe))
             throw std::runtime_error("Oracle capture is from a different executable");
-        rr::Assets assets(argc > 2 ? argv[2] : std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH");
+        rr::Assets assets(argc > 2 ? argv[2] : rr::test::assets_root());
         const auto table = rr::read_depth_table(assets.read("ROADRASH.EXE"));
         // Original course selector indexes the pointer table at 0x0046df58
         // (0x00441940), unlike rr-game's CLI course ordering.

@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "frontend.hpp"
 #include "native_screens.hpp"
@@ -14,8 +15,8 @@ int main(int argc, char** argv) {
     };
     for (int s = rr::native_slot_base; s < rr::ns::count; ++s)
         check(!rr::native_string(s).empty(), "every native slot has text");
-    const std::string root = argc > 1 ? argv[1] : RR_SOURCE_DIR "/../cdrom/ROADRASH";
-    const rr::Assets assets(root);
+    const std::string root = argc > 1 ? argv[1] : rr::test::assets_root();
+    const rr::Assets assets(root, rr::test::media_root());
     if (!assets.exists("ROADRASH.EXE")) {
         std::cout << "skip: no disc\n";
         return failures ? 1 : 77;

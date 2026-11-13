@@ -2,25 +2,60 @@
 #include "pedestrians.hpp"
 #include "track_ring.hpp"
 #include "traffic.hpp"
+#include "terrain_ground.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 
 // Pedestrians, plan 24 Task 4. Each function names the routine it ports.
-// Known native differences (labelled where they occur):
-// - 0x004415b0 (traffic-light phase) reads live intersection signals:
-//   phase 2 crosses without a road check, phases 0/1 wait, -1 checks;
-// - category-2 resources load after the step whose frame first reaches the
-//   pedestrian's slice (0x00440680 calls 0x00440b80 lazily on draw); the
-//   draw's on-screen x test on the projected node is not ported;
-// - the ground height +0x24 settles on the first move instead of
-//   0x00439b10 at allocation;
-// - shared wall and shoulder responses use retained physical ring slices;
-// - only the camera roadway's DZHR records spawn; the other roadway of a
-//   split (second 0x00454240 call) is not walked yet;
-// - scheduler order: pedestrians think after every rider, not interleaved
-//   by ring position, and the contact pass runs after rider/car contacts.
+// The live scheduler interleaves pedestrians with riders and traffic. The
+// track ring walks both roadways at splits, and draw-time category-2 lookup
+// follows the shared resource queue. Allocation queries the newly built
+// sub-slice before copying its placement words, as 0x00438930 does.
+// Standalone fixtures without a track ring retain the fallback slice builder.
 namespace rr {
+int32_t Race::allocation_ground(const Rider& r, const RouteSample& current) const {
+    const auto& b = r.bike;
+    const auto& path = current.path;
+    const int32_t lateral = b.i32(0x28) - current.offset * 256;
+    if (!terrain_source_) {
+        const int32_t x = lateral >> 8;
+        if (x > path.right)
+            return x >= path.right + path.shoulder_right ? 999 : path.height_right;
+        if (x < -path.left)
+            return x <= -path.left - path.shoulder_left ? 999 : path.height_left;
+        return 0;
+    }
+    const auto& terrain = ground(current);
+    const uint8_t fraction = uint8_t(b.i32(0x138));
+    if (terrain.type != 4 || fraction == 0)
+        return terrain_height(terrain, path, terrain, path, lateral, fraction, 0, current.offset);
+
+    // The current slice has just been written, but its forward physical
+    // slot can still hold the previous ring generation (or the initial slot template).
+    // Do not substitute the not-yet-built future route geometry.
+    const auto& route = route_of(r);
+    const auto* ring = nearest_ring(b.i32(0x1c));
+    if (ring && !ring->slice_location(int32_t((r.sample + 1) * 256), current.half)) {
+        // 004551c0 initializes unbuilt slots: ground edges e0/e4 are
+        // -500/+500, shoulders e8/ec -650/+650. They are not zeroed roads.
+        PathSample initial{};
+        initial.left = initial.right = 500;
+        initial.shoulder_left = initial.shoulder_right = 150;
+        return terrain_height(terrain, path, TerrainSlice{}, initial, lateral, fraction,
+                              -current.offset, current.offset);
+    }
+    size_t next_sample = std::min(r.sample + 1, route.size() - 1);
+    if (ring) {
+        const int64_t back = ring->back_q8() >> 8;
+        next_sample = size_t(std::clamp<int64_t>(back + ((int64_t(next_sample) - back) & 127),
+                                                0, int64_t(route.size() - 1)));
+    }
+    auto next = route[next_sample];
+    if (next.dual && next.event == RoadEvent::split) next = route_half(next, 1);
+    return terrain_height(terrain, path, ground(next), slice_path(next, next_sample), lateral, fraction,
+                          next.offset - current.offset, current.offset);
+}
 namespace {
 int32_t sar8(int32_t x) {
     return (x + ((x >> 31) & 0xff)) >> 8;
@@ -183,7 +218,6 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
     b.i32(0x20) = 0;
     b.i32(0x24) = 0;
     b.i32(0x28) = lateral;
-    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
     b.i32(0x134) = position;
     b.i32(0x138) = position;
     p.body.route = riders_[0].route;
@@ -194,6 +228,8 @@ void Race::spawn_pedestrian(const RouteSample& sample, size_t s, const DzhrActor
             break;
         }
     p.body.sample = p.body.previous_sample = s;
+    b.i32(0x24) = allocation_ground(p.body, sample);
+    for (int k = 0; k < 5; ++k) b.i32(0x30 + 4 * k) = b.i32(0x1c + 4 * k);
     p.anchor = position; // +0x1c8..+0x1d8 copy of +0x1c..+0x2c
     p.anchor_lateral = lateral;
     p.selector = uint8_t(w0 >> 8);
@@ -228,8 +264,9 @@ void Race::load_pedestrian_looks() {
     // camera (front - 0x5000) up to camera + 0x1e00, the static-box reach.
     // A pedestrian beyond it stays unloaded and keeps thinking as one
     // (city-parked-randlog-20261102: the parked-camera crosser 10000 Q8
-    // ahead walks at the unloaded pace 4). The on-screen x test on the
-    // projected node is not ported.
+    // ahead walks at the unloaded pace 4). 0x00438610's lateral dispatch
+    // bounds are world coordinates, not projected screen x; the static
+    // strip's broad bounds also admit these pedestrian nodes.
     if (!pedestrians_) return;
     const int32_t camera =
         std::max<int32_t>(ring_ ? ring_->front_q8() - 0x5000 : int32_t(camera_position()), 0);

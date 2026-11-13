@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "assets.hpp"
 #include "check.hpp"
 #include "golden.hpp"
@@ -139,7 +140,7 @@ void scenario(rr::test::Checks& check, const rr::Assets& assets, const std::vect
 }
 } // namespace
 int main() {
-    const std::string root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string root = rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) return rr::golden::skip;
     rr::Assets assets(root);
     auto exe = assets.read("ROADRASH.EXE");

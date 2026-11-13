@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "bob.hpp"
 #include "assets.hpp"
 #include "rider_sprites.hpp"
@@ -45,7 +46,7 @@ int main() {
     check(r.pixels == std::vector<uint8_t>({248, 246}), "rider remap");
 
     // Corpus (skips without the disc): frame counts and exact file consumption from 0x00443610.
-    const std::string game = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string game = rr::test::assets_root();
     if (std::filesystem::exists(game + "/DATA/BIKERS/HIBOB.DAT")) {
         rr::Assets a(game);
         auto hi = rr::read_bobs(a.read("DATA/BIKERS/HIBOB.DAT"), rr::bob_frames);

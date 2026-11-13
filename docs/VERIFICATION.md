@@ -1,5 +1,48 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 12, 2026 — offline Windows repair gate
+
+`build/offline-parity-final-build.log` and
+`build/offline-final-logging-build.log` complete successfully (MSVC Release).
+`build/native-frontend-helper-final-build.log` compiles the32-bit helper; it was
+not installed or run. The ten memory/file/synthetic component CTests pass with
+zero failures/skips in11.57s: `build/offline-components-verified.log` and
+`build/release/offline-components.xml`. Command:
+
+```powershell
+ctest --test-dir build/release -R '^(text(-system-.*)?|assets|frontend|net_frontend|net_deploy|terrain_ground|agent-tooling|portability-lint)$' --output-on-failure --output-junit offline-components.xml
+```
+
+Font checks cover9,856 disc glyphs per surface,672 system glyphs per surface,
+196,608 RGB565 blend samples,292 line heights,7 string extents and6 wrapped
+rectangles; black-shadow/transparency regressions pass. The ground component
+checks2,112 original samples. Synthetic tooling passes27 tests without skips
+(`build/offline-tooling-full-gate.log`); mocked capture-contract tests do not
+launch any original game or replay.
+
+`build/missing-original-evidence-negative-check.log` intentionally returns CTest8:
+`frontend-original` rejects missing configured original screenshots/cache data;
+`career-save-corpus` rejects missing naturally driven original save evidence.
+They are unresolved acceptance requirements, not passed checks. The seeded
+original writer separately matches its full160-byte output buffer to its RRS
+file: `build/seeded-save-byte-evidence.json`, SHA256
+`45c601fd78b074b440b12188e3353a73f3b4c9ff9f2338c7853a5463619c388a`.
+That capture predates the PC-use pause and its DLL restoration is receipted.
+
+The full145-test gate, seven missing render captures plus native actor coverage,
+native menu/picture/save captures and fresh finished-race replays remain pending.
+No game, recorded simulation replay or GUI gate ran during the pause. No new
+commit, installer or release is claimed. Details and next commands are in the
+[current handoff](agent-handoffs/skip-removal-20261112.md).
+
+## November 12, 2026 — higher-level prefix and extended contact checks
+
+`build/hiway-l5-prefix-acceptance.json` passes all 2,400 ticks of the completed Hiway Level 5/seed1 human prefix, including RNG from one anchor. `build/extended-contact-parity-audit.json` passes three immutable collision/split prefixes: Hiway6,500, City1,300 and Napa1,310, with zero skips, known divergences or unexpected failures. These are prefix checks, not additional finished races.
+
+The separate pedestrian ground-field helper compiles (`build/ped-ground-helper-build.log`), and the native replay target compiles (`build/ped-ground-replay-build.log`). Its older-schema Level 5 regression remains exact (`build/ped-ground-schema-prefix-regression.log`). `verify_sim.py --timeout 600` also passes that prefix (`build/hiway-l5-prefix-extended-timeout.json`); timeout failure handling is covered by the synthetic tooling suite:26 tests,2 existing platform skips,zero failures (`build/higher-level-agent-tooling-tests.log`). Extended ground fields have not yet been captured from the original, so their parity is unverified. Full higher-level capture is ongoing in E:/RR; no completion claim or GUI gate during that capture.
+
+Release1.1.18's clean stamp/public checksum/update preservation and installed SDL smoke are recorded in `build/v1118-publish.log` and `build/parity-v1118-upgrade-validation.json`. See [handoff](agent-handoffs/parity-higher-levels-20261112.md).
+
 ## November 12, 2026 — all five completed human recordings
 
 Direct free-running replays from a single RNG anchor match Hiway L1/seed1 (14,084 ticks), Napa L1/seed1 (29,055), Canyn L1/seed1 (29,620), City L1/seed1 (33,819), and Medly L1/seed2 (37,186). City also compares all19 previously uncovered police identity/cycle/bend words. Strict five-race receipt and four prefix regressions pass; the final MSVC Release/SDL native gate passes104 tests with35 explicit skips and2 unavailable Direct3D exclusions (38.22s). Checkpoint1.1.18 packaging follows. These are the measured level/seed/input scenarios; other levels, branch choices and unexercised behavior remain unverified. Multiplayer stays held.
@@ -4595,3 +4638,56 @@ Full Release gate on current local tree passes141 registered,105 passed,
 New indexed1000-frame replay validates anchor lifetimes, bounded residency,
 lookahead/backward reads and late malformed fields; streaming10000-frame
 Python validation verifies bounded memory. Complete race parity remains open.
+
+
+## November12 resumed gameplay verification
+
+User resumed captures and excluded menu parity and widescreen-only investigations. Five completed Level1 recordings reverified143764 ticks with zero skips/divergences. New Canyon3301 human ticks also match including stored ground; fresh Canyon/Medly ground evaluator queries and City scene/actor components match. Recovered original4547e0 forward-neighbor lane-grid correction fixes four Medly panel mismatches. See [resumed handoff](agent-handoffs/gameplay-resumed-20261112.md) for exact evidence and unresolved gameplay checks. No new release yet.
+
+
+## November12 — latest measured gameplay additions
+
+- build/working-assets-components.log:9/9 raster/CEL/material gates pass, new receipted raster-working-assets capture from E:/RR (old fixture preserved).
+- build/driver-progress-test.log: deterministic five-second detector checks pass. Original career run46281eec56d44339bc0aae0345b24348 recovered two blocked cars and finished City32999; original RRS SHA63449619678c3beec57308d25b5f968578cace50bfda037ef8237a89f9e4a9b4, DLL restored, no renderer changes.
+- build/native-driven-save-acceptance.log: career-save-corpus passes original160-byte save,152-byte memory payload, place13/cash1000 and native byte identity. Historical place0/cash651 expectations remain attached to the historical fixture.
+- build/napa-human-parked-runon-acceptance.json:4730 ticks exact, including post-arrest AI/braking. build/city-allocation-ground-acceptance.log:4552 ticks exact, including new pedestrian placement snapshots. build/napa-human-crash-300-acceptance.json:700 ticks exact with the recorded original crash event at300.
+- build/allocation-ground-components.log:5/5 pedestrian/terrain/screen/cache/save checks pass.
+- Latest frozen pre-allocation five-race regression and mandatory ten-case police suite remain in progress; see resumed handoff for processes/evidence. Do not count missing cases as skips or claim a full current gate. Menu pixels/widescreen-only work excluded by owner. Canyon4:3 sample0 render expectation still unresolved.
+
+
+### November12 — closed parked probe and finish-control correction
+
+`build/native-police-allocation-fix.log`: Napa4730 and City4552 strictly pass; next Napa crash4400 capture was closed at1177/5030 and rejected. No completed receipt; do not count it as coverage. All ten mandatory police scenarios remain incomplete.
+
+`build/post-arrest-five-whole-race-acceptance.json`:0pass,5unexpected failures,0skip. Late finish-control regressions: Hiway13984, Napa29015, Canyn29583, City33780, Medly37149. The prior five-pass baseline does not establish current-source parity.
+
+`build/finish-control-delay-build.log`: oracle-sim-test build succeeds after splitting finish-line crossing from the original delayed AI handoff. `build/finish-control-delay-five-acceptance.json` is the pending renewed full-race report. New state-hash latch inclusion is source-only until subsequent rebuild.
+
+
+### Original Canyon boundary and corrected coverage acceptance
+
+`canyn-start-boundary-pose.tsv`:151render frames, exact E:/RR, restored; explicit render-only pose128,x0,height150,half0, physical row0 validated. `build/canyn-start-boundary-terrain.log`:6sampled frames,12original terrain nodes match,0missing,132fresh ground queries match. Original f0 contains7176 opaque palette0 pixels below y320.
+
+`build/canyn-boundary-coverage-test.log` diagnostic still fails the old black-pixel criterion while proving actual untouched count0. `build/canyn-opaque-zero-test.log`: corrected dual-clear test PASS88.74s, rejects any untouched pixel instead of allowing1%. Source renderer unchanged.
+
+`build/finish-control-police-regression.json`:3pass,0skip,0fail (Napa4730, City4552, crash700). `build/finish-control-state-test.log`:save/restore/hash regression PASS11.36s. New full-five acceptance and remaining mandatory police suite are still pending.
+
+
+`build/finish-control-delay-five-acceptance.json` completed:5pass,0skip,0known divergence,0failure. Hiway14084, Napa29055, Canyon29620, City33819, Medly37186 (total143764), start tick1 through original finish, one anchor. This verifies latest allocation-ground and separate finish-control latch in the current unoptimized binary. Pending optimized rebuild/regression and result-screen integration test are separate.
+
+
+`build/native-police-finish-control-fix.log` and `build/native-police-cases-completed.json`: all10 required police/crash cases accepted,35916ticks total, exit0. Original captures restored; initial closed1177frame partial remains rejected and is not counted. Full production rebuild now restores normal MSVC Release flags /O2 /Ob2 /DNDEBUG; optimized gates pending.
+
+
+### November13 production corrections
+
+Initial optimized native attempt was incomplete after test130 and had two observed failures (L5allocation and finish integration); its log is `build/v1119-native-attempt1-incomplete.log`. Initial optimized five-race attempt has no completed report and is not accepted. No reason for process disappearance is inferred.
+
+`build/initial-slot-ground-fix-acceptance.json`:2pass0skip0fail, L5prefix2400 and City4552 on unchanged original recordings. `build/finish-two-branches-test.log`: normal and crashed finish integration PASS14.18s. Renewed production gate also passes these two previously failed tests. `build/v1119-release-regressions.json`: optimized Highway Level5 original94929ticks exact through arrest (outcome4), NOT a finish. Source/new full build `build/v1119-optimized-build-final.log` succeeds with /O2 /Ob2 /DNDEBUG.
+
+
+### Completed optimized production milestone (November13)
+
+`build/v1119-native-tests.xml` / `.log`:152selected tests PASS,0failures,0CTest skips,356.87s. Only CTest widescreen/wide_math excluded by owner; frontend original menu-pixel comparisons likewise owner-excluded. No other missing-evidence skips found in recorded output. `build/v1119-whole-race-acceptance.json`:5pass,143764ticks through original finishes,0skip/0divergence. `build/v1119-release-regressions.json`:94929Level5ticks through arrest pass. The ten required police/crash cases also pass in the optimized native gate. Tested replay executable SHA256160ff866db3672a9d1cdb0ecf25460c05bb5b76a9f84baa87b57447ec2ffb656.
+
+Build provenance previously omitted its cache argument, leaving configuration metadata empty. CMake now passes its actual cache; Release /O2 /Ob2 /DNDEBUG is embedded. Focused game-version, console-version and agent-tooling checks pass3/3; replay executable SHA256 unchanged. This metadata-only change does not replace simulation evidence or imply new original captures. Clean-commit packaging and update installation remain pending.

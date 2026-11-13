@@ -1,5 +1,11 @@
 # Binary evidence and next work
 
+## November 12, 2026 — pedestrian allocation and offline snapshot calls
+
+Disassembly of the working E:/RR/ROADRASH.EXE confirms allocation routine00438930 calls ground evaluator00439b10 at004389dd, stores the returned height at object+24 (004389e6), then copies five placement words from+1c..+2c to+30..+40 (004389f7). Native allocation now evaluates the freshly written current slice before copying previous-placement words. It retains the physical forward neighbor (including the initialized slot template) for fractional hill interpolation instead of assuming future route geometry. New City level3 parked capture exposed original previous-ground20/native0 at tick1; after the fix all4552 ticks match, including the measured placement words. The synthetic sidewalk20 regression also checks allocation without any movement tick.
+
+Routine0043c7e0, previously called a missing standings update in crash-path comments, writes a network snapshot. Its entry ORs bytes004c5b00 and004c5af9 and jumps directly to the epilogue0043c951 when both are zero. The omitted call therefore has no offline simulation effect. The separate0040a100/0040a410 adapter reads packet buffers004c1400/004c1a15 and handles correction/remount cases; do not confuse it with ordinary AI target steering. Evidence: direct working-executable disassembly and `build/steering-adapter-disassembly.txt`; [handoff](agent-handoffs/parity-higher-levels-20261112.md).
+
 ## November 12, 2026 — resource activation and retained pools
 
 00452310 queues MSRR prefetch and activation separately;0044b0e0 services one request from the eight-slot circular queue before scheduling.0044af80 dispatches a worker holding the replacement slot;0044ae90 loads/relocates asynchronously. City18307 queues115/slot3 activation after service,18308 dispatches with guard1/current36,18309 has115/guard0. Native imported payloads are already resident; the discrete queue commits worker completion on the next scheduler pass. This matches the measured captures, not arbitrary host I/O timing. Pedestrian first loads and cached RRAN-header validation now use resident slot/replacement history, preserving untouched bytes after shorter replacements.
@@ -2880,3 +2886,56 @@ controller think contributes31, advancing a600-tick signal phase at571.
 Original cars also use 00439270/004394c0 weighted road bend/rise/heading
 accumulation and atan table00476768. See
 [measurements and limits](agent-handoffs/actor-lifetimes-clock-20261111.md).
+
+
+## Native Windows font evidence — November 12, 2026
+
+The same disc TrueType fonts differ between Windows GDI and the former Wine /
+FreeType emulation. Native probes establish9,856 byte cases per disc surface,
+672 system cases per surface and196,608 RGB565 colour/background samples.
+Windows 32-bit ClearType pixels cannot be treated as Wine's17-level coverage
+ramp; `glyphprobe gray565` records full RGB565-expanded channels directly.
+A native memory-DIB renderer matches every compared case, including unsupported
+CP1252 bytes previously omitted by the test. Its font resources create no window.
+
+Courier New Bold at cell18 demonstrates ANSI extent-cache sensitivity: DEL is5
+on the mono probe,10 on RGB565, while a warmed native ANSI call can retain5.
+Native Unicode extent and GetCharWidth32A return10 on that RGB565 DC
+(`build/native-font-width-api.log`). Colour fixed-pitch width measurement uses
+explicit CP1252->Unicode; proportional/symbol and indexed faces retain their
+measured ANSI behavior. Every byte remains compared, without exceptions.
+
+Windows DrawTextEx CALCRECT for “Choose from 2 exciting tunes by Hammerbox” at
+Futura Condensed Regular32 / width300 is `(0,0,274,64)`; the former Wine-style
+layout returned `(0,0,268,64)` by excluding a trailing space. Native layout now
+matches all6 recorded rectangles,292 line-height sweeps and7 string extents.
+Sources: `tools/textprobe.c`, `analysis/frontend/glyphs-windows-20261112/metrics.txt`.
+These are memory-GDI components; they do not establish original all-menu pixel
+parity. That still requires the pending native frontend captures.
+
+
+### November12: forward-neighbor road panel grid
+
+Working E:/RR executable004547e0..00454888 (build/original-marked-lanes-disassembly.txt) widens each sub-slice panel grid to its forward neighbor(s): +d8 receives min(current+d0,left-neighbor+d0), +dc max(current+d4,right-neighbor+d4). Neighbor lane Q8 counts are summed only when +8/+c differ. When the current Q8 width is integral and differs from that neighbor sum, the byte panel count is ceil(sum/256); the Q8 value increments by1 when widening. Fractional physical road edges remain separate. CourseScene previously used only its own ceil(width), losing two START160 panels in each of fresh Medly frames1860/1890. Applying the recovered rule matches all4764 captured terrain nodes (and preserves Canyon2011 matches). This extends the October26 lane-grid-origin finding: projecting a strip's own grid at both depths also requires constructing that grid as the original does.
+
+
+### November12: original result-delay control and throttle
+
+004346a1..004346b6 switches the player wrapper to407bd0 when demo hold is set OR race outcome004c5d7c is not1. The wrapper and AI clocks continue during the result delay. 0040adc2..0040add2 separately redirects only the player's throttle to full brake27c while end timer004753c4>0; DriveMode0 still takes its direct Brake(0) route when current force is negative. Restored these rules after a fresh4730-tick Napa parked recording first differed at4553. Complete strict run-on now matches. A later apparent brain180 mismatch at4568 was checker identity, not engine behavior: the cop is allocated after the startup address catalog. Its recorded half+1c4 backlink now resolves new bike identities before brain comparisons, with duplicate backlink checks. No state fields are waived or native snapshots reanchored.
+
+
+### Finish crossing is not the global outcome
+
+00434853..00434885 tests bike+c0 bit10. While set, the player still follows the human steering branch, stops nitro and uses DriveMode2. Only speed+ec<300 calls00416010(127,180). The next wrapper call observes004c5d7c!=1 and takes407bd0. Therefore the finish latch must not directly select terminal AI or the global end-timer throttle override. Original00416010 also ignores subsequent requests when4753c4!=0 or4753b4!=0. Fresh parked arrest coverage exposed the missing outcome branch, but equating that outcome with finish crossing regressed all five completed race recordings; these are distinct states.
+
+
+### Canyon start-boundary black pixels are opaque terrain
+
+Fresh native-original render component `canyn-start-boundary-pose.tsv` uses original454120 to reverse the ring before projection, confirms valid physical row0, camera128,x0,height150,half0. Original frame0 has7176 palette0 pixels below y320, exactly the native output count. Native dual-clear(0/255) render proves all these pixels overwritten, with0 untouched pixels. The old mountain coverage test incorrectly assumed palette0 meant missing geometry. Corrected to independent dual-clear coverage with zero untouched-pixel allowance, clearing per view. No fill patch or altered oracle golden. Component fixture is not simulation replay evidence.
+
+
+### Unbuilt forward slots and crashed finish results (November13)
+
+Supersedes the earlier allocation note's "initial zeros" assumption:004551c0 initializes unbuilt sub-slices with ground edges+e0/e4=-500/+500 and shoulders+e8/ec=-650/+650. Hill interpolation during actor allocation must use those edges until the forward slot is built. A zero-width next road incorrectly produced previous-ground8 for the Level5 pedestrian at position17403,fraction251; original0. Correct initial-template geometry restores strict2400-tick L5 prefix and the94929-tick L5 arrest recording. No terrain heights or recorded fields were waived. Original454240 commits terrain through451910 before actor placements4520d0; the earlier prose that terrain commits after actors was incorrect.
+
+Original004346c6..004346e1 handles a crashed finish-latched half separately: it calls437800 and416010(127,180) before crash AI, without the uncrashed speed<300 gate. Native now latches the result phase there. Controlled nearby-line integration separately checks no-opponent normal braking and a scripted knock after crossing, ending exactly180ticks after result handoff.

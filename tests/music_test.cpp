@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -853,7 +854,7 @@ int main(int argc, char** argv) {
     }
 
     // Corpus (skip 77 without the disc).
-    rr::Assets assets(argc > 1 ? argv[1] : RR_SOURCE_DIR "/../cdrom/ROADRASH");
+    rr::Assets assets(argc > 1 ? argv[1] : rr::test::assets_root());
     if (!assets.exists("ROADRASH.EXE")) {
         std::cout << "skip: no disc\n";
         return failures ? 1 : 77;
@@ -941,9 +942,10 @@ int main(int argc, char** argv) {
         rr::Mixer mixer(8);
         rr::RaceMusicPlayer player(assets, mixer);
         player.play_race(4, "");
-        check(player.active() && player.loaded() && player.song() == "SBKGRNG4",
-              "play_race(4) loads SBKGRNG4");
-        check(player.event_count() == s.events.size(), "player event count matches parser");
+        check(player.active() && player.loaded() && player.song() == "GRUNGE4",
+              "built-in MIDI play_race(4) loads GRUNGE4");
+        const auto built_in_song = rr::read_mids(assets.read("AUDIO/MUSIC/GRUNGE4.MID"));
+        check(player.event_count() == built_in_song.events.size(), "player event count matches parser");
         for (int i = 0; i < 4; ++i) player.update();
         std::vector<int16_t> out(2 * 2048, 0);
         mixer.render(out.data(), 2048);

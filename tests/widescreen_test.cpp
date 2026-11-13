@@ -1,3 +1,5 @@
+#include "test_assets.hpp"
+#include "moving_frames.hpp"
 // Plan 21 Task 8: Hor+ widescreen (failing test).
 // The port's scene builders cull at the 320-wide logical view: an actor at
 // logical x in [320,426) is dropped even when the caller asks for the 16:9
@@ -47,13 +49,13 @@ int main(int argc, char** argv) {
             std::cerr << "FAIL " << what << '\n';
         }
     };
-    std::string assets_root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    std::string assets_root = rr::test::assets_root();
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--assets" && i + 1 < argc) assets_root = argv[++i];
     }
     rr::Assets assets(assets_root);
-    const std::string tsv = rr::golden::oracle_dir() + "/napa-moving.tsv";
+    const std::string tsv = rr::test::moving_fixture(rr::golden::oracle_dir() + "/napa-moving.tsv");
     if (!std::filesystem::exists(tsv) || !assets.exists("DATA/GLOBAL.RSC")) {
         std::cout << "skip: no moving capture or disc\n";
         return 77;
@@ -129,6 +131,7 @@ int main(int argc, char** argv) {
     }
     // Seam 2 + golden replay: 16:9 centre crop equals 4:3; side bands reveal.
     const auto golden = rr::golden::load(tsv);
+    const auto selected = rr::test::moving_scene_files(golden.frames);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
     const int course = int(golden.frames.at(0).at("course"));
     const auto lib = rr::testlib::load_texture_library(assets, course_files[course]);
@@ -138,7 +141,7 @@ int main(int argc, char** argv) {
     for (const auto& f : golden.frames) {
         if (!f.count("scene.file") || !f.count("pixels.file")) continue;
         const long file = f.at("scene.file");
-        if (file != 0 && file != 30 && file != 60 && file != 90 && file != 120) continue;
+        if (!selected.count(file)) continue;
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(file) + ".raw");
         const auto pixels = read_file(stem + "-f" + std::to_string(long(f.at("pixels.file"))) + ".raw");
         const int width = int(f.at("pixels.width")), height = int(f.at("pixels.height"));
@@ -190,6 +193,22 @@ int main(int argc, char** argv) {
             for (int x = 0; x < 1280; ++x) differ += wide.row(y)[x0 + x] != ref.row(y)[x];
         check(differ == 0, "16:9 centre crop equals 4:3 frame");
         if (differ) std::cerr << "frame " << file << ": " << differ << " centre mismatches\n";
+        if (differ && std::getenv("RR_WIDE_TRACE")) {
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                rr::Framebuffer a(wide_w, wide_h), b(wide_w, wide_h);
+                rr::render_nodes(a, {nodes[i]}, wide_mode0, uint32_t(f.at("view.quality_mask")));
+                rr::render_nodes(b, {shifted[i]}, wide_mode, uint32_t(f.at("view.quality_mask")));
+                size_t mismatch = 0;
+                for (int y = 0; y < wide_h; ++y)
+                    for (int x = 0; x < 1280; ++x) mismatch += a.row(y)[x] != b.row(y)[x0 + x];
+                if (!mismatch) continue;
+                std::cerr << "node " << i << " differ " << mismatch << " texture "
+                          << (nodes[i].texture ? nodes[i].texture->name : "flat") << " points";
+                for (const auto& point : nodes[i].view_points)
+                    std::cerr << ' ' << wide_mode0.map(point.x) << ',' << wide_mode0.map(point.y);
+                std::cerr << '\n';
+            }
+        }
         {
             size_t side_pixels = 0, side_total = 0;
             for (int y = 0; y < 960; ++y)
@@ -205,7 +224,7 @@ int main(int argc, char** argv) {
         }
         ++frames;
     }
-    check(frames > 0, "golden frames rendered");
+    check(frames == 5, "five moving frames rendered");
     if (failures)
         std::cout << failures << " failures\n";
     else

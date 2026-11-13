@@ -191,7 +191,10 @@ const TerrainSlice& CourseScene::terrain(uint32_t section, uint32_t local) const
 }
 void CourseScene::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample& path,
                                      const TerrainSlice& slice) {
-    if (slice.type != 1 && slice.type != 4) return;
+    if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
+        terrain_.at(section).at(local).side_heights.reset();
+        return;
+    }
     auto& t = terrain_.at(section).at(local);
     base_saved_.emplace(std::make_pair(section, local), t); // keeps the first (original) value
     ring_terrain_onto(t, path, slice);
@@ -212,7 +215,9 @@ void ring_terrain_onto(TerrainSlice& t, const PathSample& path, const TerrainSli
     t.walls = slice.walls;
     t.points = slice.points;
     t.shades = slice.shades;
-    if (slice.type == 4 && (path.marking_flags || path.zone_end) && !(path.marking_flags & 0x40))
+    t.side_heights = slice.side_heights;
+    if (!slice.ring_adjusted && slice.type == 4 && (path.marking_flags || path.zone_end) &&
+        !(path.marking_flags & 0x40))
         for (auto& point : t.points) point[1] = 0;
     t.type = type;
 }
@@ -796,7 +801,28 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             const auto& old = roads[n][r];
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
-            const int32_t whole_left = -((path.left_q8 + 255) / 256) * 250;
+            // 0x004547e0 widens the sub-slice's panel grid to its forward
+            // neighbor(s). Physical road edges retain the fractional widths.
+            const auto& left_neighbor = roads[n][far.count == 2 && near.count == 1 ? 0 : r];
+            const auto& right_neighbor = roads[n][far.count == 2 && near.count == 1 ? 1 : r];
+            int32_t left_q8 = path.left_q8, right_q8 = path.right_q8;
+            int32_t next_left_q8 = left_neighbor.path->left_q8;
+            int32_t next_right_q8 = left_neighbor.path->right_q8;
+            if (&left_neighbor != &right_neighbor) {
+                next_left_q8 += right_neighbor.path->left_q8;
+                next_right_q8 += right_neighbor.path->right_q8;
+            }
+            int left_count = (left_q8 + 255) / 256, right_count = (right_q8 + 255) / 256;
+            const int32_t whole_left = std::min(-left_count * 250,
+                left_neighbor.offset - road.offset - ((left_neighbor.path->left_q8 + 255) / 256) * 250);
+            if (next_left_q8 != left_q8 && (left_q8 & 255) == 0) {
+                left_count = (next_left_q8 + 255) / 256;
+                if (next_left_q8 > left_q8) ++left_q8;
+            }
+            if (next_right_q8 != right_q8 && (right_q8 & 255) == 0) {
+                right_count = (next_right_q8 + 255) / 256;
+                if (next_right_q8 > right_q8) ++right_q8;
+            }
             RoadPanelInput panels;
             // 0x00444630 updates the previous strip's +0x30 using that
             // strip's own +0xd8 lane origin at the new far scale. Both ends
@@ -811,10 +837,10 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             panels.second_lane_width = wrap(int64_t(250) * near.scale);
             panels.near_depth_q8 = near.depth;
             panels.far_depth_q8 = far.depth;
-            panels.left_lanes_q8 = path.left_q8;
-            panels.right_lanes_q8 = path.right_q8;
-            panels.left_lane_count = uint8_t((path.left_q8 + 255) / 256);
-            panels.right_lane_count = uint8_t((path.right_q8 + 255) / 256);
+            panels.left_lanes_q8 = left_q8;
+            panels.right_lanes_q8 = right_q8;
+            panels.left_lane_count = uint8_t(left_count);
+            panels.right_lane_count = uint8_t(right_count);
             panels.marking_flags = path.marking_flags;
             panels.terrain_type = road.terrain->type;
             panels.next_terrain_type = old.terrain->type;

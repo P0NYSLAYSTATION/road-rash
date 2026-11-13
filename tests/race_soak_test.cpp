@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 16 Task 7 + plan 24 Task 5: native determinism and soak gate.
 // For each race: seed 1, seven opponents, accelerate held, up to 108,000
 // ticks (30 simulated minutes) or finish; FNV-1a over every tick snapshot.
@@ -37,6 +38,8 @@ struct SoakResult {
 static SoakResult soak(rr::RaceSetup& setup, uint32_t controls) {
     SoakResult out;
     std::map<size_t, int32_t> last_pos;
+    std::map<size_t, int32_t> last_crash;
+    std::map<size_t, bool> last_parked;
     for (; out.ticks < 108000 && !setup.instance.race->finished(); ++out.ticks) {
         setup.instance.race->step(controls);
         // Pool bounds (original sizes) every tick.
@@ -56,12 +59,24 @@ static SoakResult soak(rr::RaceSetup& setup, uint32_t controls) {
         for (size_t i = 0; i < riders.size(); ++i) {
             const int32_t pos = riders[i].bike.i32(0x1c);
             auto it = last_pos.find(i);
-            // Contact separation shoves riders backward a few Q8 units
-            // without crashing (observed: -6); anything past one sample
-            // outside a crash is a rollback bug.
-            if (it != last_pos.end() && pos < it->second - 0x100 && riders[i].bike.i32(0x2f4) == 0)
-                throw std::runtime_error("non-monotonic position outside crash");
+            // Waking a virtual rider (004060b0 -> wake) places its bike at
+            // the chosen live slice's midpoint. This coordinate correction
+            // can be backward; validate the wake placement rather than
+            // applying the continuous-motion bound across that transition.
+            if (it != last_pos.end() && pos < it->second - 0x100 && riders[i].bike.i32(0x2f4) == 0) {
+                if (last_parked[i] && !riders[i].parked) {
+                    if (!riders[i].live || !riders[i].bike_slice_present || (uint32_t(pos) & 255) != 128 ||
+                        riders[i].bike.i32(0x134) != pos || riders[i].bike.i32(0x138) != pos)
+                        throw std::runtime_error("invalid virtual-to-live wake placement");
+                } else throw std::runtime_error("non-monotonic position outside crash: tick=" +
+                    std::to_string(out.ticks) + " rider=" + std::to_string(i) +
+                    " old=" + std::to_string(it->second) + " new=" + std::to_string(pos) +
+                    " old_crash=" + std::to_string(last_crash[i]) +
+                    " cop=" + std::to_string(riders[i].cop));
+            }
             last_pos[i] = pos;
+            last_crash[i] = riders[i].bike.i32(0x2f4);
+            last_parked[i] = riders[i].parked;
         }
         const auto snap = setup.instance.race->snapshot();
         out.hash = fnv(out.hash, uint64_t(snap.tick));
@@ -105,8 +120,8 @@ static uint64_t render_soak(rr::RaceSetup& setup, const std::vector<uint8_t>& ex
     }
     return hash;
 }
-int main() {
-    const std::string assets_root = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+int run() {
+    const std::string assets_root = rr::test::assets_root();
     if (!std::filesystem::exists(assets_root + "/ROADRASH.EXE")) {
         std::cout << "SKIP no disc\n";
         return rr::golden::skip;
@@ -252,4 +267,13 @@ int main() {
         std::cout << "crash/remount teleport rule holds (" << checks << " transitions)\n";
     }
     return 0;
+}
+
+int main() {
+    try {
+        return run();
+    } catch (const std::exception& error) {
+        std::cerr << "race-soak: " << error.what() << '\n';
+        return 1;
+    }
 }

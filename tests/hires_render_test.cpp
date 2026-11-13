@@ -1,3 +1,5 @@
+#include "test_assets.hpp"
+#include "moving_frames.hpp"
 // Plan 19 Task 4: the race scene at render scale 2x-4x.
 // Golden replay at scale: original napa-moving display lists render at s=1
 // exactly (as today) and at s=2..4; downsampling each scaled image by the
@@ -18,8 +20,41 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <cmath>
 
 namespace {
+struct ClipPoint {
+    double x, y;
+};
+std::vector<ClipPoint> clipped_footprint(const rr::DrawNode& node, const rr::ViewMode& mode) {
+    std::vector<ClipPoint> polygon;
+    for (const auto& p : node.view_points) polygon.push_back({double(mode.map(p.x)), double(mode.map(p.y))});
+    for (int edge = 0; edge < 4; ++edge) {
+        if (polygon.empty()) break;
+        const bool horizontal = edge >= 2;
+        const double boundary = edge == 0 || edge == 2 ? 0
+                                : horizontal           ? mode.surface_height - 1
+                                                       : mode.surface_width;
+        auto coordinate = [&](ClipPoint p) { return horizontal ? p.y : p.x; };
+        auto inside = [&](ClipPoint p) {
+            return edge == 0 || edge == 2 ? coordinate(p) >= boundary : coordinate(p) <= boundary;
+        };
+        std::vector<ClipPoint> out;
+        auto previous = polygon.back();
+        for (const auto current : polygon) {
+            if (inside(previous) != inside(current)) {
+                const double t =
+                    (boundary - coordinate(previous)) / (coordinate(current) - coordinate(previous));
+                out.push_back(
+                    {previous.x + t * (current.x - previous.x), previous.y + t * (current.y - previous.y)});
+            }
+            if (inside(current)) out.push_back(current);
+            previous = current;
+        }
+        polygon = std::move(out);
+    }
+    return polygon;
+}
 const char* const course_files[5] = {"CITY", "HIWAY", "MEDLY", "NAPA", "CANYN"};
 std::vector<uint8_t> read_file(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -36,30 +71,29 @@ int main(int argc, char** argv) {
             std::cerr << "FAIL " << what << '\n';
         }
     };
-    std::string assets_root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    std::string assets_root = rr::test::assets_root();
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--assets" && i + 1 < argc) assets_root = argv[++i];
     }
     rr::Assets assets(assets_root);
-    const std::string tsv = rr::golden::oracle_dir() + "/napa-moving.tsv";
+    const std::string tsv = rr::test::moving_fixture(rr::golden::oracle_dir() + "/napa-moving.tsv");
     if (!std::filesystem::exists(tsv) || !assets.exists("DATA/GLOBAL.RSC")) {
         std::cout << "skip: no moving capture or disc\n";
         return 77;
     }
     const auto golden = rr::golden::load(tsv);
+    const auto selected = rr::test::moving_scene_files(golden.frames);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
     const int course = int(golden.frames.at(0).at("course"));
     const auto lib = rr::testlib::load_texture_library(assets, course_files[course]);
     const auto exe = assets.read("ROADRASH.EXE");
     const auto sprites = rr::load_rider_sprites(assets, exe, std::getenv("RR_SCENE_LOBIKES") == nullptr);
-    // Frames 0/30/60/90/120 stand in for the plan's 0/150/300/750: the
-    // napa-moving capture holds every 30th frame.
     size_t frames = 0;
     for (const auto& f : golden.frames) {
         if (!f.count("scene.file") || !f.count("pixels.file")) continue;
         const long file = f.at("scene.file");
-        if (file != 0 && file != 30 && file != 60 && file != 90 && file != 120) continue;
+        if (!selected.count(file)) continue;
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(file) + ".raw");
         const auto pixels = read_file(stem + "-f" + std::to_string(long(f.at("pixels.file"))) + ".raw");
         const int width = int(f.at("pixels.width")), height = int(f.at("pixels.height"));
@@ -152,13 +186,20 @@ int main(int argc, char** argv) {
         }
         // break up at scale — bbox grows by ~s in each axis. Sampled on the
         // first frame to bound runtime.
-        if (file == 0) {
+        if (file == *selected.begin()) {
             int sampled = 0;
             for (const auto& nd : nodes) {
                 if (sampled >= 15) break;
+                // Measure geometry coverage, not the texture's nonzero texels.
+                // Resampling a transparent/black boundary changes its ink box
+                // independently of the quad footprint. Textured output is
+                // compared against the original and scaled interiors above.
+                auto footprint = nd;
+                footprint.texture = nullptr;
+                footprint.flat_index = 1;
                 rr::Framebuffer f1(640, 480);
                 f1.clear(0);
-                rr::render_nodes(f1, {nd}, rr::view_mode(true), uint32_t(f.at("view.quality_mask")));
+                rr::render_nodes(f1, {footprint}, rr::view_mode(true), uint32_t(f.at("view.quality_mask")));
                 int x0 = 640, x1 = -1, y0 = 480, y1 = -1;
                 for (int y = 0; y < 480; ++y)
                     for (int x = 0; x < 640; ++x)
@@ -175,7 +216,8 @@ int main(int argc, char** argv) {
                 for (int s = 2; s <= 4; ++s) {
                     rr::Framebuffer fs(640 * s, 480 * s);
                     fs.clear(0);
-                    rr::render_nodes(fs, {nd}, rr::view_mode_scaled(s), uint32_t(f.at("view.quality_mask")));
+                    rr::render_nodes(fs, {footprint}, rr::view_mode_scaled(s),
+                                     uint32_t(f.at("view.quality_mask")));
                     int sx0 = 640 * s, sx1 = -1, sy0 = 480 * s, sy1 = -1;
                     for (int y = 0; y < 480 * s; ++y)
                         for (int x = 0; x < 640 * s; ++x)
@@ -190,10 +232,27 @@ int main(int argc, char** argv) {
                         ++failures;
                         continue;
                     }
-                    const int ws = sx1 - sx0 + 1, hs = sy1 - sy0 + 1;
-                    if (ws < s * w1 - s || hs < s * h1 - s) {
-                        std::cerr << "frame 0 s=" << s << ": bbox " << w1 << "x" << h1 << " -> " << ws << "x"
-                                  << hs << '\n';
+                    // s=1 clears the low vertex bit; larger modes retain it.
+                    // A clipped 22px footprint can legitimately become62px at
+                    // 3x. Compare the actual projected/clipped geometry instead
+                    // of scaling its already-snapped and clipped ink box.
+                    const auto polygon = clipped_footprint(footprint, rr::view_mode_scaled(s));
+                    double left = fs.width(), right = 0, top = fs.height(), bottom = 0;
+                    for (const auto point : polygon) {
+                        left = std::min(left, point.x);
+                        right = std::max(right, point.x);
+                        top = std::min(top, point.y);
+                        bottom = std::max(bottom, point.y);
+                    }
+                    // Integer scanlines and exclusive right edges account for
+                    // at most one boundary pixel of the geometric envelope.
+                    if (polygon.empty() || std::abs(sx0 - int(std::floor(left))) > 1 ||
+                        std::abs(sx1 - (int(std::ceil(right)) - 1)) > 1 ||
+                        std::abs(sy0 - int(std::ceil(top))) > 1 ||
+                        std::abs(sy1 - int(std::floor(bottom))) > 1) {
+                        std::cerr << "frame 0 s=" << s << ": geometry footprint differs: " << sx0 << ','
+                                  << sy0 << '-' << sx1 << ',' << sy1 << " expected envelope " << left << ','
+                                  << top << '-' << right << ',' << bottom << '\n';
                         ++failures;
                     }
                 }

@@ -17,6 +17,19 @@
 
 namespace rr::golden {
 constexpr int skip = 77;
+inline bool original_executable(const std::string& hash) {
+    // The second executable changes only its startup compatibility check.
+    // Capture receipts verify that patch; simulation/render routines retain
+    // the original addresses and instructions.
+    return hash == "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2" ||
+           hash == "b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563";
+}
+inline std::string raster_fixture() {
+    if (const char* path = std::getenv("RR_TEST_RASTER_FIXTURE"); path && *path) return path;
+    const char* root = std::getenv("RR_ORACLE_DIR");
+    return std::string(root && *root ? root : RR_SOURCE_DIR "/analysis/oracle") + "/raster-fixtures.tsv";
+}
+
 using Frame = std::map<std::string, int64_t>;
 
 // Full races can contain millions of fields. Indexed replay validates the

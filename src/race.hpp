@@ -262,6 +262,8 @@ struct Rider {
     int32_t finish_distance = 0, place = 0, place_refresh = 0;
     AiState brain;
     bool finished = false;
+    // 00416010 outcome latch, distinct from crossing the finish line.
+    bool finish_controls_ended = false;
     int32_t finish_tick = -1;
     CrashActor crash_actor;
     ActorAnimationState crash_bike_animation;
@@ -641,6 +643,7 @@ class Race {
     void accumulate(Rider&, uint32_t from, uint32_t to, size_t from_sample, size_t to_sample);
     void move(Rider&, bool player);
     void vertical(Rider&);
+    int32_t allocation_ground(const Rider&, const RouteSample& freshly_built) const;
     // 0x0043a610 on the sub-slice values of a route sample (absolute laterals).
     struct SubSliceView {
         int32_t e0 = 0, e4 = 0, e8 = 0, ec = 0;

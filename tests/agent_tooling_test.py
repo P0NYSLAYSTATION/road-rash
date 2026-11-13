@@ -19,7 +19,7 @@ from agent_common import ResourceClaims, atomic_json, run_logged, source_identit
 from agent_gate import ctest_counts
 from agent_status import render
 from build_info import identity, write_header
-from oracle_capture import capture, validate_trace, validate_recorded_controls
+from oracle_capture import capture, validate_trace, validate_recorded_controls, publish_capture
 from verify_sim import classify, verify
 
 EXE = 'a' * 64
@@ -61,6 +61,30 @@ class Tooling(unittest.TestCase):
         # The name cannot substitute for an instrumented branch.
         p.write_text(trace().replace('synthetic', 'sim-napa-solo-human'))
         self.assertEqual(validate_trace(p, True)['control_branch'], 'unverified')
+
+    def test_native_companions_keep_embedded_names_and_save_bytes(self):
+        from oracle_windows import collect_companions
+        scratch = self.root / 'scratch'
+        scratch.mkdir()
+        raw = scratch / 'capture-abc-scene0.raw'
+        raw.write_bytes(b'original scene')
+        save = scratch / 'capture-abc.tsv-save.rrs'
+        save.write_bytes(bytes(range(160)))
+        controls = scratch / 'capture-abc.controls'
+        controls.write_text('200\n')
+        companions = collect_companions(scratch, 'capture-abc', 'current', controls)
+        expected = {'capture-abc-scene0.raw', 'current-scene0.raw',
+                    'current.tsv-save.rrs', 'current.controls'}
+        self.assertEqual({p.name for p in companions}, expected)
+        source = self.write('source.tsv', trace(0))
+        output = self.root / 'accepted/current.tsv'
+        receipt = publish_capture(source, output, {'complete': True}, companions)
+        for name in expected:
+            immutable = Path(receipt['trace']).parent / name
+            self.assertEqual(immutable.read_bytes(), (output.parent / name).read_bytes())
+            self.assertEqual(receipt['artifact_sha256'][name], hashlib.sha256(immutable.read_bytes()).hexdigest())
+        self.assertEqual(raw.read_bytes(), b'original scene')
+        self.assertEqual(save.read_bytes(), bytes(range(160)))
 
     def test_recorded_controls_match_hexadecimal_replay_words(self):
         p = self.write('controls.tsv', trace(0).replace('controls\t1\n', 'controls\t512\n', 1))
@@ -210,6 +234,20 @@ class Tooling(unittest.TestCase):
             report, code = verify(binary, [fixture], self.root)
             self.assertEqual(code, 1)
 
+    def test_replay_timeout_cannot_pass_acceptance(self):
+        fixture = self.write('human.tsv', trace(0))
+        atomic_json(str(fixture) + '.receipt.json', validate_trace(fixture, True))
+        capability = subprocess.CompletedProcess([], 0, 'human-controls-single-anchor\n', '')
+        with patch('verify_sim.reference_hash', return_value=EXE), \
+             patch('verify_sim.run_binary', side_effect=[
+                 capability, subprocess.TimeoutExpired('replay', 600)]) as run:
+            report, code = verify(self.root / 'binary', [fixture], self.root, timeout=600)
+        self.assertEqual(run.call_args.args[-1], 600)
+        self.assertEqual(code, 1)
+        self.assertFalse(report['acceptance_met'])
+        self.assertEqual(report['counts']['unexpected-failure'], 1)
+        self.assertIn('timed out', report['outcomes'][0]['error'])
+
     def setup_fake_capture(self, body):
         workspace = self.root / 'workspace'
         install = workspace / 'prefix/drive_c/ElectronicArts/RoadRashOracle'
@@ -229,8 +267,57 @@ class Tooling(unittest.TestCase):
                                   scenario='scenario', session='test-capture', timeout=2)
         return args, digest
 
-    @unittest.skipIf(os.name == 'nt', 'Wine-prefix oracle capture runs on macOS/Linux hosts (plan 33b)')
+    @contextlib.contextmanager
+    def native_capture_contract(self, outcome):
+        # Synthetic files and mocked OS boundaries only. Never load the real
+        # executable, registry, capture helper or DLL in these unit tests.
+        install = self.root / ('native-' + outcome)
+        install.mkdir()
+        (install / 'ROADRASH.EXE').write_bytes(b'synthetic executable')
+        (install / 'AWEMAN32.DLL').write_bytes(b'proxy')
+        digest = hashlib.sha256(b'synthetic executable').hexdigest()
+        args = argparse.Namespace(install=install, live_hooks=install / 'synthetic-hooks.dll',
+            output=self.root / ('accepted-' + outcome) / 'scenario.tsv', scenario='scenario',
+            session='test-capture', timeout=2)
+        args.output.parent.mkdir()
+        state = {'phase': 'prepared'}
+
+        @contextlib.contextmanager
+        def instrument(where, helper):
+            self.assertEqual(where, install.resolve())
+            state['phase'] = 'installed'
+            try:
+                yield state
+            finally:
+                state['phase'] = 'restored'
+
+        def process(command, cwd, env, log, timeout):
+            self.assertEqual(command, [str(install / 'ROADRASH.EXE')])
+            self.assertEqual(cwd, install)
+            Path(log).write_text('synthetic process log')
+            Path(env['RR_ORACLE_OUT']).write_text(
+                '# rr-oracle 1\n' if outcome == 'partial' else trace().replace(EXE, digest))
+            return 8 if outcome == 'exit' else 0
+
+        with patch('oracle_windows.runtime_profile', return_value={'runtime_exe_sha256': digest}), \
+             patch('oracle_windows.instrument_live', instrument), \
+             patch('oracle_windows.working_registry', return_value=contextlib.nullcontext('synthetic-key')), \
+             patch('oracle_windows.run_owned', side_effect=process), \
+             patch.dict(os.environ, {'RR_ORACLE_SIM': '1', 'RR_ORACLE_FRAMES': '2'}):
+            yield args, state
+
     def test_failed_capture_preserves_accepted_and_releases_resources(self):
+        if os.name == 'nt':
+            for outcome in ['partial', 'exit']:
+                with self.subTest(outcome=outcome), self.native_capture_contract(outcome) as (args, state):
+                    args.output.write_text('previous accepted')
+                    with self.assertRaises(ValueError):
+                        capture(args)
+                    self.assertEqual(args.output.read_text(), 'previous accepted')
+                    self.assertEqual(state['phase'], 'restored')
+                    self.assertEqual(ResourceClaims().list(), [])
+                    self.assertTrue(list((args.output.parent / 'failed-captures').glob('*/failure.json')))
+            return
         for body in ['out.write_text("# rr-oracle 1\\n")\n',
                      'out.write_text(GOOD)\nraise SystemExit(8)\n']:
             # Independent fake prefix per case.
@@ -251,8 +338,20 @@ class Tooling(unittest.TestCase):
                 finally:
                     self.root = saved
 
-    @unittest.skipIf(os.name == 'nt', 'Wine-prefix oracle capture runs on macOS/Linux hosts (plan 33b)')
     def test_capture_publish_receipt_and_immutable_run(self):
+        if os.name == 'nt':
+            with self.native_capture_contract('success') as (args, state), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                capture(args)
+            receipt = json.loads(Path(str(args.output) + '.receipt.json').read_text())
+            self.assertTrue(receipt['complete'])
+            self.assertEqual(state['phase'], 'restored')
+            self.assertEqual(receipt['aweman_instrumentation']['phase'], 'restored')
+            self.assertEqual(receipt['proxy_sha256'], hashlib.sha256(b'proxy').hexdigest())
+            self.assertEqual(receipt['trace_sha256'], hashlib.sha256(args.output.read_bytes()).hexdigest())
+            self.assertTrue(Path(receipt['trace']).exists())
+            self.assertEqual(ResourceClaims().list(), [])
+            return
         args, digest = self.setup_fake_capture('out.write_text(GOOD)\n')
         with patch('oracle_capture.reference_hash', return_value=digest), \
              patch.dict(os.environ, {'RR_ORACLE_SIM': '1', 'RR_ORACLE_FRAMES': '2'}), \

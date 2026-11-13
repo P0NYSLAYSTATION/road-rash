@@ -87,6 +87,7 @@ if(RR_NET_TRANSPORT)
 endif()
 if(NOT EMSCRIPTEN)
     add_test(NAME net_deploy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/net_deploy_test.py)
-    # deploy.py needs fcntl: a unit test on POSIX hosts, skipped (77) on Windows.
-    set_tests_properties(net_deploy PROPERTIES SKIP_RETURN_CODE 77 LABELS "unit;posix")
+    # File/command deployment contracts run on Windows too. The service's
+    # process lock is imported only by its POSIX deployment entry point.
+    set_tests_properties(net_deploy PROPERTIES LABELS "unit")
 endif()

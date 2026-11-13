@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "animation.hpp"
 #include "assets.hpp"
 #include "family.hpp"
@@ -52,7 +53,7 @@ int main() {
             rejected = true;
         }
         if (!rejected) throw std::runtime_error("Invalid pixel offset accepted");
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/FAMILIES.RSC")) {
             std::cout << "Imported animation corpus absent\n";
             return 0;

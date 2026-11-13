@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Natural-frame display-list check: the original's own pending display nodes for a captured race
 // frame (oracle dump_scene) are converted to native DrawNodes, resources identified by their mip-0
 // hash, and rendered over the original frame. Every pixel must equal the original final pixel.
@@ -83,7 +84,7 @@ uint8_t player_row_byte(const rr::scene::Dump& dump, const std::vector<uint8_t>&
 int native_actors(const std::string& tsv, const rr::Assets& assets) {
     const auto golden = rr::golden::load(tsv);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
-    if (golden.exe != "73d7f9744b5b1a9482b3909950cdf3fe34119fe13d023b031e9c6739a60f18a2") {
+    if (!rr::golden::original_executable(golden.exe)) {
         std::cerr << "Oracle capture is from a different executable\n";
         return 1;
     }
@@ -102,7 +103,9 @@ int native_actors(const std::string& tsv, const rr::Assets& assets) {
         const int64_t scene_file = frame.at("scene.file");
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(scene_file) + ".raw");
         if (dump.version < 4 || dump.riders.empty() || !frame.count("actor.sel.count")) {
-            std::cout << "frame " << scene_file << ": skip (needs v4 dump + actor hooks recapture)\n";
+            std::cerr << "FAIL frame " << scene_file
+                      << ": native actor comparison requires v4 dump and actor hooks\n";
+            ++failures;
             continue;
         }
         const uint8_t prow = player_row_byte(dump, exe);
@@ -330,6 +333,10 @@ int native_actors(const std::string& tsv, const rr::Assets& assets) {
             std::cout << "frame " << scene_file << ": " << frame_checked << " actor nodes match\n";
         }
     }
+    if (!frames || !nodes) {
+        std::cerr << "FAIL native actor comparison has no measured frame/node coverage\n";
+        ++failures;
+    }
     std::cout << frames << " frames, " << nodes << " actor nodes, " << failures << " failures\n";
     return failures ? 1 : 0;
 }
@@ -372,7 +379,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
     // Native nodes keyed by points and flips; textures compare by the dump's
     // mip-0 hash (several disc resources share pixels under other names).
     using Key = std::tuple<std::array<int32_t, 8>, bool, bool>;
-    size_t frames = 0, matched = 0, missing = 0, others = 0, grounds = 0, ground_failures = 0;
+    size_t frames = 0, matched = 0, missing = 0, others = 0, grounds = 0, ground_failures = 0, cached_ground_differences = 0;
     for (const auto& f : golden.frames) {
         if (!f.count("scene.file")) continue;
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(f.at("scene.file")) + ".raw");
@@ -389,6 +396,8 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
             const int type = dump.memory.u8(sub + 0x3c);
             if (cc != rs.offset) return false;
             t = scene.terrain(rs.section, rs.local);
+            t.side_heights = std::array{I(0x144), I(0x140)};
+            t.selectors = {dump.memory.u8(sub + 0x148), dump.memory.u8(sub + 0x149)};
             if (type != t.type)
                 throw std::runtime_error("Sub-slice type differs at sample " + std::to_string(sample));
             if (type == 4)
@@ -469,6 +478,20 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
                     for (auto j = range.first; j != range.second; ++j)
                         std::cout << " | native " << (j->second.texture ? j->second.texture->name : "flat");
                     std::cout << '\n';
+                    const Key* nearest = nullptr;
+                    int64_t distance = INT64_MAX;
+                    for (const auto& [key, node] : native) {
+                        if (!node.texture || node.texture->name != name) continue;
+                        int64_t candidate = 0;
+                        for (size_t k = 0; k < v.size(); ++k)
+                            candidate += std::abs(int64_t(v[k]) - std::get<0>(key)[k]);
+                        if (candidate < distance) { distance = candidate; nearest = &key; }
+                    }
+                    if (nearest) {
+                        std::cout << "    nearest " << name << " at";
+                        for (auto value : std::get<0>(*nearest)) std::cout << ' ' << value;
+                        std::cout << " camera " << position << " half " << f.at("camera.half") << '\n';
+                    }
                 }
                 continue;
             }
@@ -482,7 +505,8 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
             rr::TerrainSlice t, tn;
             size_t sample = 0, next_sample = 0;
             if (!load(sub, t, sample)) continue;
-            if (!dump.memory.has(sub + 8) || !load(dump.memory.u32(sub + 8), tn, next_sample)) {
+            const uint32_t forward = sub + (t.type == 4 ? 0x0c : 8);
+            if (!dump.memory.has(forward) || !load(dump.memory.u32(forward), tn, next_sample)) {
                 tn = t;
                 next_sample = sample;
             }
@@ -491,8 +515,22 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
             const int32_t got =
                 rr::terrain_height(t, rs.path, tn, rn.path, r.bike_i32(0x28) - rs.offset * 256,
                                    uint8_t(r.bike_i32(0x138)), rn.offset - rs.offset, rs.offset);
+            const std::string query = "terrain.query." + std::to_string(r.address) + ".";
+            const bool fresh = f.count(query + "height") != 0;
+            if (fresh && (f.at(query + "sub") != sub || f.at(query + "lateral") != r.bike_i32(0x28) ||
+                          uint32_t(f.at(query + "fraction")) != uint32_t(r.bike_i32(0x138))))
+                throw std::runtime_error("Ground query inputs differ from captured object");
+            const int32_t original = fresh ? int32_t(f.at(query + "height")) : r.bike_i32(0x24);
+            if (fresh && original != r.bike_i32(0x24)) ++cached_ground_differences;
             ++grounds;
-            if (got != r.bike_i32(0x24)) ++ground_failures;
+            if (got != original) {
+                if (ground_failures < 20)
+                    std::cerr << "ground mismatch frame " << f.at("scene.file") << " rider " << r.address
+                              << " sample " << sample << " type " << int(t.type) << " original "
+                              << original << " native " << got << " lateral " << r.bike_i32(0x28)
+                              << " swept " << r.bike_i32(0x138) << '\n';
+                ++ground_failures;
+            }
         }
         ++frames;
         missing += frame_missing;
@@ -506,7 +544,8 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
     }
     std::cout << frames << " frames: " << matched << " terrain nodes match, " << missing << " missing, "
               << others << " scenery/actor nodes not compared; " << grounds << " rider grounds, "
-              << ground_failures << " differ\n";
+              << ground_failures << " differ; " << cached_ground_differences
+              << " stored grounds differ from fresh queries\n";
     return missing || (check_ground && ground_failures) ? 1 : 0;
 }
 } // namespace
@@ -515,7 +554,7 @@ int run(int argc, char** argv) {
     bool actors_mode = false, terrain_mode = false, check_ground = true;
     const std::string dir = rr::golden::oracle_dir();
     std::string tsv = dir + "/city-scene.tsv";
-    std::string assets_root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    std::string assets_root = rr::test::assets_root();
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--native-actors")

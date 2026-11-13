@@ -124,7 +124,11 @@ struct FieldReplay {
             }
             const auto& p = *native;
             const auto& b = p.body.bike;
-            for (int offset : {0x104, 0x108, 0x10c, 0x128}) {
+            // Optional extended motion words also cover allocation-time ground
+            // height and its previous-position copy. Older immutable captures
+            // omit them; new captures compare them without seeding native state.
+            for (int offset : {0x20, 0x24, 0x30, 0x34, 0x38, 0x3c, 0xf4,
+                               0x104, 0x108, 0x10c, 0x128}) {
                 char field[8];
                 std::snprintf(field, sizeof field, "%x", offset);
                 if (f.count(prefix + field)) check(f, prefix + field, b.i32(offset));
@@ -276,6 +280,7 @@ struct FieldReplay {
         check(f, p + "position", b.i32(0x1c));
         check(f, p + "lateral", b.i32(0x28));
         check(f, p + "height", b.i32(0x20));
+        if (f.count(p + "terrain_ground")) check(f, p + "terrain_ground", b.i32(0x24));
         check(f, p + "velocity", b.i32(0xf4));
         check(f, p + "speed", b.i32(0xec));
         check(f, p + "gear", b.i32(0x23c));
@@ -290,12 +295,20 @@ struct FieldReplay {
         check(f, p + "lat108", b.i32(0x108));
         check(f, p + "lat10c", b.i32(0x10c));
         check(f, p + "yaw60", b.i32(0x60));
-        // slice_ptr is a host pointer: compare the sample through position.
-        if (diff.empty()) {
-            const auto pos = f.find(p + "position");
-            if (pos != f.end() && size_t(uint32_t(pos->second) >> 8) != r.sample)
-                diff = p + "slice sample original " + std::to_string(uint32_t(pos->second) >> 8) +
-                       " native " + std::to_string(r.sample);
+        // 0045539a builds the fixed 128-row ring at0049f250, stride2f8;
+        // its sub-slices start at30/194. Normalize the measured pointer,
+        // rather than inferring a slice from position: an object can move
+        // past a self-linked split end while retaining the endpoint slice.
+        const auto slice = f.find(p + "slice_ptr");
+        if (diff.empty() && slice != f.end() && slice->second != 0) {
+            used.insert(slice->first);
+            const int64_t offset = slice->second - 0x0049f250;
+            const int64_t part = offset % 0x2f8;
+            if (offset < 0 || offset >= 128 * 0x2f8 || (part != 0x30 && part != 0x194))
+                fail(p + "slice pointer outside original ring");
+            else if (size_t(offset / 0x2f8) != (r.sample & 127))
+                fail(p + "slice slot original " + std::to_string(offset / 0x2f8) +
+                     " native " + std::to_string(r.sample & 127));
         }
         for (const auto& [key, value] : f) {
             if (!diff.empty() && !all) return;
@@ -708,6 +721,12 @@ struct FieldReplay {
         const auto& f = g.frames.at(i);
         diff.clear();
         if (f.count("capture.finished")) check(f, "capture.finished", race().riders()[0].finished ? 1 : 0);
+        if (f.count("race.outcome")) check(f, "race.outcome", race().human_outcome(0).code);
+        if (f.count("capture.outcome")) check(f, "capture.outcome", race().human_outcome(0).code);
+        if (f.count("input.knock_applied")) {
+            const auto at = g.frames.front().at("input.knock_tick");
+            check(f, "input.knock_applied", race().ticks() >= at ? at : 0);
+        }
         if (counted_rng && f.count("rng_calls"))
             check(f, "rng_calls", int64_t(race().rng_draw_count() - previous_rng_draws));
         previous_rng_draws = race().rng_draw_count();
@@ -733,6 +752,22 @@ struct FieldReplay {
         const auto native_slots = slots();
         trace(i, native_slots);
         check(f, "riders", int64_t(native_slots.size()));
+        // Police are allocated after frame zero. Their half's measured
+        // +1c4 backlink identifies the new bike; the startup node list alone
+        // cannot resolve later AI target/overtake pointers to that rider.
+        std::map<int64_t, int> live_bikes;
+        for (size_t k = 0; k < native_slots.size() && diff.empty(); ++k) {
+            const auto address = f.find("rider." + std::to_string(k) + ".raw_1c4");
+            if (address == f.end() || !address->second) continue;
+            const int rider = native_slots[k].first;
+            const auto [at, inserted] = live_bikes.emplace(address->second, rider);
+            if (!inserted && at->second != rider) {
+                fail("captured bike backlink identifies two different riders");
+                break;
+            }
+            identity[address->second] = rider;
+            address_type[address->second] = 4;
+        }
         for (size_t k = 0; k < native_slots.size() && (diff.empty() || all); ++k) {
             const std::string p = "rider." + std::to_string(k) + ".";
             const Rider& r = race().riders()[size_t(native_slots[k].first)];
@@ -853,6 +888,9 @@ struct FieldReplay {
             const auto& f = g.frames[i];
             const auto fc = f.find("controls");
             if (fc == f.end()) throw std::runtime_error("frame lacks controls");
+            const auto knock = g.frames.front().find("input.knock_tick");
+            if (knock != g.frames.front().end() && knock->second == race().ticks() + 1)
+                race().crash_now(race().riders()[0]);
             race().step(demo ? 0 : uint32_t(fc->second));
             const auto ft = f.find("tick");
             if (ft == f.end() || ft->second != tick0 + int64_t(i)) {

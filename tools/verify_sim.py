@@ -100,11 +100,15 @@ def main():
                         'human for acceptance (which requires a human capture) and '
                         'demo for diagnostic')
     p.add_argument('--binary', type=Path, default=ROOT / 'build/oracle-sim-test')
-    p.add_argument('--assets', type=Path, default=ROOT.parent / 'cdrom/ROADRASH')
+    p.add_argument('--assets', type=Path, default=Path(os.environ.get('RR_ASSETS', ROOT.parent / 'cdrom/ROADRASH')))
     p.add_argument('--fixture', type=Path, action='append')
     p.add_argument('--rules', type=Path, default=ROOT / 'tools/sim_known_divergences.json')
     p.add_argument('--report', type=Path)
+    p.add_argument('--timeout', type=int, default=120,
+                   help='seconds allowed per replay process (default: 120)')
     args = p.parse_args()
+    if args.timeout <= 0:
+        p.error('--timeout must be positive')
     directory = Path(os.environ.get('RR_ORACLE_DIR', ROOT / 'analysis/oracle'))
     if args.mode == 'diagnostic':
         fixtures = args.fixture or [directory / 'sim-napa-solo.tsv']
@@ -116,7 +120,7 @@ def main():
         driver = args.driver or 'human'
     rules = json.loads(args.rules.read_text())
     report, code = verify(args.binary.resolve(), fixtures, args.assets.resolve(), args.mode, rules,
-                          driver=driver, whole_race=args.whole_race)
+                          timeout=args.timeout, driver=driver, whole_race=args.whole_race)
     if args.report:
         atomic_json(args.report, report)
     print(json.dumps(report, indent=2))

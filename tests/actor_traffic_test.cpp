@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "traffic.hpp"
 #include "assets.hpp"
 #include <fstream>
@@ -6,7 +7,7 @@
 #include <iostream>
 int main(int argc, char** argv) {
     try {
-        rr::Assets assets(RR_SOURCE_DIR "/../cdrom/ROADRASH");
+        rr::Assets assets(rr::test::assets_root());
         if (!assets.exists("DATA/CARS/NAPA.CAR")) {
             std::cout << "Imported actor traffic corpus absent\n";
             return 0;

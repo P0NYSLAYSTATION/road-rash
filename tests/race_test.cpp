@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 #include "race.hpp"
 #include <cstdlib>
 #include "track_ring.hpp"
@@ -1107,7 +1108,7 @@ int main() {
     }
 
     // Original field from the executable (skips without the disc).
-    const std::string game = std::string(RR_SOURCE_DIR) + "/../cdrom/ROADRASH";
+    const std::string game = rr::test::assets_root();
     if (std::filesystem::exists(game + "/ROADRASH.EXE")) {
         rr::Assets assets(game);
         const auto exe = assets.read("ROADRASH.EXE");

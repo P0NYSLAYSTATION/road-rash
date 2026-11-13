@@ -1,3 +1,4 @@
+#include "test_assets.hpp"
 // Plan 32 A/B: exercise the real screen loop with controlled frame times.
 #include "race_screen.hpp"
 #include "race_helpers.hpp"
@@ -36,7 +37,7 @@ int main() {
             std::cerr << "FAIL " << message << '\n';
         }
     };
-    const std::string root = RR_SOURCE_DIR "/../cdrom/ROADRASH";
+    const std::string root = rr::test::assets_root();
     if (!std::filesystem::exists(root + "/ROADRASH.EXE")) return 77;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         std::cerr << SDL_GetError();
@@ -51,7 +52,7 @@ int main() {
         return 1;
     }
     try {
-        rr::Assets assets(root);
+        rr::Assets assets(root, rr::test::media_root());
         const auto exe = assets.read("ROADRASH.EXE");
         rr::Settings settings;
         rr::DisplayDriver display;
@@ -153,6 +154,9 @@ int main() {
                   "first resumed tick initializes both snapshots");
             screen.event(event(SDL_EVENT_RENDER_DEVICE_RESET));
             check(screen.iterate(now += 17000000), "renderer reset while active remains usable");
+            // This screen-transition fixture uses a synthetic nearby line.
+            // Normal races discover their finish from the live course ring.
+            game.race().set_finish_course(nullptr);
             game.race().set_finish_q8(int32_t(game.race().position()));
             for (int i = 0; i < 600 && !game.race().finished(); ++i) game.tick(rr::control_accelerate);
             check(game.race().finished(), "fixture reaches an actual race finish");
@@ -292,6 +296,46 @@ int main() {
                     check(rr::capture_race_frame(renderer).pixels == original_frame,
                           "Original pixels agree at 30/60/120 FPS");
             }
+        // Nearby synthetic line isolates result timing. No opponents can
+        // crash the normal-braking case. A separate explicit knock checks
+        // 004346c6's finish-latched crash branch, which has no speed gate.
+        game.config.opponents = 0;
+        game.load_course(assets, exe);
+        for (const bool crashed_finish : {false, true}) {
+            game.restart();
+            game.countdown = 0;
+            game.career = true;
+            auto& finish_bike = game.race().riders()[0].bike;
+            finish_bike.i32(0xec) = finish_bike.i32(0x108) = 12000;
+            game.race().set_finish_course(nullptr);
+            game.race().set_finish_q8(int32_t(game.race().position()) + 256);
+            rr::RaceScreen screen(game, renderer, options, display);
+            uint64_t now = 1000000000ull;
+            bool running = screen.iterate(now), crashed = false;
+            int crossed = -1, controls_ended = -1;
+            for (int frame = 0; running && frame < 600; ++frame) {
+                running = screen.iterate(now += 16666667);
+                if (crossed < 0 && game.race().finished()) {
+                    crossed = game.race().ticks();
+                    if (crashed_finish)
+                        game.race().knock_off(game.race().riders()[0], 5000, 0, 1);
+                }
+                if (controls_ended < 0) crashed |= game.race().bike().i32(0x2f4) != 0;
+                if (controls_ended < 0 && game.race().riders()[0].finish_controls_ended)
+                    controls_ended = game.race().ticks();
+            }
+            if (crossed < 0 || controls_ended <= crossed)
+                std::cerr << "finish fixture: crashed_finish=" << crashed_finish << " crossed=" << crossed
+                          << " controls_ended=" << controls_ended << " tick=" << game.race().ticks()
+                          << " running=" << running << " speed=" << game.race().speed()
+                          << " crash=" << game.race().bike().i32(0x2f4) << '\n';
+            check(crashed == crashed_finish, "normal and crashed finish scenarios exercise distinct branches");
+            check(crossed >= 0 && controls_ended > crossed,
+                  "finish crossing precedes braking/crash result handoff");
+            check(!running && controls_ended >= 0 &&
+                      game.race().ticks() == controls_ended + rr::race_end_delay,
+                  "finish result delay starts at result handoff, not at line crossing");
+        }
         // Plan 32 D / plan 24 Task 2: start with a real periodic cop, then
         // let the screen advance the chase and arrest. Carry its result into
         // the same frontend entry point used by the game host.
@@ -306,25 +350,41 @@ int main() {
             game.restart();
             game.countdown = 0;
             game.career = true;
-            while (game.race().ticks() < 4096) game.tick(0);
+            for (int attempts = 0; game.race().ticks() < 4096 && attempts < 4096; ++attempts) game.tick(0);
+            check(game.race().ticks() == 4096, "arrest fixture advances to the cop arrival tick");
             check(game.race().cop_index() > 0 && !game.race().busted(),
                   "periodic cop enters the live game before the arrest");
-            // A stamina knockdown leaves the bike usable; consuming all bike
-            // condition would correctly end the screen as wrecked first.
+            // This is screen/result integration, not an assertion that every
+            // arbitrary field/RNG stream makes a pursuing cop stop in range.
+            // Original pursuit parity is checked by the strict police replay.
+            // Enter the real arrest predicate's measured window with the live
+            // periodic cop; keep the riding and walking branches distinct.
             if (on_foot) {
-                for (int tick = 0; tick < 1000 && !game.race().busted(); ++tick) {
-                    const auto& cop = game.race().riders()[size_t(game.race().cop_index())];
-                    if (game.race().bike().i32(0x1c) - cop.bike.i32(0x1c) < 5000) break;
-                    game.tick(0);
-                }
-                check(!game.race().busted(), "cop approaches before the knockdown");
                 game.race().knock_off(game.race().riders()[0], 5000, 0, 1);
+                for (int tick = 0; tick < 1200 && game.race().bike().i32(0x2f4) != 2 &&
+                                   !game.race().busted(); ++tick) game.tick(0);
+                check(game.race().bike().i32(0x2f4) == 2 && !game.race().busted(),
+                      "walking arrest fixture reaches the walking state before arrest");
             }
+            auto& player = game.race().riders()[0];
+            auto& cop = game.race().riders()[size_t(game.race().cop_index())];
+            const auto& body = on_foot ? player.crash_actor.motion : player.bike;
+            cop.bike.i32(0x1c) = body.i32(0x1c) - 128;
+            cop.bike.i32(0x28) = body.i32(0x28) + 25600;
+            cop.bike.i32(0xec) = cop.bike.i32(0x108) = 0;
+            cop.half_mirror = player.half_mirror;
+            cop.half_mirror.position = cop.bike.i32(0x1c);
+            cop.half_mirror.lateral = cop.bike.i32(0x28);
+            cop.half_mirror.speed = 0;
+            cop.half_object.i32(0x1c) = cop.bike.i32(0x1c);
+            cop.sample = player.sample;
+            cop.route = player.route;
+            player.bike.i32(0xec) = player.bike.i32(0x108) = 0;
             rr::RaceScreen screen(game, renderer, options, display);
             uint64_t now = 1000000000ull;
             bool running = screen.iterate(now);
             bool walked = false;
-            for (int frame = 0; running && !game.race().busted() && frame < 6000; ++frame) {
+            for (int frame = 0; running && !game.race().busted() && frame < 120; ++frame) {
                 running = screen.iterate(now += 16666667);
                 walked |= game.race().bike().i32(0x2f4) == 2;
             }
