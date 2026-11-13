@@ -115,6 +115,11 @@ int main(int argc, char** argv) {
                         pixel(819, 589) == 0xff0000 && pixel(820, 590) == 0,
                     "integer image is not centered at exact 1x scale");
             require(present_frame(renderer), "DirectX 9 integer presentation");
+            require(SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.width", 0) ==
+                            640 &&
+                        SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.height",
+                                              0) == 480,
+                    "640x480 integer presentation used a window-sized framebuffer");
             int w, h;
             SDL_RendererLogicalPresentation mode;
             SDL_GetRenderLogicalPresentation(renderer, &w, &h, &mode);

@@ -3532,3 +3532,16 @@ See [integration and release correction](agent-handoffs/windows-branch-merge-202
 Merge 85ca5ec is on the remote Windows branch. Initial gate: 146/156 pass;
 ten missing police capture paths are being supplied and rerun, not waived.
 Six strict replay comparisons pass. Installer packaging now enforces the clean Windows branch.
+
+
+## DirectX integer scaling correction
+
+The DirectX presenter now reads the game viewport into a 640x480 framebuffer
+(or 320x240 in low-resolution mode) and applies the selected presentation
+rectangle explicitly for both resolutions. Previously only low-resolution mode
+did this; the other path uploaded a window-sized image and relied on SDL borders.
+This removes that dependence and applies integer scaling once at final output.
+The existing integer-framebuffer check now also requires the 640x480 native
+framebuffer. Focused MSVC Release build and integer-framebuffer check pass;
+logs: build/integer-scaling-fix-build.log and integer-scaling-fix-test.log.
+No simulation replays or installer upgrade runs were performed for this fix.

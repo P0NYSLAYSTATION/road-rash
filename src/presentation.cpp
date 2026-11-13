@@ -111,15 +111,18 @@ struct Backend {
         int logical_w = 640, logical_h = 480;
         SDL_RendererLogicalPresentation mode;
         SDL_GetRenderLogicalPresentation(renderer, &logical_w, &logical_h, &mode);
-        SDL_Surface* raw =
-            low_resolution ? SDL_RenderReadPixels(renderer, nullptr) : read_presentation_frame(renderer);
+        // Read the game viewport, not a desktop-sized image with SDL's
+        // presentation already baked in. D3D applies the output scale once.
+        SDL_Surface* raw = SDL_RenderReadPixels(renderer, nullptr);
         if (!raw) return false;
         SDL_Surface* frame = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
         SDL_DestroySurface(raw);
         if (!frame) return false;
         float left = -.5f, top = -.5f, right = float(client.right) - .5f, bottom = float(client.bottom) - .5f;
-        if (low_resolution) {
-            const int native_w = std::max(1, logical_w / 2), native_h = std::max(1, logical_h / 2);
+        if (logical_w > 0 && logical_h > 0 && mode != SDL_LOGICAL_PRESENTATION_DISABLED) {
+            const int divisor = low_resolution ? 2 : 1;
+            const int native_w = std::max(1, logical_w / divisor);
+            const int native_h = std::max(1, logical_h / divisor);
             auto* native = SDL_CreateSurface(native_w, native_h, SDL_PIXELFORMAT_ARGB8888);
             if (!native) {
                 SDL_DestroySurface(frame);
