@@ -13,6 +13,7 @@ struct AnimationFrame {
     // slice for the 0x004373f0 sweep). Empty when the frame has none.
     std::vector<std::array<int32_t, 4>> boxes;
     uint32_t collision_reference = 0; // unused legacy references are retained, never dereferenced
+    uint32_t collision_source_offset = 0; // byte offset into the reusable family buffer
     uint32_t flags = 0;
     uint16_t width = 0, height = 0;
 };

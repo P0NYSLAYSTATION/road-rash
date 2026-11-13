@@ -36,6 +36,12 @@ int main() {
         if (decoded.frames.size() != 1 || decoded.frames[0].hotspot != std::array<int32_t, 2>{-2, 3} ||
             decoded.frames[0].flags != 7 || decoded.frames[0].legacy_pixel_word != 0x17001e00)
             throw std::runtime_error("Synthetic animation fields");
+        std::vector<uint8_t> embedded(64, 0);
+        embedded.insert(embedded.end(), synthetic.begin(), synthetic.end());
+        const auto relocated = rr::read_animation(embedded, 64);
+        if (relocated.frames[0].collision_source_offset != 64 + 204 ||
+            relocated.frames[0].boxes != decoded.frames[0].boxes)
+            throw std::runtime_error("Embedded collision pointer lost its family-buffer origin");
         for (size_t length = 0; length < synthetic.size(); ++length) {
             bool rejected = false;
             try {

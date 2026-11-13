@@ -198,6 +198,7 @@ struct Rider {
     int slot = 0;                           // grid slot 0..7 (0x00464218); 0 is the player
     int rider_idx = 0;                      // 0x00463c78 row / personality index (0x00405990 param_6)
     size_t sample = 0, previous_sample = 0; // bike +0x140 / +0x13c
+    std::optional<uint8_t> slice_half, previous_slice_half; // retained physical sub-slice pointers
     std::optional<size_t> wall_previous_sample; // +0x40, copied from +0x2c at the start of this mover
     bool ai = false;
     bool cop = false;    // the police rider (DAT_004642dc, 0x00406b80); never in places or finish order
@@ -248,6 +249,7 @@ struct Rider {
                 lat108 = 0, yaw = 0;
         size_t sample = 0;
         int route = 0;
+        std::optional<uint8_t> slice_half;
     };
     HalfMirror half_mirror;
     // Rider-half object image (0x00405990: 0x004387a0 from table 0x00463c10).
@@ -264,6 +266,7 @@ struct Rider {
     bool finished = false;
     // 00416010 outcome latch, distinct from crossing the finish line.
     bool finish_controls_ended = false;
+    int result_code = 1; // original player-global result, latched by00416010
     int32_t finish_tick = -1;
     CrashActor crash_actor;
     ActorAnimationState crash_bike_animation;
@@ -509,6 +512,10 @@ class Race {
         int32_t tick = -1;
     };
     HumanOutcome human_outcome(int seat) const;
+    // 00416010 result registration. Crossing/zero condition can precede
+    // this event; a terminal result cannot be overwritten during run-on.
+    void register_result(Rider&, int code);
+    int race_outcome() const { return riders_[0].result_code; }
     bool all_humans_done() const;
     // Render/audio only: a detached copy with the followed rider in row zero.
     // Never step this copy or feed its state back to the authoritative race.
@@ -535,16 +542,21 @@ class Race {
         std::optional<std::array<int32_t, 4>> box; // first loaded BORR box (+0x68)
     };
     StaticSliceState static_slice_state(const Rider& r) const {
-        return static_slice_state(r.route, r.sample);
+        return static_slice_state(r.route, r.sample, r.slice_half);
     }
-    StaticSliceState static_slice_state(int route, size_t sample) const {
+    StaticSliceState static_slice_state(int route, size_t sample, std::optional<uint8_t> half = {}) const {
         StaticSliceState out;
-        const auto& table = statics_[route];
+        const int physical_half = ring_ && sample < routes_[route]->size()
+                                      ? half.value_or((*routes_[route])[sample].half) : route;
+        const auto& table = statics_[physical_half];
         if (sample >= table.size() || !table[sample].built) return out;
         const auto& s = table[sample];
         out = {true,         s.boxes_ready,           s.borr_count, s.borr_count ? s.borr[0] : 0,
-               s.billboards, slice_ac(route, sample), std::nullopt};
-        if (s.boxes_ready && s.borr_frame && !s.borr_frame->boxes.empty()) out.box = s.borr_frame->boxes[0];
+               s.billboards, slice_ac(physical_half, sample), std::nullopt};
+        if (s.boxes_ready && s.borr_frame) {
+            const auto boxes = resolved_static_boxes(*s.borr_frame, s.borr_selector);
+            if (!boxes.empty()) out.box = boxes[0];
+        }
         return out;
     }
     const std::vector<RouteSample>& route_for(int road) const { return *routes_[road]; }
@@ -578,6 +590,9 @@ class Race {
                                                              uint8_t selector, bool billboard)>;
     void set_road_separation_limits(const std::array<int32_t, 32>& limits) { road_separation_limits_ = limits; }
     void set_static_frames(StaticFrames frames);
+    using StaticBoxes = std::function<std::vector<std::array<int32_t, 4>>(
+        const AnimationFrame&, const std::vector<uint16_t>&)>;
+    void set_static_boxes(StaticBoxes boxes) { static_boxes_ = std::move(boxes); }
     // Plan 34 Task 3: size the ring-terrain overlay (scene section lengths)
     // and record one ring slice's terrain for the simulation.
     void set_ground_layout(const std::vector<uint32_t>& section_sizes);
@@ -642,7 +657,7 @@ class Race {
     void cross_sample(Rider&, int32_t delta);
     void accumulate(Rider&, uint32_t from, uint32_t to, size_t from_sample, size_t to_sample);
     void move(Rider&, bool player);
-    void vertical(Rider&);
+    void vertical(Rider&, Rider* half_owner = nullptr);
     int32_t allocation_ground(const Rider&, const RouteSample& freshly_built) const;
     // 0x0043a610 on the sub-slice values of a route sample (absolute laterals).
     struct SubSliceView {
@@ -703,6 +718,9 @@ class Race {
         int rank = -1;   // ascending mixed-node order at the last sort
         int rider = -1, pedestrian = -1, car = -1, roadside = -1;
         const RouteSample* sample = nullptr; // the object's slice (+0x2c)
+        int32_t slice_position = 0; // retained physical slot, which can differ from position
+        uint8_t roadway_mask = 0;
+        std::optional<uint8_t> slice_half;
     };
     void build_scan_list() const;
     void contact_car_nodes(const ScanObject&, const ScanObject&);
@@ -896,7 +914,7 @@ class Race {
                                               std::make_shared<const DzhrTable>()}; // DZHR solids per sample
     struct StaticSlice {
         bool built = false, boxes_ready = false;
-        uint8_t borr_count = 0;
+        uint8_t borr_count = 0, borr_selector = 0x3f;
         std::array<int32_t, 8> borr{}; // absolute laterals, units (+0x6c)
         const AnimationFrame* borr_frame = nullptr;
         uint8_t billboards = 0;
@@ -912,8 +930,10 @@ class Race {
     // it with the boxes, and the slot rebuild (0x00451cb0) never clears it.
     std::array<std::array<uint32_t, 128>, 2> slot_ac_{};
     uint32_t slice_ac(int road, size_t sample) const { return slot_ac_[size_t(road)][sample & 127]; }
-    CowVector<StaticSlice> statics_[2]; // mutable (ring builds), copy-on-write for snapshots
+    CowVector<StaticSlice> statics_[2]; // physical halves with a ring; copy-on-write for snapshots
     StaticFrames static_frames_;
+    StaticBoxes static_boxes_;
+    std::vector<std::array<int32_t, 4>> resolved_static_boxes(const AnimationFrame&, uint8_t selector) const;
     std::optional<std::array<int32_t, 32>> road_separation_limits_;
     Rider static_actor_{}; // 0x004c3e90 static hazard object (rebuilt per hit)
     std::array<RoadsideNode, 20> roadside_nodes_{};

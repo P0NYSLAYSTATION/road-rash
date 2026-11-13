@@ -136,10 +136,16 @@ void split_shoulders() {
     rr::TrackRing ring(course, 0);
     const rr::TrackRing::Random random = [] { return 0u; };
     ring.setup(230 * 256, random, {}); // builds the split at300 within its128 slots
+    const auto initial_trackers = ring.tracker_window(course.root);
+    check(initial_trackers[0] && initial_trackers[1] && initial_trackers[0]->position == 196 * 256 &&
+              initial_trackers[1]->position == 273 * 256,
+          "original trackers start14 and91 slices ahead of the back boundary");
     const auto left = ring.slice_shoulders(300 * 256, 0);
     const auto right = ring.slice_shoulders(300 * 256, 1);
     check(left && right && (*left)[1] == (*right)[0],
           "the split's touching road edges have zero inner shoulders, not overlapping224-unit widths");
+    check(ring.retained_roadway_mask(300 * 256, 0) == 1 && ring.retained_roadway_mask(300 * 256, 1) == 2,
+          "physical split masks separate the two roadways");
     const rr::TrackRing saved = ring;
     ring.commit_branch(0);
     for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
@@ -150,11 +156,22 @@ void split_shoulders() {
           "a collapsed physical slot refers to the committed graph node even for a discarded-half lookup");
     check(!ring.closed_upper(80, 381) && ring.closed_upper(80, 382) == 81,
           "the forward tracker keeps the discarded arm's final local coordinate after reaching its self-link");
+    const auto discarded = ring.tracker_window(80);
+    check(discarded[0] && discarded[1] && discarded[0]->local == 24 * 256 && discarded[1]->local == 81 * 256,
+          "discarded-arm wake bounds retain the leading endpoint while the trailing clone advances");
     for (int i = 0; i < 128; ++i) ring.advance(256, random, {});
     const auto old_half = ring.retained_motion(381 * 256, 1);
     const auto new_half = ring.retained_motion(381 * 256, 0);
     check(old_half && new_half && old_half->second == 3 && new_half->second == 1,
           "rebuilding a common half0 preserves an old physical half1's motion words");
+    check(ring.retained_roadway_mask(381 * 256, 0) == 3 && ring.retained_roadway_mask(381 * 256, 1) == 2,
+          "common half0 admits either branch while unused half1 retains its old mask");
+    check(saved.retained_roadway_mask(300 * 256, 0) == 1 && saved.retained_roadway_mask(300 * 256, 1) == 2,
+          "ring snapshots preserve the pre-collapse physical masks");
+    const auto expired = ring.tracker_window(80);
+    check(!expired[0] && !expired[1], "trailing self-link cleanup removes both discarded-node wake references");
+    check(saved.tracker_window(course.root)[0]->position == initial_trackers[0]->position,
+          "ring snapshots preserve graph-node tracker references");
     check(saved.slice_shoulders(300 * 256, 0) == left,
           "a copied ring preserves physical shoulder geometry when the live slot is reused");
 }
@@ -382,6 +399,32 @@ int main() {
                   state.front.position == 319 * 256 && state.front_other.node == 60 &&
                   state.front_other.position == 319 * 256,
               "forward merge window restores both branch-relative iterator positions");
+    }
+    // Unequal arms are aligned by the physical merge window. The short
+    // arm's flattened route has already merged while its physical half
+    // still contains the last sixteen samples of that arm (Medly case).
+    {
+        auto unequal = window_course(400);
+        unequal.nodes.at(40).primary = 0;
+        unequal.nodes.at(20).previous = 160;
+        unequal.nodes.emplace(160, rr::CourseNode{160, 3});
+        unequal.nodes.at(80).length = 384;
+        unequal.sections[2].samples.resize(384);
+        unequal.sections[2].samples[383].rise = 37;
+        rr::TrackRing physical(unequal, 0);
+        physical.setup(50 * 256, random, {});
+        for (int i = 130; i < 690; ++i) physical.advance(256, random, {});
+        const auto logical = rr::make_route(unequal, true);
+        const auto retained = physical.retained_sample(684 * 256, 1);
+        check(logical[684].node == 120 && retained && retained->node == 80 &&
+                  retained->local == 383 && retained->path.rise == 37,
+              "physical short-arm terrain survives the flattened route merge");
+        check(physical.forward_slice(684 * 256, 1) == std::pair<int32_t, uint8_t>{685 * 256, 1},
+              "forward link keeps the physical second half inside the merge window");
+        const auto snapshot = physical;
+        physical.advance(128 * 256, random, {});
+        check(snapshot.retained_sample(684 * 256, 1)->path.rise == 37,
+              "snapshot retains physical terrain after ring reuse");
     }
     // NALR lane changes align the outer edges of the two halves to
     // the old common road; rejoining on either side restores its centre.

@@ -395,7 +395,7 @@ struct FieldReplay {
             const auto think = f.find(p + "think");
             const bool half = think != f.end() && think->second == 0x00434660;
             const auto st = half && r.crash_active
-                                ? race().static_slice_state(r.crash_actor.route, r.crash_actor.sample)
+                                ? race().static_slice_state(r.crash_actor.route, r.crash_actor.sample, r.crash_actor.slice_half)
                                 : race().static_slice_state(r);
             check(f, p + "slice_60", st.borr_count);
             check(f, p + "slice_3d", st.billboards);
@@ -720,9 +720,23 @@ struct FieldReplay {
     bool frame(size_t i) {
         const auto& f = g.frames.at(i);
         diff.clear();
-        if (f.count("capture.finished")) check(f, "capture.finished", race().riders()[0].finished ? 1 : 0);
-        if (f.count("race.outcome")) check(f, "race.outcome", race().human_outcome(0).code);
-        if (f.count("capture.outcome")) check(f, "capture.outcome", race().human_outcome(0).code);
+        const int screen_result_code = race().race_outcome();
+        if (f.count("capture.finished"))
+            check(f, "capture.finished", screen_result_code == 2 || screen_result_code == 3);
+        if (f.count("race.outcome")) check(f, "race.outcome", screen_result_code);
+        if (f.count("capture.outcome")) check(f, "capture.outcome", screen_result_code);
+        // UNTIL_FINISH exits on the first terminal outcome. In older traces
+        // without race.outcome, every preceding recorded frame is therefore
+        // still racing, even if the finish-line bit is already latched.
+        const auto& head = g.frames.front();
+        if (!f.count("race.outcome") && head.count("capture.until_finish") &&
+            head.at("capture.until_finish") != 0) {
+            const int expected = f.count("capture.outcome") ? int(f.at("capture.outcome")) : 1;
+            const int actual = screen_result_code;
+            if (actual != expected && diff.empty())
+                diff = "race.outcome (until-finish termination) original " + std::to_string(expected) +
+                       " native " + std::to_string(actual);
+        }
         if (f.count("input.knock_applied")) {
             const auto at = g.frames.front().at("input.knock_tick");
             check(f, "input.knock_applied", race().ticks() >= at ? at : 0);

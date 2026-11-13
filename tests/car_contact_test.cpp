@@ -132,6 +132,47 @@ static void car_body(rr::TrafficCar& car) {
 int main() {
     try {
         const auto library = vehicles();
+        // 00404ed9 compares against world velocity (+108), not engine
+        // speed (+ec). Equal engine speeds must still distinguish an
+        // oncoming car from one travelling in the rider's direction.
+        for (bool oncoming : {false, true}) {
+            rr::Race race(route(), route(), rr::PhysicsTables::synthetic(), rr::BikeSpec{}, 90);
+            race.set_live_schedule(true);
+            rr::TrafficSystem traffic(library, executable());
+            traffic.set_spawn_enabled(false);
+            race.set_traffic(&traffic);
+            auto& rider = race.riders()[0];
+            auto& b = rider.bike;
+            rider.sched_last = 1;
+            rider.sched_next = rider.half_sched_next = 100;
+            rider.stamina.current = rider.stamina.max = rider.stamina.base = 1000000;
+            rider.half_object.u8(0x1e9) = 1;
+            b.u8(0xc0) = 7;
+            b.i32(0xc4) = 4;
+            b.i32(0x18) = 1;
+            b.i32(0x174) = 7680;
+            b.i32(0x178) = 64;
+            b.i32(0x17c) = 8960;
+            b.i32(0x194) = 256;
+            b.i32(0x180) = 256;
+            b.i32(0xec) = b.i32(0x108) = 8000;
+            b.i32(0x30) = b.i32(0x1c) - 1000;
+            b.i32(0x3c) = b.i32(0x28);
+            b.i32(0x2f0) = 1000000;
+            auto& car = traffic.cars_mut()[0];
+            car.active = true;
+            car.position = b.i32(0x1c) + 64;
+            car.lateral = b.i32(0x28);
+            car.speed = 5000;
+            car.next_tick = 100;
+            car_body(car);
+            car.motion.i32(0x108) = oncoming ? -5000 : 5000;
+            race.step(0);
+            check((b.i32(0x2f4) != 0) == oncoming,
+                  "car impact crash threshold must use signed world velocity");
+            check(rider.half_object.u8(0x1e9) == 0,
+                  "car impact must clear the rider's scenery flash");
+        }
         // Both class 2 (contained) and class 3 (glancing) must finish the
         // handler after 0x004052c0 knocks the rider off: 00404f4d/00404feb.
         for (bool contained : {false, true}) {

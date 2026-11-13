@@ -398,6 +398,9 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
             r->set_static_frames([scene](uint32_t section, uint32_t local, uint8_t selector, bool billboard) {
                 return scene->static_frame(section, local, selector, billboard);
             });
+            r->set_static_boxes([scene](const AnimationFrame& frame, const std::vector<uint16_t>& history) {
+                return scene->static_collision_boxes(frame, history);
+            });
             out.ring->set_static_sink(
                 [r](int32_t sample, uint32_t section, uint32_t local, const RingStatics& statics) {
                     r->ring_statics(sample, section, local, statics);

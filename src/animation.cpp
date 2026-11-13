@@ -54,6 +54,7 @@ Animation read_animation(const std::vector<uint8_t>& bytes, uint32_t offset) {
         // frames whose collision flag is zero. The drawing path never uses it.
         if (value.flags && value.collision_reference) {
             const size_t collision = pointer(frame + 12, 16);
+            value.collision_source_offset = uint32_t(collision);
             for (int j = 0; j < 4; ++j) value.collision[j] = signed_word(collision + j * 4);
             // Frame +0x10 is the box count (0x0044b630; disc frames hold 0..2).
             const uint64_t room = (bytes.size() - collision) / 16;

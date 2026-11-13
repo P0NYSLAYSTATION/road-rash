@@ -74,6 +74,8 @@ class CourseScene {
     // billboard category 4 frame 0), as 0x0044b630 resolves it.
     const AnimationFrame* static_frame(uint32_t section, uint32_t local, uint8_t selector,
                                        bool billboard) const;
+    std::vector<std::array<int32_t, 4>> static_collision_boxes(
+        const AnimationFrame&, const std::vector<uint16_t>& family_history) const;
     // DZHR actor records placed on this sample (place_dzhr), in original order.
     const std::vector<DzhrActor>& dzhr_actors(uint32_t section, uint32_t local) const;
     // 0x0044acd0(selector, 2, n) against the families resident at this

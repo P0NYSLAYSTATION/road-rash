@@ -134,8 +134,36 @@ class TrackRing {
         if (!(s.motion_valid & (1u << physical_half))) return std::nullopt;
         return s.motion[physical_half]; // unused half1 survives a common-half0 rebuild
     }
+    std::optional<uint8_t> retained_roadway_mask(int32_t position, uint8_t physical_half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!(s.motion_valid & (1u << physical_half))) return std::nullopt;
+        return s.roadway_masks[physical_half];
+    }
+    std::optional<int32_t> retained_offset(int32_t position, uint8_t physical_half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!(s.motion_valid & (1u << physical_half))) return std::nullopt;
+        return s.offsets[physical_half];
+    }
+    std::pair<int32_t, uint8_t> forward_slice(int32_t position, uint8_t half) const {
+        const auto& from = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (from.closed & (1u << half)) return {position, half};
+        const int32_t next = position + 256;
+        const auto& to = shoulders_[size_t((uint32_t(next) >> 8) & 127)];
+        return {next, to.count == 1 ? uint8_t(0) : half};
+    }
+    std::optional<RouteSample> retained_sample(int32_t position, uint8_t half) const {
+        const auto& s = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!(s.motion_valid & (1u << half))) return std::nullopt;
+        auto sample = s.samples[half];
+        sample.path.shoulder_left = sample.offset - sample.path.left - s.edges[half][0];
+        sample.path.shoulder_right = s.edges[half][1] - sample.offset - sample.path.right;
+        return sample;
+    }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
+    struct TrackerPoint { int32_t position = 0, local = 0; };
+    std::array<std::optional<TrackerPoint>, 2> tracker_window(uint32_t node) const;
+    std::vector<int64_t> tracker_state() const;
     // Terrain slice exported by a walker at its current sample.
     TerrainSlice front_terrain(int32_t left_edge, int32_t right_edge) const;
 
@@ -221,6 +249,7 @@ class TrackRing {
     uint8_t chosen_half_ = 0;
     std::array<uint8_t, 128> slice_events_{};
     struct Shoulders {
+        int32_t position = 0;
         uint8_t count = 0;
         uint8_t closed = 0;
         int8_t countdown = 0;
@@ -229,8 +258,33 @@ class TrackRing {
         std::array<std::array<int32_t, 2>, 2> lanes{};
         std::array<std::pair<uint32_t, uint32_t>, 2> location{};
         std::array<std::pair<int32_t, int32_t>, 2> motion{};
+        std::array<uint8_t, 2> roadway_masks{};
+        std::array<int32_t, 2> offsets{};
+        std::array<RouteSample, 2> samples{};
     };
     std::array<Shoulders, 128> shoulders_{};
+    struct TrackerRef {
+        uint8_t slot = 0, half = 0;
+        bool operator==(const TrackerRef&) const = default;
+    };
+    struct Tracker {
+        bool active = false;
+        uint8_t kind = 0;
+        int32_t position = 0;
+        TrackerRef slice;
+    };
+    std::array<Tracker, 4> trackers_{}; // 00450d00: four 24-byte tracker objects
+    std::array<std::vector<size_t>, 2> tracker_lists_;
+    using TrackerRefs = std::map<uint32_t, std::array<std::optional<TrackerRef>, 2>>;
+    std::shared_ptr<TrackerRefs> tracker_refs_ = std::make_shared<TrackerRefs>();
+    TrackerRefs& mutable_tracker_refs() {
+        if (tracker_refs_.use_count() != 1) tracker_refs_ = std::make_shared<TrackerRefs>(*tracker_refs_);
+        return *tracker_refs_;
+    }
+    int create_tracker(TrackerRef, int32_t position, uint8_t kind);
+    void remove_tracker(size_t index);
+    void step_trackers(uint8_t kind, int32_t delta);
+    void setup_trackers();
     using ClosedEnds = std::map<uint32_t, std::pair<int32_t, uint32_t>>;
     std::shared_ptr<ClosedEnds> closed_ends_ = std::make_shared<ClosedEnds>();
     int32_t known_finish_ = 0;

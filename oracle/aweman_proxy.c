@@ -596,6 +596,16 @@ static void dump_sim_tick(void) {
                         sl && readable(sl, 0x37) ? RD8(sl + 0x36) : 0);
             }
             const uintptr_t ground_slice = readable(node, 0x144) ? (uint32_t)RD32(node + 0x140) : 0;
+            if (g_ai_probe_tick >= 0 && tick == g_ai_probe_tick && readable(node, 0x30c) && RD32(node + 0xc4) == 4) {
+                const uintptr_t virtual_node = (uint32_t)RD32(node + 0x304);
+                if (readable(virtual_node, 0x20)) {
+                    const uintptr_t t0 = (uint32_t)RD32(virtual_node + 0x18), t1 = (uint32_t)RD32(virtual_node + 0x1c);
+                    fprintf(g_out, "# parked-trackers actor=%u position=%d virtual=%u local=%d tracker0=%u/%d tracker1=%u/%d\n",
+                            (unsigned)node, RD32(node + 0x1c), (unsigned)virtual_node, RD32(node + 0x308),
+                            (unsigned)t0, readable(t0, 8) ? RD32(t0 + 4) : -1,
+                            (unsigned)t1, readable(t1, 8) ? RD32(t1 + 4) : -1);
+                }
+            }
             const int ground_trace = g_ground_trace && node == player && readable(ground_slice, 0x14a) &&
                 (((int32_t)RD32(node + 0x28) >> 8) < RD32(ground_slice + 0xe0) ||
                  ((int32_t)RD32(node + 0x28) >> 8) > RD32(ground_slice + 0xe4));
@@ -967,6 +977,30 @@ static void dump_sim_tick(void) {
                     }
                     if (g_ai_probe_tick >= 0 && (int32_t)RD32(0x004b7ecc) >= g_ai_probe_tick - 20 &&
                         (int32_t)RD32(0x004b7ecc) <= g_ai_probe_tick + 1) {
+                        const uintptr_t slice = (uint32_t)RD32(node + 0x140);
+                        if (g_slice_probe >= 0 && RD32(0x004b7ecc) == (uint32_t)g_ai_probe_tick &&
+                            (uint16_t)RD32(node + 0x1c4) == 26) {
+                            const int delta = (g_slice_probe - (RD32(node + 0x1c) >> 8)) * 256;
+                            const uintptr_t target = ((uintptr_t(__fastcall*)(uintptr_t, int))0x449910)(slice, delta);
+                            const uintptr_t boxes = readable(target, 0xb0) ? (uint32_t)RD32(target + 0x68) : 0;
+                            if (readable(boxes, 16))
+                                fprintf(g_out, "# scenery-target sample=%d source=%d base=%d count=%u boxes=%u bounds=%d/%d/%d/%d\n",
+                                    g_slice_probe, RD32(node + 0x1c) >> 8, RD32(target + 0x6c), RD8(target + 0x60),
+                                    RD8(target + 0x61), RD32(boxes), RD32(boxes + 4), RD32(boxes + 8), RD32(boxes + 12));
+                        }
+                        if (readable(slice, 0xb0) && RD8(slice + 0x60) && RD8(slice + 0x61)) {
+                            const uintptr_t boxes = (uint32_t)RD32(slice + 0x68);
+                            if (readable(boxes, 16))
+                                fprintf(g_out, "# ped-static-box tick=%u serial=%u base=%d box=%d/%d/%d/%d\n",
+                                    RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD32(slice + 0x6c),
+                                    RD32(boxes), RD32(boxes + 4), RD32(boxes + 8), RD32(boxes + 12));
+                        }
+                        fprintf(g_out, "# ped-contact-shape tick=%u serial=%u flags=%u width=%d length=%d height=%d callback=%x speed=%d slice=%u count=%u boxes=%u ac=%x\n",
+                                RD32(0x004b7ecc), (unsigned)(uint16_t)RD32(node + 0x1c4), RD8(node + 0xc0),
+                                RD32(node + 0x174), RD32(node + 0x178), RD32(node + 0x17c), RD32(node + 0x1a4),
+                                RD32(node + 0xec), (unsigned)slice, readable(slice, 0xb0) ? RD8(slice + 0x60) : 0,
+                                readable(slice, 0xb0) ? RD8(slice + 0x61) : 0,
+                                readable(slice, 0xb0) ? RD32(slice + 0xac) : 0);
                         const uintptr_t graphics = (uint32_t)RD32(node + 0x74);
                         const unsigned family_slot = RD8(node + 0x1dc) >> 6;
                         fprintf(g_out, "# ped-resource tick=%u serial=%u selector=%u graphics=%u header=%08x family=%u root=%u loaded=%u\n",
@@ -1314,6 +1348,23 @@ static void __fastcall rr_static_sweep_probe(uintptr_t self) {
         fprintf(g_out, "# ped-static-after actor=%u pos=%d lateral=%d state=%d\n",
                 (unsigned)self, RD32(self + 0x1c), RD32(self + 0x28), RD32(self + 0x1e8));
 }
+static int __fastcall rr_place_refresh_probe(uintptr_t self) {
+    if (g_out && RD32(0x004b7ecc) == g_ai_probe_tick && RD32(self + 0x1f4) <= RD32(self + 0x10)) {
+        const uintptr_t slice = (uint32_t)RD32(self + 0x2c);
+        const unsigned mask = readable(slice, 0x37) ? RD8(slice + 0x36) : 0;
+        fprintf(g_out, "# place-self actor=%u pos=%d distance=%d mask=%u\n", (unsigned)self,
+                RD32(self + 0x1c), RD32(self + 0x1f8), mask);
+        for (int i = 0; i < RD32(0x4642d4) - 1 && i < 16; ++i) {
+            const uintptr_t other = (uint32_t)RD32(0x4c7fb0 + i * 4);
+            if (!readable(other, 0x200)) continue;
+            const uintptr_t os = (uint32_t)RD32(other + 0x2c);
+            fprintf(g_out, "# place-other actor=%u row=%d other=%u pos=%d distance=%d slice=%u mask=%u\n",
+                    (unsigned)self, i, (unsigned)other, RD32(other + 0x1c), RD32(other + 0x1f8),
+                    (unsigned)os, readable(os, 0x37) ? RD8(os + 0x36) : 0);
+        }
+    }
+    return ((int(__fastcall*)(uintptr_t))0x4075f0)(self);
+}
 static void __fastcall rr_billboard_draw_probe(uintptr_t self, int32_t mask, int32_t left, int32_t right) {
     uintptr_t sl = (uint32_t)RD32(self + 0xc);
     int tick = RD32(0x004b7ecc);
@@ -1323,6 +1374,18 @@ static void __fastcall rr_billboard_draw_probe(uintptr_t self, int32_t mask, int
                 tick, (unsigned)sl, (int32_t)RD32(sl + 4), (int32_t)RD32(self + 0x18), (unsigned)mask,
                 left, right, RD8(sl + 0x41), RD8(sl + 0x43));
     ((void(__fastcall*)(uintptr_t,int32_t,int32_t,int32_t))0x0044b980)(self,mask,left,right);
+}
+static int __fastcall rr_curvature_probe(uintptr_t slice, int count) {
+    const int result = ((int(__fastcall*)(uintptr_t, int))0x449b40)(slice, count);
+    if (g_out && RD32(0x4b7ecc) == g_ai_probe_tick) {
+        fprintf(g_out, "# curvature count=%d source=%u result=%d\n", count, (unsigned)slice, result);
+        for (int i = 0; i < count && i < 16 && readable(slice, 0xd0); ++i) {
+            fprintf(g_out, "# curvature-slice i=%d slice=%u local=%d centre=%d bend=%d mask=%u\n", i,
+                    (unsigned)slice, RD32(slice + 4), RD32(slice + 0xcc), RD32(slice + 0xb4), RD8(slice + 0x36));
+            slice = (uint32_t)RD32(slice + 0x10);
+        }
+    }
+    return result;
 }
 static void __fastcall rr_ai_curve_probe(uintptr_t self) {
     ((void(__fastcall*)(uintptr_t))0x004090a0)(self);
@@ -5093,13 +5156,17 @@ static int rr_install_hooks(void) {
         return 0;
     }
     if(g_ai_probe_tick >= 0 &&
-       (!rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
+       (!rr_patch_call((uint8_t*)0x00409043,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x004090db,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x00409268,0x00449b40,rr_curvature_probe) ||
+        !rr_patch_call((uint8_t*)0x0040900e,0x004090a0,rr_ai_curve_probe) ||
         !rr_patch_call((uint8_t*)0x00409e29,0x004090a0,rr_ai_curve_probe))) {
         if(g_out)fputs("# patch installation failed at AI target probe\n",g_out);
         return 0;
     }
     if(g_ai_probe_tick >= 0 &&
-       (!rr_patch_call((uint8_t*)0x00436952,0x004373f0,rr_static_sweep_probe) ||
+       (!rr_patch_call((uint8_t*)0x00406191,0x004075f0,rr_place_refresh_probe) ||
+        !rr_patch_call((uint8_t*)0x00436952,0x004373f0,rr_static_sweep_probe) ||
         !rr_patch_call((uint8_t*)0x004383b6,0x004368f0,rr_collision_walk_probe) ||
         !rr_patch_call((uint8_t*)0x004369f6,0x00436a40,rr_collision_pair_probe) ||
         !rr_patch_call((uint8_t*)0x00443b1b,0x00443b40,rr_static_view_probe) ||

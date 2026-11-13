@@ -11,10 +11,7 @@
 // Live rider scheduler (plan 10 Task 6): 0x00438170(0) walks the object list
 // and 0x00437e60 runs each due node. Each function names the routine it
 // ports. Riders, pedestrians, cars and intersection nodes share the live
-// position-ordered scheduler. Remaining tracker/route limitations:
-// - the ring trackers 0x00450d30/0x00450dc0 are taken at their measured
-//   offsets from the ring back (14 and 91 samples, set up by 0x004552e0);
-//   their split/merge hand-over is not modelled;
+// position-ordered scheduler. Remaining route limitation:
 // - the parked virtual walk follows the rider's own route at splits, where
 //   the original takes the split node's byte +0x18;
 namespace rr {
@@ -22,10 +19,6 @@ namespace {
 int32_t sar(int32_t x, int n) {
     return (x + ((x >> 31) & ((1 << n) - 1))) >> n;
 } // signed division by 2^n
-// Ring trackers (0x00450d30 from 0x004552e0): created on the back slice and
-// stepped 14 (tracker 0, section +0x18) and 91 (tracker 1, section +0x1c)
-// slices forward; 0x00454120 steps both with every slice crossing.
-constexpr int32_t tracker_back = 14, tracker_front = 91;
 size_t section_start(const std::vector<RouteSample>& road, size_t sample) {
     sample = std::min(sample, road.size() - 1);
     return sample >= road[sample].local ? sample - road[sample].local : 0;
@@ -65,7 +58,7 @@ void Race::init_live_rider(Rider& r, int32_t interval) {
     r.virtual_local = int32_t(r.sample - r.virtual_section) * 256; // 0x00405990: slice +4
     const Bike& b = r.bike;
     r.half_mirror = {b.i32(0x1c),  b.i32(0x28),  b.i32(0x20), b.i32(0xf4), b.i32(0xec), b.i32(0xf0),
-                     b.i32(0x10c), b.i32(0x108), b.i32(0x60), r.sample,    r.route};
+                     b.i32(0x10c), b.i32(0x108), b.i32(0x60), r.sample,    r.route, r.slice_half};
     // 0x00405c80 spawn words (spawn_brain repeats them for built riders).
     r.bike.i32(0x30c) = 600;
     r.bike.i32(0x310) = (((level_ * 5 + 0x2d) * 200) >> 8) * 600;
@@ -412,8 +405,10 @@ void Race::think_half(Rider& r, uint32_t controls, bool countdown) {
         if (!r.crash_active) crash(r); // entry applies once, on the first node to run
         // 004346c6..004346e1 starts the result for a crashed, finish-latched
         // player before dispatching crash AI, without a speed threshold.
-        if (player && (r.half_object.u8(0xc0) & 0x10) != 0)
+        if (player && (r.half_object.u8(0xc0) & 0x10) != 0) {
             r.finish_controls_ended = true;
+            register_result(r, 0x7f);
+        }
         ai_think(r);
         // 0x00434660 wrapper stamina regen (lines 15-24): the player half
         // regenerates +dt whenever crash != 1, on top of the 0x00407bd0
@@ -431,7 +426,7 @@ void Race::think_half(Rider& r, uint32_t controls, bool countdown) {
     }
     // 004346a1..004346b6 selects AI after any terminal outcome as
     // well as during attract hold; player input ends before the result delay.
-    const bool demo_player = player && (demo_hold_ || r.finish_controls_ended || r.busted);
+    const bool demo_player = player && (demo_hold_ || r.result_code != 1);
     fight(r, demo_player ? 0 : controls, size_t(&r - riders_.data()));
     rider_think(r, controls, player);
 }
@@ -477,7 +472,7 @@ void Race::run_bike_node(Rider& r, uint32_t controls, bool countdown) {
         //00437e99..00437eb7 also parks a rider that crossed the numeric
         //coordinate of a physical self-linked end slice (including a
         //discarded split arm inside the global ring window).
-        if (s != int32_t(r.sample) && ring_->forward_closed(int32_t(r.sample * 256), route_of(r)[r.sample].half))
+        if (s != int32_t(r.sample) && ring_->forward_closed(int32_t(r.sample * 256), r.slice_half.value_or(route_of(r)[r.sample].half)))
             outside = true;
         if (outside) park(r);
     }
@@ -501,8 +496,8 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
     auto physical_node = [&](size_t sample) {
         const auto& logical = road[std::min(sample, road.size() - 1)];
         if (const auto* ring = nearest_ring(b.i32(0x1c)))
-            if (const auto physical = ring->slice_location(int32_t(sample * 256), logical.half))
-                return physical->first;
+            if (const auto physical = ring->retained_sample(int32_t(sample * 256), r.slice_half.value_or(logical.half)))
+                return physical->node;
         return logical.node;
     };
     const uint32_t node_before = physical_node(r.sample);
@@ -562,14 +557,27 @@ void Race::move_bike_live(Rider& r, uint32_t controls, bool countdown) {
 void Race::refresh_place(Rider& r) {
     const bool player = human(r);
     const size_t i = size_t(&r - riders_.data());
+    auto mask = [&](const Rider& actor) {
+        const auto& half = actor.half_mirror;
+        const auto& sample = (*routes_[half.route])[half.sample];
+        if (const auto* ring = nearest_ring(half.position))
+            if (const auto retained = ring->retained_roadway_mask(int32_t(half.sample * 256), half.slice_half.value_or(sample.half)))
+                return *retained;
+        return roadway_mask(sample);
+    };
     int place = 1;
     for (size_t j = 0; j < riders_.size(); ++j) {
         if (j == i || riders_[j].cop) continue; // the place table 0x004c7fb0 holds no cop
         const Rider& o = riders_[j];
         const bool shared = o.half_slice_present && r.half_slice_present &&
-                            shared_roadway((*routes_[r.half_mirror.route])[r.half_mirror.sample],
-                                           (*routes_[o.half_mirror.route])[o.half_mirror.sample]);
-        if (shared ? o.half_mirror.position > r.half_mirror.position : o.finish_distance < r.finish_distance)
+                            (mask(r) & mask(o) & 3) != 0;
+        const bool ahead = shared ? o.half_mirror.position > r.half_mirror.position : o.finish_distance < r.finish_distance;
+        if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")) &&
+            std::getenv("RR_SIM_TRACE_RIDER") && int(i) == std::atoi(std::getenv("RR_SIM_TRACE_RIDER")))
+            std::fprintf(stderr, "place-compare self %zu other %zu shared %d slices %d/%d positions %d/%d distance %d/%d ahead %d\n",
+                         i, j, shared, r.half_slice_present, o.half_slice_present,
+                         r.half_mirror.position, o.half_mirror.position, r.finish_distance, o.finish_distance, ahead);
+        if (ahead)
             ++place;
     }
     r.place = place;
@@ -581,7 +589,7 @@ void Race::live_standings(Rider& r) {
     // its half.
     const Bike& b = r.bike;
     r.half_mirror = {b.i32(0x1c),  b.i32(0x28),  b.i32(0x20), b.i32(0xf4), b.i32(0xec), b.i32(0xf0),
-                     b.i32(0x10c), b.i32(0x108), b.i32(0x60), r.sample,    r.route};
+                     b.i32(0x10c), b.i32(0x108), b.i32(0x60), r.sample,    r.route, r.slice_half};
     r.half_slice_present = r.bike_slice_present;
 }
 
@@ -713,40 +721,27 @@ void Race::move_bike_parked(Rider& r) {
         }
         if (section_changed && finish_q8_ != 0) r.finish_distance = remaining_finish_distance(r, b.i32(0x1c)); // 0x00407410
     }
-    // Wake test against the ring trackers in this section (TrackRing walks
-    // both split branches in lockstep, so road[t0]/road[t1] are the tracker
-    // positions on r's branch).
+    // 004065d4 reads this graph node's actual retained tracker pointers.
     // Plan 34 C1: every human's window, in seat order; the first that
     // reaches the rider wakes it (one ring: the original test).
     for (const TrackRing* w : rings_) {
         if (!w) continue;
-        const int32_t back = w->back_q8() >> 8, front = w->front_q8() >> 8;
-        const size_t t0 = size_t(back + tracker_back), t1 = size_t(back + tracker_front);
-        if (t1 >= road.size()) continue;
         const uint32_t node = road[r.virtual_section].node;
-        const auto location0 = w->slice_location(int32_t(t0 * 256), road[t0].half);
-        const auto location1 = w->slice_location(int32_t(t1 * 256), road[t1].half);
-        const bool has0 = location0 && location0->first == node;
-        const bool has1 = location1 && location1->first == node;
+        const auto refs = w->tracker_window(node);
+        const bool has0 = refs[0].has_value(), has1 = refs[1].has_value();
         if (!has0 && !has1) continue;
         const int32_t length = section_length(road, r.virtual_section);
-        const int32_t lo = has0 ? int32_t(location0->second) * 256 : 0;
-        //00450e30..00450e4d preserves tracker1's last sub-slice when its
-        //forward link is self. Until tracker0 leaves this node, that stale
-        //upper endpoint still limits waking on the discarded arm.
-        const auto closed = has0 && !has1 ? w->closed_upper(node, int32_t(t1)) : std::nullopt;
-        const int32_t hi = has1 ? int32_t(location1->second) * 256
-                               : closed ? int32_t(*closed) * 256 : length * 256 - 1;
+        const int32_t lo = has0 ? refs[0]->local : 0;
+        const int32_t hi = has1 ? refs[1]->local : length * 256 - 1;
         const int32_t v = r.virtual_local;
         if (std::getenv("RR_SIM_TRACE_TICK") && ticks_ == std::atoi(std::getenv("RR_SIM_TRACE_TICK")))
-            std::fprintf(stderr, "wake-window slot %d node %u local %d bounds %d/%d trackers %zu/%zu nodes %u/%u locals %u/%u has %d/%d closed %d\n",
-                         r.slot, node, v, lo, hi, t0, t1, location0 ? location0->first : 0,
-                         location1 ? location1->first : 0, location0 ? location0->second : 0,
-                         location1 ? location1->second : 0, has0, has1, bool(closed));
+            std::fprintf(stderr, "wake-window slot %d node %u local %d bounds %d/%d has %d/%d\n",
+                         r.slot, node, v, lo, hi, has0, has1);
         if (v < lo || hi < v) continue;
         bool use0 = has0;
         if (has0 && has1) use0 = std::abs(v - lo) <= std::abs(v - hi);
-        const int32_t slice = int32_t(use0 ? t0 : t1);
+        const int32_t slice = (use0 ? refs[0]->position : refs[1]->position) >> 8;
+        const int32_t back = w->back_q8() >> 8, front = w->front_q8() >> 8;
         // 0x00449910: step whole slices from the tracker's slice, clamped to the ring.
         int32_t steps = sar(v - (use0 ? lo : hi), 8);
         if (steps >= 1 && front <= steps + slice) steps = front - slice - 1;
@@ -769,6 +764,7 @@ void Race::wake(Rider& r, size_t sample) {
     b.i32(0x24) = 0;
     b.i32(0x28) = road[sample].offset * 256 + road_base_; // sub-slice +0xcc
     r.sample = r.previous_sample = sample;
+    r.slice_half = r.previous_slice_half = route_of(r)[sample].half;
     b.i32(0x134) = b.i32(0x138) = pos;
     r.bike_slice_present = true;
     r.virtual_section = section_start(road, sample);

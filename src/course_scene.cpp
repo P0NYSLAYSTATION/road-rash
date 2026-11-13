@@ -517,6 +517,35 @@ bool CourseScene::pedestrian_family_graphics_valid(const std::vector<uint16_t>& 
     }
     return header == std::array<uint8_t, 4>{0x4e, 0x41, 0x52, 0x52};
 }
+
+std::vector<std::array<int32_t, 4>> CourseScene::static_collision_boxes(
+    const AnimationFrame& frame, const std::vector<uint16_t>& history) const {
+    auto boxes = frame.boxes;
+    if (!frame.collision_source_offset || history.empty()) return boxes;
+    // 0044b630 caches a pointer into the family slot, not a private copy
+    // of the rectangle. 004155e5 replaces that buffer in place, retaining
+    // its unused tail. Resolve each byte from the latest covering payload.
+    for (size_t box = 0; box < boxes.size(); ++box) {
+        for (size_t word = 0; word < 4; ++word) {
+            uint32_t value = uint32_t(boxes[box][word]);
+            uint8_t found = 0;
+            for (auto it = history.rbegin(); it != history.rend() && found != 15; ++it) {
+                const auto family = families_.find(*it);
+                if (family == families_.end()) continue;
+                const auto& bytes = family->second.bytes;
+                for (size_t byte = 0; byte < 4; ++byte) {
+                    const uint64_t offset = uint64_t(frame.collision_source_offset) + box * 16 + word * 4 + byte;
+                    if (!(found & (1 << byte)) && offset < bytes.size()) {
+                        value = (value & ~(0xffu << (byte * 8))) | uint32_t(bytes[size_t(offset)]) << (byte * 8);
+                        found |= uint8_t(1 << byte);
+                    }
+                }
+            }
+            boxes[box][word] = value <= INT32_MAX ? int32_t(value) : int32_t(int64_t(value) - 0x100000000LL);
+        }
+    }
+    return boxes;
+}
 const CelTexture* CourseScene::material(uint32_t section, uint32_t local, uint8_t selector, uint8_t category,
                                         std::optional<uint32_t> frame, int32_t width, int32_t height) const {
     const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];

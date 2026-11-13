@@ -510,6 +510,44 @@ static void test_signal_rebuilt_lane_slot() {
         throw std::runtime_error("a retained light reads rebuilt lane slot208, not historical slot80");
 }
 
+static void test_signal_physical_roadway_mask() {
+    rr::Course course;
+    course.root = 20;
+    course.sections.resize(1);
+    course.sections[0].samples.resize(400, rr::PathSample{0, 0, 500, 500, 512, 512});
+    course.nodes.emplace(20, rr::CourseNode{20, 0, 40, 0, 0, 400});
+    course.nodes.emplace(40, rr::CourseNode{40, 4});
+    rr::TrackRing ring(course, 0);
+    const rr::TrackRing::Random random = [] { return 0u; };
+    ring.setup(50 * 256, random, {});
+    rr::VehicleLibrary library(synthetic_container(0));
+    rr::TrafficSystem traffic(library, synthetic_exe());
+    traffic.configure(6);
+    traffic.set_spawn_enabled(false);
+    traffic.set_ring_source([&](int32_t) { return &ring; });
+    std::vector<rr::RouteSample> road(400, lane_sample(512, 512));
+    for (auto& sample : road) { sample.dual = true; sample.half = 0; }
+    auto& signal = const_cast<rr::IntersectionSignal&>(traffic.signals()[0]);
+    signal.active = true;
+    signal.index = 0;
+    signal.controller = 0;
+    signal.position_q8 = 60 * 256;
+    auto& controller = const_cast<rr::IntersectionController&>(traffic.controllers()[0]);
+    controller.half = 1;
+    controller.start_q8 = 60 * 256;
+    controller.end_q8 = 80 * 256;
+    auto& car = traffic.cars_mut()[0];
+    car.active = true;
+    car.kind = 0;
+    car.position = 50 * 256;
+    car.lane = 0;
+    car.phase = 256;
+    car.next_tick = 1;
+    traffic.run_car(0, road, 50 * 256, ring.front_q8(), 50 * 256, 0, random, 1, 0);
+    if (car.signal != 0)
+        throw std::runtime_error("rebuilt common roadway must admit a signal beyond logical arm masks");
+}
+
 static void test_invalid_crossing_spawn() {
     rr::VehicleLibrary library(synthetic_container(0));
     rr::TrafficSystem traffic(library, synthetic_exe());
@@ -1544,6 +1582,7 @@ int main() {
         test_recycled_pool_order();
         test_marked_crossing_final_move();
         test_signal_rebuilt_lane_slot();
+        test_signal_physical_roadway_mask();
         test_invalid_crossing_spawn();
         test_intersection_pool_reuse();
         test_deferred_car_teardown();

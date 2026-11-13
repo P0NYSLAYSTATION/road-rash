@@ -106,6 +106,7 @@ endif()
 
 target_sources(rr-resource PRIVATE src/family.cpp src/terrain_panels.cpp src/building_panels.cpp src/terrain_ground.cpp src/course_scene.cpp src/hud.cpp src/animation.cpp src/actor_animation.cpp src/actor_descriptors.cpp src/actor_render.cpp src/actor_nodes.cpp src/crash.cpp src/police.cpp src/scenery.cpp src/traffic.cpp src/pedestrians.cpp src/race_pedestrians.cpp src/race_schedule.cpp src/race_music.cpp src/race_setup.cpp src/track_ring.cpp src/race_state.cpp src/net/rollback.cpp src/det_math.cpp src/utf8_path.cpp src/system_fonts.cpp "${RR_WINGDINGS_CPP}" src/platform_files.cpp src/platform_linux.cpp src/file_browser.cpp)
 set_target_properties(rr-resource PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_sources(rr-resource PRIVATE src/track_ring_trackers.cpp)
 target_include_directories(rr-resource PUBLIC src)
 target_include_directories(rr-resource SYSTEM PRIVATE third_party)   # plan 30 Task 3: vendor headers out of warnings
 if(RR_FUZZ)
@@ -262,6 +263,18 @@ else()
             --fixture "${RR_TEST_SIM_LEVEL5}" --timeout 600
             --report "${CMAKE_BINARY_DIR}/oracle-field-l5-diagnostic.json")
         set_tests_properties(oracle-sim-field-l5 PROPERTIES SKIP_RETURN_CODE 77)
+        # A wreck ends after recovery, not when damage first reaches zero.
+        # Required on the supplied native Windows asset/capture configuration.
+        if(WIN32 AND EXISTS "${RR_TEST_ASSETS_DIR}/ROADRASH.EXE")
+            set(RR_TEST_SIM_WRECK "${CMAKE_SOURCE_DIR}/analysis/oracle/medly-finish-keyboard-l1-s1.tsv"
+                CACHE FILEPATH "Original complete human wreck recording")
+            add_test(NAME oracle-sim-wreck COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/verify_sim.py" --mode acceptance --driver human
+                  --binary "$<TARGET_FILE:oracle-sim-test>" --assets "${RR_TEST_ASSETS_DIR}"
+                  --fixture "${RR_TEST_SIM_WRECK}" --timeout 600
+                --report "${CMAKE_BINARY_DIR}/oracle-wreck-acceptance.json")
+            set_tests_properties(oracle-sim-wreck PROPERTIES LABELS "sim;disc;fixture")
+        endif()
         # Level-5 live field re-capture with the w2c/we8 proxy (per-tick car
         # +0x2c/+0xe8 branch diagnostics) is verified manually, not as a CTest:
         # now 2400/2400 identical with 13 golden-only diagnostic keys, and a

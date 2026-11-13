@@ -29,6 +29,25 @@ int main(int argc, char** argv) {
         const auto exe = assets.read("ROADRASH.EXE");
         const auto config = rr::read_crash_config(exe);
         const rr::ActorAnimationLibrary library(exe, assets.read("DATA/GLOBAL.RSC"));
+        // 00449c20 is signed ABS (CDQ), including a body ahead of the bike.
+        // Medly's destroyed bike must wait for the body to approach it.
+        for (int distance : {-1296, -80, -79, 79, 80, 1296}) {
+            rr::Bike bike;
+            bike.i32(0x1c) = 10000;
+            bike.i32(0x2f4) = 2;
+            bike.i32(0x2f0) = 0;
+            rr::CrashActor body;
+            body.motion.i32(0x1c) = 10000 + distance;
+            body.animation.animation = 37;
+            body.animation.loops = 1;
+            rr::CrashRecoveryInput input;
+            input.player = true;
+            const auto action = rr::recover_crash_actor(bike, body, library.playback[0],
+                                                         library.fallback, 100, input);
+            const bool within = distance > -80 && distance < 80;
+            if ((action == rr::CrashRecoveryAction::wrecked) != within)
+                throw std::runtime_error("wreck recovery requires absolute longitudinal distance below80");
+        }
         rr::CrashActor initialized;
         rr::init_crash_actor(initialized, config);
         if (initialized.motion.i32(0xc4) != 8) throw std::runtime_error("Imported rider behavior type");

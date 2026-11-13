@@ -390,7 +390,15 @@ std::pair<int32_t, int32_t> TrafficSystem::plan_speed(TrafficCar& car, const std
             //Both halves can have active intersections at the same distance.
             const size_t ss = size_t(std::clamp(s.position_q8 >> 8, 0, int32_t(route.size() - 1)));
             const uint8_t half = s.controller >= 0 ? controllers_[size_t(s.controller)].half : route[ss].half;
-            if (!shared_roadway(at, route_half(route[ss], half))) continue;
+            uint8_t car_mask = roadway_mask(at);
+            uint8_t signal_mask = roadway_mask(route_half(route[ss], half));
+            if (ring_source_) {
+                if (const auto* ring = ring_source_(car.position))
+                    car_mask = ring->retained_roadway_mask(car.position, at.half).value_or(car_mask);
+                if (const auto* ring = ring_source_(s.position_q8))
+                    signal_mask = ring->retained_roadway_mask(s.position_q8, half).value_or(signal_mask);
+            }
+            if (!(car_mask & signal_mask & 3)) continue;
             const int32_t ahead = kind == 0 ? s.position_q8 - car.position : car.position - s.position_q8;
             if (ahead < 0 || ahead >= best) continue;
             best = ahead;

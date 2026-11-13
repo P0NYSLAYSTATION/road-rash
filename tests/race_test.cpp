@@ -77,6 +77,45 @@ int main() {
     check(race.position() == 0x3200, "start on the grid at sample 50 (0x00464218 slot 0)");
     check(race.lateral() == 16384 >> 8, "grid slot 0 lateral offset from the imported EXE table");
 
+    // Result timing and qualification are separate from a rider's crossing.
+    // Original416010 qualifies three offline places, one network place.
+    {
+        std::vector<rr::Opponent> opponents;
+        for (int slot = 1; slot <= 3; ++slot)
+            opponents.push_back({spec, 90, 65, 65, 1, slot});
+        rr::Race results(straight(200), straight(200), t, spec, 90, opponents);
+        auto& player = results.riders()[0];
+        player.bike.i32(0x2f0) = 10000;
+        player.finished = true;
+        player.finish_tick = 20;
+        results.riders()[1].finished = true;
+        results.riders()[1].finish_tick = 19;
+        check(results.place(0) == 2 && results.human_outcome(0).code == 3,
+              "rider-level finish reports second place with network semantics");
+        check(results.race_outcome() == 1, "finish line crossing keeps result pending while braking");
+        player.finish_controls_ended = true;
+        auto network_result = results;
+        network_result.set_net(true);
+        results.register_result(player, 0x7f);
+        check(results.race_outcome() == 2, "offline second place qualifies after the result handoff");
+        results.register_result(player, 5);
+        check(results.race_outcome() == 2, "a later wreck cannot overwrite a latched finish result");
+        network_result.register_result(network_result.riders()[0], 0x7f);
+        check(network_result.race_outcome() == 3, "network second place does not win");
+        player.result_code = 1; // independent fourth-place registration fixture
+        for (int i = 2; i <= 3; ++i) {
+            results.riders()[size_t(i)].finished = true;
+            results.riders()[size_t(i)].finish_tick = 20 - i;
+        }
+        results.register_result(player, 0x7f);
+        check(results.race_outcome() == 3, "offline fourth place finishes without qualifying");
+        auto wreck = std::make_unique<rr::Race>(straight(200), straight(200), t, spec, 90);
+        wreck->register_result(wreck->riders()[0], 5);
+        wreck->step(0);
+        check(wreck->camera_position() + 0x100 + 3 == uint32_t(wreck->riders()[0].half_mirror.position),
+              "registered wreck starts camera pullback on the result tick");
+    }
+
     // The lookahead ring can choose a different initial half from the
     // player's lateral crossing. 0x00439390 calls 0x004540e0 even when
     // the player stays on half 0, committing both live walkers.
@@ -95,15 +134,34 @@ int main() {
         course.nodes.emplace(100, rr::CourseNode{100, 2, 60, 80, 120, 0});
         course.nodes.emplace(120, rr::CourseNode{120, 0, 140, 100, 3, 300});
         course.nodes.emplace(140, rr::CourseNode{140, 4});
-        rr::TrackRing ring(course, 0);
+        auto ring = std::make_unique<rr::TrackRing>(course, 0);
         rr::Race crossing(rr::make_route(course, false), rr::make_route(course, true), t, spec, 90);
-        crossing.set_track_ring(&ring);
-        check(ring.diagnostic_state().front_active == 1, "lookahead starts on the original primary half");
+        crossing.set_track_ring(ring.get());
+        check(ring->diagnostic_state().front_active == 1, "lookahead starts on the original primary half");
         for (int i = 0; i < 1200 && crossing.position() < 60 * 256; ++i)
             crossing.step(rr::control_accelerate);
         check(crossing.position() >= 60 * 256 && crossing.riders()[0].route == 0 &&
-                  ring.diagnostic_state().front.node == 60,
+                  ring->diagnostic_state().front.node == 60,
               "player staying on half zero commits the lookahead ring to that branch");
+
+        rr::AnimationFrame billboard;
+        crossing.set_static_frames([&](uint32_t, uint32_t, uint8_t, bool) { return &billboard; });
+        rr::RingStatics secondary;
+        secondary.physical_half = 1;
+        secondary.dual = true;
+        secondary.billboards = 1;
+        secondary.billboard[0] = {1, 70, 420};
+        crossing.ring_statics(365, 2, 299, secondary);
+        rr::RingStatics common;
+        common.physical_half = 0;
+        crossing.ring_statics(365, 3, 5, common);
+        rr::Rider retained;
+        retained.route = 1;
+        retained.sample = 365;
+        retained.slice_half = 1;
+        check(crossing.static_slice_state(retained).billboards == 1 &&
+                  crossing.static_slice_state(0, 365, uint8_t(0)).billboards == 0,
+              "common rebuild preserves cached secondary billboard beyond the logical merge");
     }
 
     uint32_t last = race.position();
@@ -1353,6 +1411,35 @@ int main() {
         race.step(0);
         check(b.i32(0xec) > 2500 && b.i32(0x2f4) == 0,
               "wall response must use this mover's previous slice, not an older swept-motion slice");
+    }
+    // 0043a40b compares the unscaled height against dt*17920. The
+    // type-1 variant registers a wreck immediately; ordinary ground
+    // starts reason6 without destroying a healthy bike.
+    for (int ground_type : {0, 1}) {
+        for (int height : {17919, 17920}) {
+            auto road = straight(1000);
+            rr::Race fall(road, road, rr::PhysicsTables::synthetic(), test_spec(), 90);
+            rr::TerrainSlice terrain{};
+            terrain.type = uint8_t(ground_type);
+            fall.set_terrain_source([&](const rr::RouteSample&) -> const rr::TerrainSlice& { return terrain; });
+            auto& rider = fall.riders()[0];
+            auto& body = rider.bike;
+            body.i32(0x28) = body.i32(0x3c) = 0;
+            body.i32(0x20) = body.i32(0x34) = 0;
+            body.i32(0xf4) = height;
+            body.i32(0x11c) = 0;
+            body.i32(0x160) = 0;
+            body.i32(0x18) = 1;
+            body.i32(0xc4) = 4;
+            body.i32(0x2f0) = 1000;
+            fall.step(0);
+            const bool impact = height == 17920;
+            check((body.i32(0x2f4) != 0) == impact, "fall crash uses the original unscaled threshold");
+            check(fall.race_outcome() == (impact && ground_type == 1 ? 5 : 1),
+                  "only lethal ground registers a wreck at the fall threshold");
+            check((body.i32(0x2f0) == 0) == (impact && ground_type == 1),
+                  "ordinary high fall preserves condition; lethal ground destroys the bike");
+        }
     }
     std::cout << failures << " failures\n";
     return failures ? 1 : 0;

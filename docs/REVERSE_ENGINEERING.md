@@ -2939,3 +2939,48 @@ Fresh native-original render component `canyn-start-boundary-pose.tsv` uses orig
 Supersedes the earlier allocation note's "initial zeros" assumption:004551c0 initializes unbuilt sub-slices with ground edges+e0/e4=-500/+500 and shoulders+e8/ec=-650/+650. Hill interpolation during actor allocation must use those edges until the forward slot is built. A zero-width next road incorrectly produced previous-ground8 for the Level5 pedestrian at position17403,fraction251; original0. Correct initial-template geometry restores strict2400-tick L5 prefix and the94929-tick L5 arrest recording. No terrain heights or recorded fields were waived. Original454240 commits terrain through451910 before actor placements4520d0; the earlier prose that terrain commits after actors was incorrect.
 
 Original004346c6..004346e1 handles a crashed finish-latched half separately: it calls437800 and416010(127,180) before crash AI, without the uncrashed speed<300 gate. Native now latches the result phase there. Controlled nearby-line integration separately checks no-opponent normal braking and a scripted knock after crossing, ending exactly180ticks after result handoff.
+
+### Registered results and contact velocities (November 13)
+
+The race result global is distinct from an individual rider crossing the finish line. Original 00416010 maps finished code 0x7f to qualification for the first three offline places, or first place in a network race. Normal human finish registration occurs below speed300 at00434874; the crashed finish branch registers at004346e1. Wreck recovery registers5 at its existing recovery callbacks, rather than immediately when condition reaches zero. Native per-rider registered result state now drives the career screen and strict result-phase comparisons. Existing five whole Level1 captures pass143764 ticks with this result state (build/registered-result-five-acceptance.json); further post-change gates remain required.
+
+Original bike contact00404ed9 subtracts other-object world velocity+108, including heading, from self engine speed+ec for the6000-unit crash threshold. The car-specific native path incorrectly used positive car engine speed; it now reads car.motion+108. Uncrashed non-scenery contact also clears half+1e9 at00404b2c, shared by car, solid scenery and pedestrian partners. Opposing-versus-same-direction longitudinal car regressions pass with equal engine speeds.
+
+Original airborne branch0043a40b..0043a50b checks raw height against dt*17920 only on first departing contact. Bike type4 takes reason6; terrain type1 also applies huge reason2 damage and registers wreck5. A detached type8 half applies that lethal branch to its owning bike. Stack vectors for reason6 are rider{0,0,-80},bike{0,0,80} in ec/f0/f4 order. Native implementation and independent17919/17920 xterrain0/1 boundary cases pass; full oracle regression validation of this latest addition is still pending. No claim of a new original fatal-fall capture is made.
+
+
+### Retained physical slices across unequal-arm merges (2026-11-13)
+
+The matched Medly L1 seed1 diagnostic `medly-wreck-matched-curvature-20261113`
+(SHA256 c9a4fff5785fd8cb310c9258058a0ec1fca74d40ebd33c75247ccf3970c8758f)
+shows00449b40 following physical half1 through global1430 while the flattened
+short-arm route has already entered common section6. Actual half1 remains
+section5 local368; the flattened route was sixteen samples ahead. Curvature,
+swept bend/rise, terrain and actor masks must retain the cached sub-slice half.
+00439390 copies +140 to +13c only on page crossing and follows +08/+0c forward
+or +18/+1c backward, selecting between distinct links by half0's right edge.
+The current native forward reference correction is measured; reverse links and
+all repeated split choices still require broader validation.
+
+`medly-wreck-matched-ground-detail-20261113` (SHA256
+06e6ccfe0fb5183d00190a12d9c4b77ddc96c91a53396c1bcc58972dad337ddb) reproduces
+the immutable wreck recording's tick12519 RNG, rider position, height and
+velocity exactly. Original ground query and swept rise match native (0 and8570).
+The height2048 is a later contact, not evidence of a wrong ground interpolation:
+physical half1 retains a type1 billboard, selector70, lateral420, one collider,
+flags7. Native logical-route scenery had no billboard at global1430. Scenery
+caches therefore must follow physical halves too; rebuilding common half0 does
+not erase unused half1. This supersedes the preliminary ground-height hypothesis.
+
+
+### Crash recovery distance correction (2026-11-13)
+
+Earlier native comment calling00449c20 a logical-sign-shift routine was wrong.
+The working original executable bytes at449c20 are
+`2b d1 8b c2 99 33 c2 2b c2 c3`: SUB EDX,ECX; MOV EAX,EDX; **CDQ**;
+XOR EAX,EDX; SUB EAX,EDX; RET. This is signed absolute subtraction with
+32-bit INT_MIN wrap.0040a933 passes bike position inEDX and body position
+inECX;0040a938 requires result<80, followed by animation37 loop>=1 before
+registering player wreck5. An ahead body1296units away therefore must not
+terminate a race. Medly12964 exposed the old negative-distance mistake;
+original waits until13271. Component tests cover both directions at79/80/1296.

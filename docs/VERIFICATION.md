@@ -4700,3 +4700,27 @@ Code revisionb377447fa0deca4f5483bf66c0c8cee0f1c1eb4d, sourceSHAf3e0889694a6348f
 `build/parity-v1119-upgrade-validation.json`:1.1.18test installer then1.1.19test installer over the same existing destination, no new asset arguments;600files preserved across assets,saves,soundfonts andsettings,0changes. Updated executable changes to the clean revision and launches120frames successfully. Test installers use a separate AppId; productionAppId remains stable across versions.
 
 Release installer16801648bytes SHA256542219f4ffa60854933cc731f23c13e5fd14aeb44aaf789b9cfe3e3af69a5924. Package audit excludes commercial assets and embedded disc icon. Published https://github.com/P0NYSLAYSTATION/road-rash/releases/tag/3do-1.1.19 with installer,checksums and FFmpeg/7-Zip source archives. `build/v1119-publish.log` confirms owner/fork identity,remote codecommit,upload sizes/digests and independent public-download checksum. Local publication receipt `artifacts/release/published-release.json`.
+
+
+### November13 original Medly wreck acceptance
+
+`build/wreck-result-camera-medly.json`: strict human, single-anchor free-run
+acceptance PASS13271/13271ticks, unchanged recording
+`medly-finish-keyboard-l1-s1.tsv` SHA256
+fff54173e51ec73dee84b1c477eb605a88697e4744d3e2b15cd89cbe091f2b38.
+Original outcome5 is a destroyed bike after recovery, not a finish. No live
+state hydration or reanchor; all observed fields and final camera match.
+`build/wreck-result-camera-test.log` race component PASS; physical merge terrain
+and snapshot, physical signal latch and signed recovery distance regressions
+also pass (exact logs in the session handoff). Earlier first-failure reports
+are retained; they are not accepted runs. Full new integration gates pending.
+
+
+`build/v1120-whole-race-acceptance.json`:five full race recordings PASS143764ticks;
+`build/v1120-release-regressions.json`:Hiway Level5 PASS94929ticks through arrest4.
+These initial new-build rechecks precede the tracker-map copy-on-write change.
+`build/v1120-native-attempt1.xml`/`.log`:152pass,1fail(race_state allocation),
+0CTestskips,all10policepass,431.32s. Failure retained and fixed, not excluded.
+`build/tracker-cow-snapshot-test.log`:focused race_state PASS5.83s, including
+zero-allocation warmed snapshot copies after tracker references became COW.
+Clean-revision integrated gates and installer publication remain pending.

@@ -3470,3 +3470,29 @@ remain open. See [continuation](agent-handoffs/full-track-parity-20261112.md).
 ## November12 resumed gameplay verification
 
 User resumed captures and excluded menu parity and widescreen-only investigations. Five completed Level1 recordings reverified143764 ticks with zero skips/divergences. New Canyon3301 human ticks also match including stored ground; fresh Canyon/Medly ground evaluator queries and City scene/actor components match. Recovered original4547e0 forward-neighbor lane-grid correction fixes four Medly panel mismatches. See [resumed handoff](agent-handoffs/gameplay-resumed-20261112.md) for exact evidence and unresolved gameplay checks. No new release yet.
+
+
+## November13 wreck and physical-road parity
+
+The unchanged Medly seed1 destroyed-bike recording now matches all13271ticks,
+including registered outcome5 and the final camera pullback. This is a wreck
+acceptance case, not a completed race. Changes recover actual result timing,
+car world-velocity contact, fatal fall thresholds, mutable scenery box memory,
+physical roadway masks, retained graph-node tracker bounds and cached actor
+road-half identity across unequal-arm merges. Billboard caches now retain the
+physical secondary half beyond a logical merge. Crash recovery uses the
+original signed ABS distance instead of ending early when the body is ahead.
+
+Focused race, traffic, crash, animation and track-ring checks pass as recorded
+in [the session handoff](agent-handoffs/gameplay-results-20261113.md). Fresh full
+native, five completed races, police and long Level5 regression gates are in
+progress; no new release or broader all-level parity is claimed yet. General
+reverse-link and repeated split-choice coverage remains to be validated.
+
+
+The first new full gate reverified all five finished races and the94929tick
+Level5 arrest recording. Native152/153passed; the sole failure found an
+allocation introduced by tracker-map copying. Tracker references now share
+copy-on-write storage, and the allocation/snapshot restoration test passes.
+The failed evidence is preserved. Clean-revision final gates and release1.1.20
+packaging are the remaining work for this batch.

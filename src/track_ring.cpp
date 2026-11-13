@@ -547,6 +547,7 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     build_half(w.halves[w.active], ring_q8, sink, w.front, w.dual ? w.active : 0, w.dual);
     if (w.dual) build_half(w.halves[w.active ^ 1], ring_q8, sink, w.front, w.active ^ 1, true);
     auto& stored = shoulders_[size_t((uint32_t(ring_q8) >> 8) & 127)];
+    stored.position = ring_q8;
     stored.closed = 0;
     stored.countdown = int8_t(w.countdown);
     stored.count = w.dual ? 2 : 1;
@@ -564,6 +565,22 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         const auto& path = path_of(half);
         stored.location[h] = {half.node, uint32_t(half.position >> 8)};
         stored.motion[h] = {path.bend, path.rise};
+        stored.offsets[h] = half.offset;
+        stored.samples[h] = {path, half.node, node_of(*course_, half.node).link,
+                             uint32_t(half.position >> 8), half.offset};
+        auto& sample = stored.samples[h];
+        sample.dual = w.dual;
+        sample.half = h;
+        sample.event = RoadEvent(w.event);
+        if (w.dual) {
+            const auto& other = w.halves[h ^ 1];
+            sample.other = path_of(other);
+            sample.other_node = other.node;
+            sample.other_section = node_of(*course_, other.node).link;
+            sample.other_local = uint32_t(other.position >> 8);
+            sample.other_offset = other.offset;
+        }
+        stored.roadway_masks[h] = w.dual ? uint8_t(1u << h) : uint8_t(3);
         stored.lanes[h] = {path.right_q8, path.left_q8};
         stored.motion_valid |= uint8_t(1u << h);
         stored.edges[h] = {half.offset - path.left - path.shoulder_left,
@@ -662,7 +679,7 @@ void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sin
         for (const auto& event : section.family_events) types.push_back(event.type);
     }
     known_finish_ = 0;
-    shoulders_ = {};
+    std::fill(shoulders_.begin(), shoulders_.end(), Shoulders{});
     closed_ends_ = std::make_shared<ClosedEnds>();
     windows_ = std::make_shared<WindowCache>();
     random_ = &random;
@@ -689,6 +706,7 @@ void TrackRing::setup(int32_t camera, const Random& random, const ActorSink& sin
         build_slice(front_walker_, back_ + k, sink);
         step(front_walker_, 0x100);
     }
+    setup_trackers();
     random_ = nullptr;
     family_synchronous_ = false;
 }
@@ -702,11 +720,15 @@ void TrackRing::advance(int32_t delta, const Random& random, const ActorSink& si
     if (((old_back ^ back_) & ~0xff) != 0) {
         if (delta < 1) {
             step(back_walker_, -0x100);
+            step_trackers(1, -0x100);
             build_slice(back_walker_, back_, sink);
+            step_trackers(0, -0x100);
             step(front_walker_, -0x100);
         } else {
             step(back_walker_, 0x100);
+            step_trackers(0, 0x100);
             build_slice(front_walker_, front_ - delta, sink);
+            step_trackers(1, 0x100);
             step(front_walker_, 0x100);
         }
     }

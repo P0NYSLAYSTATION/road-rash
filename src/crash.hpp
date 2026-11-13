@@ -12,6 +12,7 @@ struct CrashActor {
     ActorAnimationState animation;
     int route = 0;
     size_t sample = 0, previous_sample = 0;
+    std::optional<uint8_t> slice_half, previous_slice_half; // retained physical sub-slice pointers
 };
 void init_crash_actor(CrashActor&, const CrashConfig&);
 void remount_crash_actor(Bike&, ActorAnimationState& bike_animation, CrashActor&, const CrashConfig&,

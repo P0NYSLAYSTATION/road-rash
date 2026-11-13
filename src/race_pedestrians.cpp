@@ -621,10 +621,11 @@ void Race::think_pedestrian(Pedestrian& p) {
             : pedestrians_->graphics_valid(road, std::min(front, road.size() - 1), p.selector, *p.look);
         if (!valid) {
             // 0x0044143b..0x00441474: replaced graphics lose their RRAN
-            // header. Clear the loaded flag and descriptor; the old bank
-            // availability words remain for the subsequent think.
+            // header. Only pointers +0/+4/+0xc are cleared; animation
+            // code/frame/queue/deadline remain, as do bank-table +8 and
+            // availability words. State3 can keep waiting on retained code2.
             p.graphics_evicted = true;
-            p.animation = {};
+            p.animation.selected.reset();
         } else {
             advance_animation(p.animation, p.look->bank, tick);
         }
@@ -710,6 +711,7 @@ void Race::contact_pedestrian(Rider& self, Pedestrian& p) {
     // decision. Upright pedestrians (state != 2) only nudge the rider below
     // speed 2000 (500 for one already down); faster riders ride up over them.
     Bike& s = self.bike;
+    if (s.i32(0x2f4) == 0) self.half_object.u8(0x1e9) = 0; // 00404b2c
     const Bike& q = p.body.bike;
     const int32_t steer = s.i32(0xf0);
     if (human(self)) {

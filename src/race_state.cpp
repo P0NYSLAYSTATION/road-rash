@@ -57,9 +57,15 @@ uint64_t state_hash(const RaceInstance& in) {
         f.bytes(r.half_object.m);
         f.i64(int64_t(r.sample));
         f.i64(r.route);
+        f.i64(r.slice_half.value_or(255));
+        f.i64(r.previous_slice_half.value_or(255));
+        f.i64(r.half_mirror.slice_half.value_or(255));
+        f.i64(r.crash_actor.slice_half.value_or(255));
+        f.i64(r.crash_actor.previous_slice_half.value_or(255));
         f.i64(r.ai);
         f.i64(r.finished);
         f.i64(r.finish_controls_ended);
+        f.i64(r.result_code);
         f.i64(r.finish_tick);
         f.i64(r.place);
         f.i64(r.parked);
@@ -82,10 +88,12 @@ uint64_t state_hash(const RaceInstance& in) {
     if (in.ring) {
         f.i64(in.ring->front_q8());
         f.i64(in.ring->back_q8());
+        for (const auto word : in.ring->tracker_state()) f.i64(word);
     }
     for (const auto& ring : in.seat_rings) {
         f.i64(ring->front_q8());
         f.i64(ring->back_q8());
+        for (const auto word : ring->tracker_state()) f.i64(word);
     }
     return f.h;
 }
