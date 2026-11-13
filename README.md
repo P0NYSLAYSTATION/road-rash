@@ -10,12 +10,7 @@ or an ISO. It imports assets without running the original installer. Optionally
 select a 3DO disc archive containing BIN/CUE (ZIP, 7z or RAR); extraction and WAV
 conversion run offline with bundled tools. With no 3DO bank, setup uses PC audio.
 Existing installations update in place and retain settings, saves, soundfonts
-and previously imported audio. Your source installation is not modified.
-Only the normal `VIDEO` folder is imported; `VIDEO BAK` is ignored.
-
-Display options include 320x240 and **Don't override**, which follows the original
-Race Resolution setting. Integer scaling preserves centered, whole-pixel sizing
-and black borders through the DirectX 9 presentation path.
+and previously imported audio. 
 
 Windows input uses native XInput and DirectInput. Keyboard and controller menus
 have independent **Turn Left**, **Turn Right**, **Lean Left** and **Lean Right**
@@ -24,11 +19,7 @@ XInput uses the left stick for turning and right stick for leaning; DirectInput
 uses X for turning and the POV left/right for leaning. Select any action to bind
 a key, button or axis direction. Bindings survive restart and apply during races.
 
-LAN play uses built-in TCP hosting and UDP discovery. Both players need this port
-and matching gameplay assets/builds. For Internet play, the host forwards TCP
-27995 and shares `tcp://HOST:27995/ROOMCODE` (replace HOST with a reachable address).
-There is no hosted matchmaking/NAT relay. Original/Steam OKPlay v0.8.3 uses a
-different game-message protocol and cannot join this port's sessions.
+Online and LAN multiplayer is still WIP.
 
 No game assets, disc images, licensed soundtrack or soundfonts are distributed.
 Supply your own PC and optional 3DO discs. [FORK_AUDIO.md](docs/FORK_AUDIO.md)
