@@ -4811,3 +4811,11 @@ Removed shared Render Resolution and Widescreen controls. Expanded the original
 Race Resolution popup, added independent Menu Resolution, and compose/present
 selected-size framebuffers with integer scaling in both SDL and DirectX.
 See [change and focused evidence](agent-handoffs/separate-resolutions-20261113.md).
+
+
+## Mini dashboard controls
+
+Connected mini_dash to the live dashboard renderer, restored F10 release cycling
+and persistence, and added Pause / Dashboard / Full, Small, Off. The rendered
+mode regression and affected input/menu/settings checks pass.
+See [implementation and evidence](agent-handoffs/mini-dashboard-20261113.md).

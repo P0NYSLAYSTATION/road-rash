@@ -165,6 +165,10 @@ enum : int {
     binding_7,
     binding_8,
     binding_9,
+    dashboard,
+    d_dashboard,
+    dash_full,
+    dash_small,
     count
 };
 }

@@ -164,6 +164,10 @@ const std::array<std::string, ns::count - native_slot_base> kNativeStrings = {
     "Punch",
     "Kick",
     "Backhand",
+    "Dashboard",
+    "Full bike dashboard, small HUD, or off. F10 cycles these modes during a race.",
+    "Full",
+    "Small",
 
 };
 const std::string kEmpty;

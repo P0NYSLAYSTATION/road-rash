@@ -171,7 +171,7 @@ struct CourseCanvas {
         RgbImage dash = need_dash
                             ? game.assets.hud->compose(
                                   game.assets.hud->state(game.race(), game.player_name, game.rider_names),
-                                  game.assets.physics, rr::DashMode::full, s)
+                                  game.assets.physics, rr::DashMode(game.mini_dash), s)
                             : RgbImage(0, 0, 0);
         if (need_dash && message)
             game.assets.hud->draw_message(dash, game.banner_message, s);

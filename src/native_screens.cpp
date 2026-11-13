@@ -154,6 +154,8 @@ void add_native_screens(FrontendData& data, bool mobile) {
     data.popups[native_popup::resolution] = build_popup(rtpl, ns::menu_resolution,
         {{1, ns::scale_1x}, {2, ns::scale_2x}, {3, ns::scale_3x},
          {4, ns::scale_4x}, {5, ns::res_match}});
+    data.popups[native_popup::dashboard] = build_popup(rtpl, ns::dashboard,
+        {{1, ns::dash_full}, {2, ns::dash_small}, {3, ns::off}});
     const int race_header = rtpl.front().caption;
     const int low_caption = rtpl[1].caption, inset_caption = rtpl[2].caption;
     data.popups[0x00474240] = build_popup(rtpl, race_header,
@@ -347,7 +349,9 @@ void add_native_screens(FrontendData& data, bool mobile) {
         pause.items.push_back(
             button(tpl.y + 2 * step, ns::display, 0, 0, screen_id::native_display, item_flag::title_desc));
         pause.items.push_back(button(tpl.y + 3 * step, ns::controls, 0, 0, 0x12, item_flag::title_desc));
-        pause.items.push_back(button(tpl.y + 4 * step, ns::quit_race, ns::d_quit_race,
+        pause.items.push_back(value_item(tpl, tpl.y + 4 * step, ns::dashboard, ns::d_dashboard,
+                                         native_popup::dashboard));
+        pause.items.push_back(button(tpl.y + 5 * step, ns::quit_race, ns::d_quit_race,
                                      native_action::pause_quit, 0,
                                      item_flag::title_desc | item_flag::description));
         chain(pause);

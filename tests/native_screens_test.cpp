@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     const auto& touch = data.screens[rr::screen_id::native_touch];
     check(touch.items.size() == 3 && touch.title == rr::ns::touch_title, "touch page rows");
     const auto& pause = data.screens[rr::screen_id::native_pause];
-    check(pause.items.size() == 5 && pause.title == rr::ns::pause_title, "pause menu rows");
+    check(pause.items.size() == 6 && pause.title == rr::ns::pause_title, "pause menu rows");
     check(pause.items[1].target == rr::screen_id::native_sound, "pause SOUND enters the sound screen");
     check(pause.items[2].target == rr::screen_id::native_display, "pause DISPLAY enters the display screen");
     check(pause.items[3].target == 0x12, "pause CONTROLS enters Configure Input");

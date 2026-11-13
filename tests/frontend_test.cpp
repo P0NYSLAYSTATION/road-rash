@@ -1135,15 +1135,24 @@ int main(int argc, char** argv) {
     fe.open_pause(race_frame);
     check(fe.pause_open() && fe.screen() == screen_id::native_pause && fe.focus() == 0,
           "pause opens on RESUME");
+    if (focus_item(4)) key("select");
+    choose_target(2);
+    check(settings.mini_dash == 1 && fe.pause_open(), "pause Dashboard selector enables the small HUD");
+    {
+        std::ifstream file(std::filesystem::path(saves).parent_path() / "settings.txt");
+        std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        check(rr::parse_settings(text).mini_dash == 1, "pause dashboard choice persists");
+    }
+    check(focus_item(0), "return to Resume after choosing the dashboard");
     snap("pause");
-    for (int i = 0; i < 4; ++i) key("down");
-    check(fe.focus() == 4, "Downx4 reaches QUIT RACE");
+    for (int i = 0; i < 5; ++i) key("down");
+    check(fe.focus() == 5, "Downx5 reaches QUIT RACE");
     key("select");
     check(fe.dialog_open(), "quit asks for confirmation");
     snap("pause-quit-dialog");
     key("select"); // No (default): still paused, no event
     check(!fe.dialog_open() && fe.pause_open() && !event(FrontendEvent::Kind::quit_race), "No stays paused");
-    if (focus_item(4)) key("select");
+    if (focus_item(5)) key("select");
     key("left");
     key("select"); // Yes: quit event, pause closed
     check(event(FrontendEvent::Kind::quit_race) && !fe.pause_open(), "Yes quits the race");
@@ -1175,8 +1184,8 @@ int main(int argc, char** argv) {
         press(in);
     };
     fe.open_pause(race_frame);
-    for (int i = 0; i < 8 && fe.focus() != 4; ++i) pad("down"); // focus memory: approach from wherever
-    check(fe.focus() == 4, "pad reaches QUIT RACE");
+    for (int i = 0; i < 8 && fe.focus() != 5; ++i) pad("down"); // focus memory: approach from wherever
+    check(fe.focus() == 5, "pad reaches QUIT RACE");
     pad("select");
     check(fe.dialog_open(), "pad opens the quit dialog");
     pad("select"); // No

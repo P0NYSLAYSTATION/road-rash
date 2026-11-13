@@ -115,6 +115,7 @@ struct Game {
     std::string quit_prompt; // string 316, shown after Escape in a career race
     bool quitting = false;
     std::string pause_prompt;   // string 317, shown by the Pause key (0x004234f7)
+    int mini_dash = 0; // live Full / Small / Off selection
     bool pause_message = false; // 0x004431d0 pump with string 317 open
     // DAT_004c5bd0 while a 0x004431d0 pump runs (DAT_004753b8): the quit or
     // pause prompt, set by RaceScreen each frame; empty otherwise.

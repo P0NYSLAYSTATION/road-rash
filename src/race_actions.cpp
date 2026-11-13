@@ -13,6 +13,11 @@ RaceAction race_action(const SDL_Event& e, const RaceActionContext& c) {
                    e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_ADDED ||
                    e.type == SDL_EVENT_FINGER_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN))
         return RaceAction::demo_exit;
+    // F10 cycles on release, including inside the original pause/quit pump.
+    if (!c.demo && e.type == SDL_EVENT_KEY_UP && e.key.key == SDLK_F10)
+        return RaceAction::cycle_dashboard;
+    if (!c.demo && !c.menu_open && e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F10)
+        return RaceAction::none;
     // Menu owns all input while open.
     if (c.menu_open) return RaceAction::none;
     // 0x004431d0 pump with string 317: key-up of any key (other than F10 /

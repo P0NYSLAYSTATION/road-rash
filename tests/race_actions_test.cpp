@@ -77,6 +77,11 @@ int main() {
     check(rr::race_action(button(7, SDL_GAMEPAD_BUTTON_SOUTH), held) == A::resume_message,
           "pad button resumes");
     check(rr::race_action(tap, held) == A::resume_message, "tap resumes");
+    SDL_Event f10_release = key(SDLK_F10);
+    f10_release.type = SDL_EVENT_KEY_UP;
+    for (auto context : {quick, held, menu_open})
+        check(rr::race_action(f10_release, context) == A::cycle_dashboard,
+              "F10 release cycles the dashboard while racing or paused");
     if (failures == 0) std::cout << "race_actions OK\n";
     return failures ? 1 : 0;
 }

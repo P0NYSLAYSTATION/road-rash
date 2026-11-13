@@ -125,6 +125,9 @@ void RaceScreen::draw_scene(FrameProfile* prof) {
     const int race_scale = (opt_.menu || opt_.render_scale == 0) && opt_.settings
                                ? effective_render_scale(*opt_.settings, dw, dh, kMobileDisplay)
                                : opt_.render_scale;
+    g_.mini_dash = std::clamp(display_.settings->mini_dash, 0, 2);
+    if (g_.assets.hud)
+        g_.assets.hud->set_low_mode(!display_.settings->high_resolution || display_.settings->inset);
     if (opt_.settings) {
         g_.widescreen = Widescreen::off;
         g_.display_w = dw;
@@ -245,7 +248,7 @@ void RaceScreen::event(const SDL_Event& e) {
         running_ = false;
         return;
     }
-    if (act_ctx.menu_open) {
+    if (act_ctx.menu_open && act != RaceAction::cycle_dashboard) {
         pause_event(opt_.menu, e, pad_, renderer_);
         return;
     }
@@ -293,6 +296,11 @@ void RaceScreen::event(const SDL_Event& e) {
         return;
     case RaceAction::restart:
         restart_ = true;
+        return;
+    case RaceAction::cycle_dashboard:
+        display_.settings->mini_dash = Hud::cycle_mini_dash(display_.settings->mini_dash);
+        if (!display_.settings_path.empty())
+            save_settings(display_.settings_path, *display_.settings);
         return;
     case RaceAction::toggle_fullscreen:
         display_.toggle_fullscreen();

@@ -17,6 +17,7 @@ enum class RaceAction {
     demo_exit,
     pause_message,
     resume_message,
+    cycle_dashboard,
     toggle_fullscreen // native: Alt+Enter / Cmd+F, as in the menus (plan 18 Task 3, plan 33b Task 3)
 };
 struct RaceActionContext {

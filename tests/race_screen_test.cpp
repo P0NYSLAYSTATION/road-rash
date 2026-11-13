@@ -223,6 +223,52 @@ int main() {
             check(screen.result().outcome == rr::RaceOutcome::wrecked, "quit counts as wrecked");
             game.career = false;
         }
+        // Exercise the saved setting and real F10 event path through the live renderer.
+        {
+            game.restart();
+            game.countdown = 0;
+            const auto previous_palette = game.palette;
+            game.palette = rr::Palette::from_raw(assets.read("DATA/PALETTE.RAW"));
+            auto previous_hud = std::move(game.assets.hud);
+            game.assets.hud = std::make_unique<rr::Hud>(assets, exe, 0, false);
+            settings.mini_dash = rr::parse_settings("mini_dash=1\n").mini_dash;
+            const bool show_fps = options.show_fps;
+            options.show_fps = false;
+            {
+                rr::RaceScreen screen(game, renderer, options, display);
+                constexpr uint64_t now = 1000000000ull;
+                screen.iterate(now);
+                const auto small = rr::capture_race_frame(renderer);
+                check(game.mini_dash == 1, "saved mini_dash=1 reaches the live renderer");
+                screen.event(key(SDLK_F10));
+                check(settings.mini_dash == 1, "F10 key-down does not cycle twice");
+                auto release = key(SDLK_F10);
+                release.type = SDL_EVENT_KEY_UP;
+                screen.event(release);
+                screen.iterate(now);
+                const auto off = rr::capture_race_frame(renderer);
+                if (off.pixels == small.pixels)
+                    std::cerr << "HUD frame unchanged: setting=" << settings.mini_dash << " drawn=" << game.mini_dash
+                              << " countdown=" << game.countdown << " scene=" << bool(game.scene())
+                              << " quitting=" << game.quitting << " paused=" << game.pause_message << "\n";
+                check(settings.mini_dash == 2 && off.pixels != small.pixels,
+                      "F10 switches the visible small HUD off");
+                screen.event(release);
+                screen.iterate(now);
+                const auto full = rr::capture_race_frame(renderer);
+                check(settings.mini_dash == 0 && full.pixels != small.pixels && full.pixels != off.pixels,
+                      "F10 restores the full bike dashboard");
+                screen.event(release);
+                screen.iterate(now);
+                check(settings.mini_dash == 1 && rr::capture_race_frame(renderer).pixels == small.pixels,
+                      "F10 returns to the small HUD without advancing simulation");
+                check(game.race().ticks() == 0, "dashboard changes do not advance gameplay");
+            }
+            game.assets.hud = std::move(previous_hud);
+            game.palette = previous_palette;
+            options.show_fps = show_fps;
+            settings.mini_dash = 0;
+        }
         // Live arrest -> screen outcome (plan 32 D) is covered by the riding
         // and on-foot arrest fixtures below: the periodic cop arrests the
         // parked player, the screen surfaces RaceOutcome::busted through the

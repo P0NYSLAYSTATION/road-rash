@@ -930,6 +930,8 @@ int Frontend::native_current(uint32_t popup) const {
         return settings_.touch_opacity / 25 + 1;
     case native_popup::resolution:
         return settings_.menu_render_scale == 0 ? 5 : settings_.menu_render_scale;
+    case native_popup::dashboard:
+        return settings_.mini_dash + 1;
     case native_popup::visual_style:
         return visual_style_current();
     case native_popup::tex_detail:
@@ -968,6 +970,9 @@ void Frontend::open_native_popup(uint32_t popup) {
         break;
     case native_popup::resolution:
         setter = native_setter::menu_resolution;
+        break;
+    case native_popup::dashboard:
+        setter = native_setter::dashboard;
         break;
     case native_popup::visual_style:
         setter = native_setter::visual_style;
@@ -1052,6 +1057,8 @@ std::string Frontend::native_value_text(int caption) const {
     case ns::menu_resolution:
         return native_string(settings_.menu_render_scale == 0 ? ns::res_match
                              : ns::scale_1x + settings_.menu_render_scale - 1);
+    case ns::dashboard:
+        return native_string(settings_.mini_dash == 0 ? ns::dash_full : settings_.mini_dash == 1 ? ns::dash_small : ns::off);
     case ns::visual_style:
         return native_string(ns::style_original + visual_style_current() - 1);
     case ns::enh_interp:
@@ -1931,6 +1938,10 @@ int Frontend::run_handler(size_t index) {
             break;
         case native_setter::menu_resolution:
             settings_.menu_render_scale = target == 5 ? 0 : std::clamp(target, 1, 4);
+            apply_native_setting();
+            break;
+        case native_setter::dashboard:
+            settings_.mini_dash = std::clamp(target - 1, 0, 2);
             apply_native_setting();
             break;
         case native_setter::visual_style:
