@@ -41,5 +41,11 @@ int main() {
     s.high_resolution = true;
     s.inset = true;
     check(rr::effective_render_scale(s, 2560, 1600, false) == 1, "inset forces 1");
+    s.menu_render_scale = 3;
+    s.render_scale = -1;
+    s.high_resolution = false;
+    check(rr::effective_menu_scale(s, 1920, 1080) == 3, "menu size ignores low race mode");
+    s.menu_render_scale = 0;
+    check(rr::effective_menu_scale(s, 1920, 1080) == 2, "detected menu fits the display in 4:3");
     return failures ? 1 : 0;
 }

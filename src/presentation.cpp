@@ -13,6 +13,56 @@
 #include <d3d9.h>
 #endif
 namespace rr {
+namespace {
+struct PresentationFramebuffer {
+    SDL_Texture* texture = nullptr;
+    int width = 0, height = 0;
+    ~PresentationFramebuffer() { if (texture) SDL_DestroyTexture(texture); }
+};
+std::unordered_map<SDL_Renderer*, std::unique_ptr<PresentationFramebuffer>> framebuffers;
+}
+SDL_RendererLogicalPresentation presentation_mode(SDL_Renderer* renderer) {
+    SDL_RendererLogicalPresentation mode;
+    SDL_GetRenderLogicalPresentation(renderer, nullptr, nullptr, &mode);
+    return SDL_RendererLogicalPresentation(SDL_GetNumberProperty(SDL_GetRendererProperties(renderer),
+                                                                  "rr.presentation.mode", mode));
+}
+bool presentation_set_logical(SDL_Renderer* renderer, int width, int height,
+                              SDL_RendererLogicalPresentation mode) {
+    SDL_SetNumberProperty(SDL_GetRendererProperties(renderer), "rr.presentation.mode", mode);
+    // Composition maps logical coordinates onto the selected native target.
+    // Integer/fit/stretch apply only when presenting that target to the window.
+    const auto internal = framebuffers.count(renderer) ? SDL_LOGICAL_PRESENTATION_STRETCH : mode;
+    return SDL_SetRenderLogicalPresentation(renderer, width, height, internal);
+}
+bool presentation_framebuffer(SDL_Renderer* renderer, int width, int height) {
+    if (width <= 0 || height <= 0) return SDL_SetError("Invalid presentation framebuffer size");
+    auto& frame = framebuffers[renderer];
+    if (!frame) frame = std::make_unique<PresentationFramebuffer>();
+    if (!frame->texture || frame->width != width || frame->height != height) {
+        SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                                 SDL_TEXTUREACCESS_TARGET, width, height);
+        if (!texture) return false;
+        int lw = 0, lh = 0;
+        SDL_RendererLogicalPresentation mode;
+        SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, &mode);
+        mode = presentation_mode(renderer);
+        SDL_SetNumberProperty(SDL_GetRendererProperties(renderer), "rr.presentation.mode", mode);
+        if (!SDL_SetRenderTarget(renderer, texture)) { SDL_DestroyTexture(texture); return false; }
+        if (frame->texture) SDL_DestroyTexture(frame->texture);
+        frame->texture = texture;
+        frame->width = width;
+        frame->height = height;
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        if (!SDL_SetRenderLogicalPresentation(renderer, lw, lh, SDL_LOGICAL_PRESENTATION_STRETCH)) return false;
+    } else if (SDL_GetRenderTarget(renderer) != frame->texture) {
+        if (!SDL_SetRenderTarget(renderer, frame->texture)) return false;
+    }
+    SDL_SetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.width", width);
+    SDL_SetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.height", height);
+    return true;
+}
 SDL_FRect presentation_rectangle(int w, int h, int nw, int nh, SDL_RendererLogicalPresentation mode) {
     float factor = std::min(float(w) / nw, float(h) / nh);
     if (mode == SDL_LOGICAL_PRESENTATION_INTEGER_SCALE && factor >= 1) factor = std::floor(factor);
@@ -20,16 +70,27 @@ SDL_FRect presentation_rectangle(int w, int h, int nw, int nh, SDL_RendererLogic
     float dh = mode == SDL_LOGICAL_PRESENTATION_STRETCH ? float(h) : nh * factor;
     return {(w - dw) / 2, (h - dh) / 2, dw, dh};
 }
+namespace {
+SDL_FRect framebuffer_destination(SDL_Renderer* renderer, int w, int h, int fw, int fh,
+                                  SDL_RendererLogicalPresentation mode) {
+    const bool inset = SDL_GetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.presentation.inset", false);
+    auto rect = presentation_rectangle(w, h, fw * (inset ? 2 : 1), fh * (inset ? 2 : 1), mode);
+    if (inset) { rect.x += rect.w / 4; rect.y += rect.h / 4; rect.w /= 2; rect.h /= 2; }
+    return rect;
+}
+}
 bool presentation_coordinates_from_window(SDL_Renderer* renderer, float x, float y, float* rx, float* ry) {
-    if (!SDL_GetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.low-resolution", false))
-        return SDL_RenderCoordinatesFromWindow(renderer, x, y, rx, ry);
+    const auto props = SDL_GetRendererProperties(renderer);
+    const int fw = int(SDL_GetNumberProperty(props, "rr.framebuffer.width", 0));
+    const int fh = int(SDL_GetNumberProperty(props, "rr.framebuffer.height", 0));
+    if (fw <= 0 || fh <= 0) return SDL_RenderCoordinatesFromWindow(renderer, x, y, rx, ry);
     int lw = 0, lh = 0, w = 0, h = 0, ww = 0, wh = 0;
     SDL_RendererLogicalPresentation mode;
     SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, &mode);
     if (lw < 2 || lh < 2) return SDL_RenderCoordinatesFromWindow(renderer, x, y, rx, ry);
-    SDL_GetRenderOutputSize(renderer, &w, &h);
+    SDL_GetWindowSizeInPixels(SDL_GetRenderWindow(renderer), &w, &h);
     SDL_GetWindowSize(SDL_GetRenderWindow(renderer), &ww, &wh);
-    auto rect = presentation_rectangle(w, h, lw / 2, lh / 2, mode);
+    auto rect = framebuffer_destination(renderer, w, h, fw, fh, presentation_mode(renderer));
     if (ww <= 0 || wh <= 0 || rect.w <= 0 || rect.h <= 0) return false;
     if (rx) *rx = (x * w / ww - rect.x) * lw / rect.w;
     if (ry) *ry = (y * h / wh - rect.y) * lh / rect.h;
@@ -62,7 +123,7 @@ struct Backend {
     HWND hwnd = nullptr;
     D3DPRESENT_PARAMETERS parameters{};
     int texture_w = 0, texture_h = 0;
-    bool vsync = true, low_resolution = false;
+    bool vsync = true;
     ~Backend() {
         if (texture) texture->Release();
         if (device) device->Release();
@@ -111,6 +172,7 @@ struct Backend {
         int logical_w = 640, logical_h = 480;
         SDL_RendererLogicalPresentation mode;
         SDL_GetRenderLogicalPresentation(renderer, &logical_w, &logical_h, &mode);
+        mode = presentation_mode(renderer);
         // Read the game viewport, not a desktop-sized image with SDL's
         // presentation already baked in. D3D applies the output scale once.
         SDL_Surface* raw = SDL_RenderReadPixels(renderer, nullptr);
@@ -120,18 +182,20 @@ struct Backend {
         if (!frame) return false;
         float left = -.5f, top = -.5f, right = float(client.right) - .5f, bottom = float(client.bottom) - .5f;
         if (logical_w > 0 && logical_h > 0 && mode != SDL_LOGICAL_PRESENTATION_DISABLED) {
-            const int divisor = low_resolution ? 2 : 1;
-            const int native_w = std::max(1, logical_w / divisor);
-            const int native_h = std::max(1, logical_h / divisor);
-            auto* native = SDL_CreateSurface(native_w, native_h, SDL_PIXELFORMAT_ARGB8888);
-            if (!native) {
+            const auto props = SDL_GetRendererProperties(renderer);
+            const int native_w = int(SDL_GetNumberProperty(props, "rr.framebuffer.width", logical_w));
+            const int native_h = int(SDL_GetNumberProperty(props, "rr.framebuffer.height", logical_h));
+            if (frame->w != native_w || frame->h != native_h) {
+                auto* native = SDL_CreateSurface(native_w, native_h, SDL_PIXELFORMAT_ARGB8888);
+                if (!native) {
+                    SDL_DestroySurface(frame);
+                    return false;
+                }
+                SDL_BlitSurfaceScaled(frame, nullptr, native, nullptr, SDL_SCALEMODE_NEAREST);
                 SDL_DestroySurface(frame);
-                return false;
+                frame = native;
             }
-            SDL_BlitSurfaceScaled(frame, nullptr, native, nullptr, SDL_SCALEMODE_NEAREST);
-            SDL_DestroySurface(frame);
-            frame = native;
-            auto rect = presentation_rectangle(client.right, client.bottom, native_w, native_h, mode);
+            auto rect = framebuffer_destination(renderer, client.right, client.bottom, native_w, native_h, mode);
             left = rect.x - .5f;
             top = rect.y - .5f;
             right = left + rect.w;
@@ -176,8 +240,10 @@ struct Backend {
         device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
         device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         device->SetTexture(0, texture);
-        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        const auto filter = SDL_GetBooleanProperty(SDL_GetRendererProperties(renderer),
+                                                   "rr.presentation.smooth", false) ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, filter);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, filter);
         device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
         device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
         device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
@@ -231,44 +297,33 @@ bool present_frame(SDL_Renderer* renderer) {
     auto it = backends.find(renderer);
     if (it != backends.end()) return it->second->present(renderer);
 #endif
-    if (SDL_GetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.low-resolution", false)) {
-        int lw = 0, lh = 0, w = 0, h = 0;
+    const auto found = framebuffers.find(renderer);
+    if (found != framebuffers.end()) {
+        const auto& frame = *found->second;
+        int w = 0, h = 0;
         SDL_RendererLogicalPresentation mode;
-        SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, &mode);
-        if (lw >= 2 && lh >= 2) {
-            SDL_Surface* source = SDL_RenderReadPixels(renderer, nullptr);
-            if (!source) return false;
-            SDL_Surface* low = SDL_CreateSurface(lw / 2, lh / 2, source->format);
-            if (!low) {
-                SDL_DestroySurface(source);
-                return false;
-            }
-            SDL_BlitSurfaceScaled(source, nullptr, low, nullptr, SDL_SCALEMODE_NEAREST);
-            SDL_DestroySurface(source);
-            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, low);
-            SDL_DestroySurface(low);
-            if (!texture) return false;
-            SDL_Rect viewport;
-            SDL_GetRenderViewport(renderer, &viewport);
-            bool set = SDL_RenderViewportSet(renderer);
-            SDL_GetRenderOutputSize(renderer, &w, &h);
-            auto rect = presentation_rectangle(w, h, lw / 2, lh / 2, mode);
-            SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
-            SDL_SetRenderViewport(renderer, nullptr);
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            SDL_RenderClear(renderer);
-            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-            SDL_RenderTexture(renderer, texture, nullptr, &rect);
-            const bool ok = SDL_RenderPresent(renderer);
-            SDL_DestroyTexture(texture);
-            SDL_SetRenderLogicalPresentation(renderer, lw, lh, mode);
-            SDL_SetRenderViewport(renderer, set ? &viewport : nullptr);
-            return ok;
-        }
+        SDL_GetRenderLogicalPresentation(renderer, nullptr, nullptr, &mode);
+        mode = presentation_mode(renderer);
+        SDL_FlushRenderer(renderer);
+        if (!SDL_SetRenderTarget(renderer, nullptr)) return false;
+        SDL_GetWindowSizeInPixels(SDL_GetRenderWindow(renderer), &w, &h);
+        const auto rect = framebuffer_destination(renderer, w, h, frame.width, frame.height, mode);
+        SDL_SetRenderLogicalPresentation(renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+        SDL_SetRenderViewport(renderer, nullptr);
+        SDL_SetRenderClipRect(renderer, nullptr);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        const bool ok = SDL_RenderClear(renderer) &&
+                        SDL_RenderTexture(renderer, frame.texture, nullptr, &rect) &&
+                        SDL_RenderPresent(renderer);
+        const bool restored = SDL_SetRenderTarget(renderer, frame.texture);
+        return ok && restored;
     }
+
     return SDL_RenderPresent(renderer);
 }
 void destroy_game_renderer(SDL_Renderer* renderer) {
+    SDL_SetRenderTarget(renderer, nullptr);
+    framebuffers.erase(renderer);
 #ifdef _WIN32
     backends.erase(renderer);
 #endif
@@ -289,14 +344,10 @@ void presentation_vsync(SDL_Renderer* renderer, int vsync) {
     SDL_SetRenderVSync(renderer, vsync);
 }
 void presentation_low_resolution(SDL_Renderer* renderer, bool low) {
-    SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.low-resolution", low);
-#ifdef _WIN32
-    auto i = backends.find(renderer);
-    if (i != backends.end()) i->second->low_resolution = low;
-#else
-    (void)renderer;
-    (void)low;
-#endif
+    int lw = 640, lh = 480;
+    SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, nullptr);
+    const int divisor = low ? 2 : 1;
+    presentation_framebuffer(renderer, std::max(1, lw / divisor), std::max(1, lh / divisor));
 }
 bool uses_directx9(SDL_Renderer* renderer) {
 #ifdef _WIN32

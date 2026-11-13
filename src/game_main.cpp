@@ -913,7 +913,7 @@ int run_game(const rr::Assets& assets, SDL_Window* window, SDL_Renderer* rendere
         fe.set_display_size(dw, dh);
         const int menu_lw = fe.menu_width(dw, dh);
         if (menu_lw != 640)
-            SDL_SetRenderLogicalPresentation(renderer, menu_lw, 480, display.config.presentation);
+            rr::presentation_set_logical(renderer, menu_lw, 480, display.config.presentation);
         fe.draw(frame, display.render_scale);
         if (!texture || menu_scale != frame.width) {
             menu_scale = frame.width;

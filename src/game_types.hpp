@@ -47,7 +47,8 @@ struct DisplayDriver {
     long frame = 0;
     int render_scale = 1;   // plan 19 Task 8: effective scale, re-queried on apply
     int render_threads = 1; // plan 19 Task 8: worker count for the band renderer
-    void apply(int logical_h);
+    bool race_mode = false;
+    void apply(int logical_h, bool race = false);
     void toggle_fullscreen();
     void maybe_toggle() {
         if (toggle_at >= 0 && ++frame >= toggle_at) {

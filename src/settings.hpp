@@ -65,7 +65,8 @@ struct Settings {
     bool vsync = true;
     bool show_fps = false;
     bool network_hud = false, smooth_remote = true; // plan 34 presentation options
-    int render_scale = -2;                          // plan 19 Task 8: 0 = match display, 1..4 fixed
+    int menu_render_scale = 1; // 0 = detected, 1..4 = independent menu size
+    int render_scale = -2;                          // race only: -2 original flags, -1 low, 0 detected, 1..4 fixed
     Widescreen widescreen = Widescreen::off;        // plan 21 Task 8: Hor+ logical width
     int texture_detail = 0;                         // plan 20 Task 3: 0 original, 1 enhanced (MMPX)
     Enhancements enhancements;                      // plan 21 Task 1: all off = original renderer

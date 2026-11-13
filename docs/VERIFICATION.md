@@ -4803,3 +4803,11 @@ The existing integer-framebuffer check now also requires the 640x480 native
 framebuffer. Focused MSVC Release build and integer-framebuffer check pass;
 logs: build/integer-scaling-fix-build.log and integer-scaling-fix-test.log.
 No simulation replays or installer upgrade runs were performed for this fix.
+
+
+## Separate menu and race resolution
+
+Removed shared Render Resolution and Widescreen controls. Expanded the original
+Race Resolution popup, added independent Menu Resolution, and compose/present
+selected-size framebuffers with integer scaling in both SDL and DirectX.
+See [change and focused evidence](agent-handoffs/separate-resolutions-20261113.md).

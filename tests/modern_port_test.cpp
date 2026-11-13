@@ -86,9 +86,9 @@ int main(int argc, char** argv) {
             std::cout << "XInput/DirectInput axis, trigger, POV, button and boost checks passed\n";
             return 0;
         }
-        if (mode == "scaling") {
+        if (mode == "scaling" || mode == "scaling-sdl") {
             SDL_setenv_unsafe("SDL_VIDEODRIVER", "windows", 1);
-            SDL_setenv_unsafe("RR_RENDERER", "dx9", 1);
+            SDL_setenv_unsafe("RR_RENDERER", mode == "scaling-sdl" ? "sdl" : "dx9", 1);
             require(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
             SDL_Window* window = nullptr;
             SDL_Renderer* renderer = nullptr;
@@ -114,7 +114,10 @@ int main(int argc, char** argv) {
             require(pixel(0, 0) == 0 && pixel(179, 109) == 0 && pixel(180, 110) == 0xff0000 &&
                         pixel(819, 589) == 0xff0000 && pixel(820, 590) == 0,
                     "integer image is not centered at exact 1x scale");
-            require(present_frame(renderer), "DirectX 9 integer presentation");
+            require(presentation_framebuffer(renderer, 640, 480), SDL_GetError());
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+            SDL_RenderClear(renderer);
+            require(present_frame(renderer), "native integer presentation");
             require(SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.width", 0) ==
                             640 &&
                         SDL_GetNumberProperty(SDL_GetRendererProperties(renderer), "rr.framebuffer.height",
@@ -123,7 +126,7 @@ int main(int argc, char** argv) {
             int w, h;
             SDL_RendererLogicalPresentation mode;
             SDL_GetRenderLogicalPresentation(renderer, &w, &h, &mode);
-            require(w == 640 && h == 480 && mode == SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+            require(w == 640 && h == 480 && presentation_mode(renderer) == SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
                     "capture changed renderer logical state");
             presentation_low_resolution(renderer, true);
             require(present_frame(renderer), "320x240 framebuffer presentation");
@@ -137,6 +140,27 @@ int main(int argc, char** argv) {
             presentation_coordinates_from_window(renderer, rect.x, rect.y, &x, &y);
             require(std::abs(x) < .01 && std::abs(y) < .01,
                     "mouse mapping does not match native integer framebuffer");
+            SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.presentation.inset", true);
+            presentation_coordinates_from_window(renderer, 340, 230, &x, &y);
+            require(std::abs(x) < .01 && std::abs(y) < .01, "original inset is not centered inside 640x480");
+            require(present_frame(renderer), SDL_GetError());
+            SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.presentation.inset", false);
+            for (int factor = 1; factor <= 4; ++factor) {
+                SDL_SetRenderLogicalPresentation(renderer, 640, 480, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+                require(presentation_framebuffer(renderer, 640 * factor, 480 * factor), SDL_GetError());
+                SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+                SDL_RenderClear(renderer);
+                SurfacePtr native(SDL_RenderReadPixels(renderer, nullptr));
+                require(native && native->w == 640 * factor && native->h == 480 * factor,
+                        "selected native framebuffer was resized to the window");
+                require(present_frame(renderer), SDL_GetError());
+                require(SDL_GetRenderTarget(renderer) != nullptr, "presentation lost the native target");
+                const auto dst = presentation_rectangle(1000, 700, 640 * factor, 480 * factor,
+                                                        SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+                presentation_coordinates_from_window(renderer, dst.x + dst.w / 2, dst.y + dst.h / 2, &x, &y);
+                require(std::abs(x - 320) < .01 && std::abs(y - 240) < .01,
+                        "mouse coordinates changed with independent framebuffer size");
+            }
             destroy_game_renderer(renderer);
             SDL_DestroyWindow(window);
             SDL_Quit();

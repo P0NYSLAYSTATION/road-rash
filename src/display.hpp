@@ -22,6 +22,7 @@ DisplayConfig display_config(const Settings&, int logical_h, bool mobile);
 // resolution choice (high_resolution false or inset true) forces 1.
 int effective_render_scale(const Settings&, int drawable_w, int drawable_h, bool mobile);
 // Idempotent: only calls SDL for fields that differ from the window's current state.
+int effective_menu_scale(const Settings&, int drawable_w, int drawable_h);
 void apply_display(SDL_Window*, SDL_Renderer*, const DisplayConfig&);
 // For every streaming texture the game creates.
 void apply_texture_scale(SDL_Texture*, const DisplayConfig&);

@@ -38,6 +38,13 @@ int effective_render_scale(const Settings& s, int drawable_w, int drawable_h, bo
     return best;
 }
 
+int effective_menu_scale(const Settings& s, int w, int h) {
+    Settings menu;
+    menu.high_resolution = true;
+    menu.render_scale = s.menu_render_scale;
+    return effective_render_scale(menu, w, h, false);
+}
+
 void apply_display(SDL_Window* window, SDL_Renderer* renderer, const DisplayConfig& c) {
     const bool is_full = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
     if (is_full != c.fullscreen) SDL_SetWindowFullscreen(window, c.fullscreen);
@@ -63,7 +70,7 @@ void apply_display(SDL_Window* window, SDL_Renderer* renderer, const DisplayConf
     SDL_RendererLogicalPresentation mode{};
     SDL_GetRenderLogicalPresentation(renderer, &lw, &lh, &mode);
     if (lw != c.logical_w || lh != c.logical_h || mode != c.presentation)
-        SDL_SetRenderLogicalPresentation(renderer, c.logical_w, c.logical_h, c.presentation);
+        presentation_set_logical(renderer, c.logical_w, c.logical_h, c.presentation);
     presentation_vsync(renderer, c.vsync);
 }
 

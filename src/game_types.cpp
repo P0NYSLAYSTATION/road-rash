@@ -13,7 +13,7 @@
 namespace rr {
 int32_t Game::logical_width() const {
     // Single setting (review 2026-10-13 item 1); match follows the window aspect.
-    return logical_width_for(widescreen, display_w, display_h);
+    return 320;
 }
 
 void Game::load_course(const Assets& a, const std::vector<uint8_t>& exe) {

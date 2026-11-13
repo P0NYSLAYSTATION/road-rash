@@ -17,7 +17,7 @@ constexpr uint32_t display_mode = 0xF0000001, window_size = 0xF0000002, scaling 
 // Setter ids for native popup choices (negative: never an EXE setter).
 namespace native_setter {
 constexpr int display_mode = -1, window_size = -2, scaling = -3, filtering = -4, vsync = -5, fps = -6,
-              touch_opacity = -7, haptics = -8, render_resolution = -9, widescreen = -10, visual_style = -11,
+              touch_opacity = -7, haptics = -8, menu_resolution = -9, widescreen = -10, visual_style = -11,
               enh_interp = -12, enh_persp = -13, enh_colour = -14, enh_filter = -15, enh_fog = -16,
               enh_grade = -17, enh_bloom = -18, enh_vig = -19, enh_mb = -20, enh_wide = -21, tex_detail = -22,
               net_level = -23, net_ai = -24, net_cars = -25, net_public = -26;

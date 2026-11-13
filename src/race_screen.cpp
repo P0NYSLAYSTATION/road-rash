@@ -21,15 +21,25 @@ std::string pref_directory(); // game_main.cpp; plan 20 Task 3 cache root
 
 namespace rr {
 // DisplayDriver methods (moved unchanged from game_main.cpp).
-void DisplayDriver::apply(int logical_h) {
+void DisplayDriver::apply(int logical_h, bool race) {
+    race_mode = race;
     config = display_config(*settings, logical_h, kMobileDisplay);
     apply_display(window, renderer, config);
-    presentation_low_resolution(renderer, settings->render_scale == -1 ||
-                                              (settings->render_scale == -2 && !settings->high_resolution));
     int dw = 0, dh = 0;
-    SDL_GetWindowSize(window, &dw, &dh);
-    render_scale = effective_render_scale(*settings, dw, dh, kMobileDisplay);
-    config.supersampling = 640 * render_scale > dw || 480 * render_scale > dh;
+    SDL_GetWindowSizeInPixels(window, &dw, &dh);
+    render_scale = race ? effective_render_scale(*settings, dw, dh, kMobileDisplay)
+                        : effective_menu_scale(*settings, dw, dh);
+    const bool low = race && (settings->inset || settings->render_scale == -1 ||
+                      (settings->render_scale == -2 && !settings->high_resolution));
+    SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.presentation.inset", race && settings->inset);
+    const int width = (low ? 320 : 640) * render_scale;
+    const int height = (low ? 240 : 480) * render_scale;
+    config.supersampling = width > dw || height > dh;
+    if (!presentation_framebuffer(renderer, width, height))
+        throw std::runtime_error(SDL_GetError());
+    const bool smooth = config.supersampling || config.texture_scale == SDL_SCALEMODE_LINEAR;
+    SDL_SetBooleanProperty(SDL_GetRendererProperties(renderer), "rr.presentation.smooth", smooth);
+    SDL_SetTextureScaleMode(SDL_GetRenderTarget(renderer), smooth ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
     int cores = SDL_GetNumLogicalCPUCores();
 #ifdef RR_WEB_BROWSER
     render_threads = 1; // Baseline browser build has no pthread workers.
@@ -41,7 +51,7 @@ void DisplayDriver::toggle_fullscreen() {
     settings->display_mode =
         settings->display_mode == DisplayMode::fullscreen ? DisplayMode::windowed : DisplayMode::fullscreen;
     save_settings(settings_path, *settings);
-    apply(config.logical_h);
+    apply(config.logical_h, race_mode);
 }
 
 RaceScreen::RaceScreen(Game& g, SDL_Renderer* r, const RaceOptions& opt, DisplayDriver& d)
@@ -96,7 +106,7 @@ RaceScreen::RaceScreen(Game& g, SDL_Renderer* r, const RaceOptions& opt, Display
     // 0x004163d0: a fresh race (timer still at its start value) fades in.
     if (!opt_.capture && g_.countdown == countdown_ticks) fade_ = Fade::in;
     display_.frame = 0;
-    display_.apply(480);
+    display_.apply(480, true);
 }
 
 // Redraw the current presentation without advancing simulation. Phone pause
@@ -107,6 +117,7 @@ RgbImage RaceScreen::pause_frame() {
 }
 
 void RaceScreen::draw_scene(FrameProfile* prof) {
+    display_.apply(480, true);
     SDL_SetRenderDrawColor(renderer_, 15, 18, 22, 255);
     SDL_RenderClear(renderer_);
     int dw = 0, dh = 0;
@@ -115,7 +126,7 @@ void RaceScreen::draw_scene(FrameProfile* prof) {
                                ? effective_render_scale(*opt_.settings, dw, dh, kMobileDisplay)
                                : opt_.render_scale;
     if (opt_.settings) {
-        g_.widescreen = opt_.settings->widescreen;
+        g_.widescreen = Widescreen::off;
         g_.display_w = dw;
         g_.display_h = dh;
         g_.enhancements = opt_.settings->enhancements;
@@ -423,7 +434,7 @@ bool RaceScreen::iterate(uint64_t now_ns) {
                 }
                 running_ = false;
             } else if (ev.kind == FrontendEvent::Kind::apply_display)
-                display_.apply(480);
+                display_.apply(480, true);
             else if (ev.kind == FrontendEvent::Kind::apply_mixer && opt_.apply_settings)
                 opt_.apply_settings();
         }
@@ -508,13 +519,14 @@ bool RaceScreen::iterate(uint64_t now_ns) {
         return running_;
     }
     if (menu_pause && opt_.menu) {
+        display_.apply(480, false);
         // Plan 18 Task 8: the pause menu draws over the captured frame.
         // Plan 19 Task 8: pause menu draws at the effective scale too.
         int dw = 0, dh = 0;
         if (display_.window) SDL_GetWindowSize(display_.window, &dw, &dh);
         opt_.menu->set_display_size(dw, dh);
         const int pause_lw = opt_.menu->menu_width(dw, dh);
-        if (!SDL_SetRenderLogicalPresentation(renderer_, pause_lw, 480, display_.config.presentation))
+        if (!presentation_set_logical(renderer_, pause_lw, 480, display_.config.presentation))
             throw std::runtime_error(SDL_GetError());
         const int pause_scale = display_.render_scale;
         opt_.menu->draw(pause_img_, pause_scale);

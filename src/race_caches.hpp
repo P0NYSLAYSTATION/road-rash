@@ -1,5 +1,6 @@
 // Plan 28 Task 4: race sprite cache + course canvas (moved from game_main.cpp).
 #pragma once
+#include "presentation.hpp"
 #include <SDL3/SDL.h>
 #include <cstdlib>
 #include <cstdint>
@@ -375,8 +376,7 @@ struct CourseCanvas {
         // Hor+ (plan 21 Task 8): logical presentation is wide*2 x 480,
         // set once per resize below; the texture fills it exactly.
         const SDL_FRect dst{0, 0, float(scale_w), float(scale_h)};
-        SDL_SetRenderLogicalPresentation(renderer, float(scale_w), float(scale_h),
-                                         SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        presentation_set_logical(renderer, scale_w, scale_h, presentation_mode(renderer));
         if (!SDL_RenderTexture(renderer, texture.get(), nullptr, &dst))
             throw std::runtime_error(SDL_GetError());
     }

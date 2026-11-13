@@ -5,6 +5,9 @@ bool create_game_window_renderer(const char*, int, int, SDL_WindowFlags, SDL_Win
 bool presentation_coordinates_from_window(SDL_Renderer*, float, float, float*, float*);
 SDL_FRect presentation_rectangle(int, int, int, int, SDL_RendererLogicalPresentation);
 SDL_Surface* read_presentation_frame(SDL_Renderer*);
+SDL_RendererLogicalPresentation presentation_mode(SDL_Renderer*);
+bool presentation_set_logical(SDL_Renderer*, int, int, SDL_RendererLogicalPresentation);
+bool presentation_framebuffer(SDL_Renderer*, int width, int height);
 void presentation_low_resolution(SDL_Renderer*, bool);
 bool present_frame(SDL_Renderer*);
 void destroy_game_renderer(SDL_Renderer*);

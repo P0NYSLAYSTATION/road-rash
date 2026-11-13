@@ -783,19 +783,6 @@ void Frontend::prepare_screen(int previous, int screen) {
     case 0x10:
         apply_restroom_pattern();
         break;
-    case screen_id::native_display: {
-        // Keep this row accessible in Low/Inset. Its help explains that
-        // applying a render resolution switches the original race mode to High.
-        auto& items = data_.screens[size_t(screen_id::native_display)].items;
-        const bool hires = settings_.high_resolution && !settings_.inset;
-        for (auto& m : items)
-            if (m.caption == ns::render_resolution) {
-                m.enabled = true;
-                m.flags &= ~item_flag::light;
-                m.desc = hires ? ns::d_render_resolution : ns::d_render_lowres;
-            }
-        break;
-    }
     case 0x1a:
         prepare_schmooze(previous);
         break;
@@ -942,11 +929,7 @@ int Frontend::native_current(uint32_t popup) const {
     case native_popup::touch:
         return settings_.touch_opacity / 25 + 1;
     case native_popup::resolution:
-        return settings_.render_scale == -1   ? 6
-               : settings_.render_scale == -2 ? 7
-                                              : settings_.render_scale + 1; // match = 1, 1x..4x = 2..5
-    case native_popup::widescreen:
-        return int(settings_.widescreen) + 1;
+        return settings_.menu_render_scale == 0 ? 5 : settings_.menu_render_scale;
     case native_popup::visual_style:
         return visual_style_current();
     case native_popup::tex_detail:
@@ -984,17 +967,8 @@ void Frontend::open_native_popup(uint32_t popup) {
         setter = native_setter::touch_opacity;
         break;
     case native_popup::resolution:
-        setter = native_setter::render_resolution;
+        setter = native_setter::menu_resolution;
         break;
-    case native_popup::widescreen: {
-        const int capw = focus_ >= 0 && size_t(focus_) < items_.size() ? items_[size_t(focus_)].caption : 0;
-        if (capw == ns::enh_wide) {
-            setter = native_setter::widescreen;
-            current = int(settings_.widescreen) + 1;
-        } else
-            setter = native_setter::widescreen;
-        break;
-    }
     case native_popup::visual_style:
         setter = native_setter::visual_style;
         break;
@@ -1037,10 +1011,6 @@ void Frontend::open_native_popup(uint32_t popup) {
         } else if (cap == ns::enh_mb) {
             setter = native_setter::enh_mb;
             current = settings_.enhancements.motion_blur ? 2 : 1;
-        } else if (cap == ns::enh_wide) {
-            // Widescreen inside Enhancements edits the single Display setting.
-            setter = native_setter::widescreen;
-            current = int(settings_.widescreen) + 1;
         } else {
             setter = native_setter::fps;
             current = settings_.show_fps ? 2 : 1;
@@ -1079,13 +1049,9 @@ std::string Frontend::native_value_text(int caption) const {
         return native_string(ns::touch_0 + settings_.touch_opacity / 25);
     case ns::haptics:
         return native_string(settings_.haptics ? ns::on : ns::off);
-    case ns::render_resolution: // plan 19 Task 8: match + 640x480..2560x1920
-        return settings_.render_scale == -1   ? native_string(ns::res_low)
-               : settings_.render_scale == -2 ? native_string(ns::res_original)
-               : settings_.render_scale == 0  ? native_string(ns::res_match)
-                                              : native_string(ns::scale_1x + settings_.render_scale - 1);
-    case ns::widescreen:
-        return native_string(ns::wide_off + int(settings_.widescreen));
+    case ns::menu_resolution:
+        return native_string(settings_.menu_render_scale == 0 ? ns::res_match
+                             : ns::scale_1x + settings_.menu_render_scale - 1);
     case ns::visual_style:
         return native_string(ns::style_original + visual_style_current() - 1);
     case ns::enh_interp:
@@ -1106,8 +1072,6 @@ std::string Frontend::native_value_text(int caption) const {
         return native_string(settings_.enhancements.vignette ? ns::on : ns::off);
     case ns::enh_mb:
         return native_string(settings_.enhancements.motion_blur ? ns::on : ns::off);
-    case ns::enh_wide:
-        return native_string(ns::wide_off + int(settings_.widescreen));
     case ns::tex_detail:
         return native_string(settings_.texture_detail ? ns::tex_enhanced : ns::tex_original);
     default:
@@ -1125,7 +1089,7 @@ void Frontend::apply_native_setting() {
     // so its Current line reflects the new setting immediately.
     if (focus_ >= 0 && size_t(focus_) < items_.size()) {
         auto& row = items_[size_t(focus_)];
-        if (row.caption == ns::render_resolution) row.desc = ns::d_render_resolution;
+        if (row.caption == ns::menu_resolution) row.desc = ns::d_menu_resolution;
         if (row.desc >= native_slot_base) describe(row);
     }
 }
@@ -1462,11 +1426,8 @@ bool Frontend::pause_open() const {
     return pause_open_;
 }
 
-int Frontend::menu_width(int display_w, int display_h) const {
-    if (settings_.widescreen == Widescreen::off || !settings_.enhancements.any()) return 640;
-    const int dw = display_w > 0 ? display_w : display_w_;
-    const int dh = display_h > 0 ? display_h : display_h_;
-    return logical_width_for(settings_.widescreen, dw, dh) * 2;
+int Frontend::menu_width(int, int) const {
+    return 640;
 }
 
 void Frontend::ensure_wide_bg(int wide_w) const {
@@ -1849,9 +1810,9 @@ int Frontend::run_handler(size_t index) {
     case 0x004457b0:
         last_focus_[0] = focus_;
         open_popup(data_.popups.at(popup_resolution),
-                   settings_.high_resolution ? 3
-                   : settings_.inset         ? 2
-                                             : 1,
+                   settings_.inset ? 2 : settings_.render_scale == 0 ? 7
+                   : settings_.render_scale > 0 ? settings_.render_scale + 2
+                   : settings_.high_resolution ? 3 : 1,
                    set_resolution);
         return 0;
     case 0x004458a0:
@@ -1908,8 +1869,11 @@ int Frontend::run_handler(size_t index) {
             set_level(career_, tables_, target);
             break;
         case set_resolution:
-            settings_.high_resolution = target == 3;
+            settings_.high_resolution = target >= 3;
             settings_.inset = target == 2;
+            settings_.render_scale = target == 7 ? 0 : target == 2 ? -2
+                                      : target == 1 ? -1 : target - 2;
+            apply_native_setting();
             break;
         case set_biker:
             settings_.high_res_bikers = target == 2;
@@ -1965,16 +1929,8 @@ int Frontend::run_handler(size_t index) {
             settings_.haptics = target == 2;
             apply_native_setting();
             break;
-        case native_setter::render_resolution:
-            settings_.render_scale = target == 6 ? -1 : target == 7 ? -2 : std::clamp(target - 1, 0, 4);
-            if (target != 7) {
-                settings_.high_resolution = target != 6;
-                settings_.inset = false;
-            }
-            apply_native_setting();
-            break;
-        case native_setter::widescreen:
-            settings_.widescreen = Widescreen(std::min(3, std::max(0, target - 1)));
+        case native_setter::menu_resolution:
+            settings_.menu_render_scale = target == 5 ? 0 : std::clamp(target, 1, 4);
             apply_native_setting();
             break;
         case native_setter::visual_style:
@@ -1982,7 +1938,7 @@ int Frontend::run_handler(size_t index) {
                 settings_.enhancements = Enhancements{};
             else if (target == 2) {
                 settings_.enhancements = enhanced_preset();
-                settings_.widescreen = Widescreen::match;
+                settings_.widescreen = Widescreen::off;
             } // widescreen stays a display choice
             else
                 enter(screen_id::native_enhancements);
@@ -2023,10 +1979,6 @@ int Frontend::run_handler(size_t index) {
             break;
         case native_setter::enh_fog:
             settings_.enhancements.fog = std::min(100, std::max(0, (target - 1) * 25));
-            apply_native_setting();
-            break;
-        case native_setter::enh_wide:
-            settings_.widescreen = Widescreen(std::min(3, std::max(0, target - 1)));
             apply_native_setting();
             break;
         case native_setter::tex_detail:

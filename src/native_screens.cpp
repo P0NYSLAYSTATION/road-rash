@@ -30,10 +30,9 @@ MenuItem choice_item(const MenuItem& t, int y, int target, int caption, size_t i
     m.caption = caption;
     m.handler = 0x00445440;
     m.enabled = true;
-    m.nav[2] = uint8_t((index + count - 1) % count);
-    m.nav[3] = uint8_t((index + 1) % count);
-    m.nav[4] = uint8_t((index + 1) % count);
-    m.nav[5] = uint8_t((index + count - 1) % count);
+    // Choice navigation wraps between choices, never into the header.
+    m.nav[2] = m.nav[5] = uint8_t(index == 1 ? count - 1 : index - 1);
+    m.nav[3] = m.nav[4] = uint8_t(index + 1 == count ? 1 : index + 1);
     return m;
 }
 std::vector<MenuItem> build_popup(const std::vector<MenuItem>& tpl, int header_caption,
@@ -89,10 +88,8 @@ void add_native_screens(FrontendData& data, bool mobile) {
     }
     rows.push_back({ns::scaling, ns::d_scaling, native_popup::scaling});
     rows.push_back({ns::filtering, ns::d_filtering, native_popup::filtering});
-    // Plan 19 Task 8: RENDER RESOLUTION row (both desktop and mobile).
-    rows.push_back({ns::render_resolution, ns::d_render_resolution, native_popup::resolution});
-    // Plan 21 Task 8: WIDESCREEN row (both desktop and mobile).
-    rows.push_back({ns::widescreen, ns::d_widescreen, native_popup::widescreen});
+    // Menu composition is independent of the original Race Resolution control.
+    rows.push_back({ns::menu_resolution, ns::d_menu_resolution, native_popup::resolution});
     // Plan 21 Task 9: VISUAL STYLE row (Original / Enhanced / Custom).
     rows.push_back({ns::visual_style, ns::d_visual_style, native_popup::visual_style});
     // Plan 20 Task 3: TEXTURE DETAIL row (Original / Enhanced).
@@ -153,19 +150,15 @@ void add_native_screens(FrontendData& data, bool mobile) {
     data.popups[native_popup::touch] = build_popup(
         rtpl, ns::touch_opacity,
         {{1, ns::touch_0}, {2, ns::touch_25}, {3, ns::touch_50}, {4, ns::touch_75}, {5, ns::touch_100}});
-    // Plan 19 Task 8: match + 1x..4x. Choice index maps to render_scale - 1 (see the setter).
-    data.popups[native_popup::resolution] = build_popup(rtpl, ns::render_resolution,
-                                                        {{1, ns::res_match},
-                                                         {2, ns::scale_1x},
-                                                         {3, ns::scale_2x},
-                                                         {4, ns::scale_3x},
-                                                         {5, ns::scale_4x},
-                                                         {6, ns::res_low},
-                                                         {7, ns::res_original}});
-    // Plan 21 Task 8: 4:3 + 16:10/16:9/match.
-    data.popups[native_popup::widescreen] =
-        build_popup(rtpl, ns::widescreen,
-                    {{1, ns::wide_off}, {2, ns::wide_16x10}, {3, ns::wide_16x9}, {4, ns::wide_match}});
+    // Independent menu sizes; extend the original race popup with the 4:3 sizes.
+    data.popups[native_popup::resolution] = build_popup(rtpl, ns::menu_resolution,
+        {{1, ns::scale_1x}, {2, ns::scale_2x}, {3, ns::scale_3x},
+         {4, ns::scale_4x}, {5, ns::res_match}});
+    const int race_header = rtpl.front().caption;
+    const int low_caption = rtpl[1].caption, inset_caption = rtpl[2].caption;
+    data.popups[0x00474240] = build_popup(rtpl, race_header,
+        {{1, low_caption}, {2, inset_caption}, {3, ns::scale_1x},
+         {4, ns::scale_2x}, {5, ns::scale_3x}, {6, ns::scale_4x}, {7, ns::res_match}});
     // Plan 20 Task 3: Original / Enhanced.
     data.popups[native_popup::tex_detail] =
         build_popup(rtpl, ns::tex_detail, {{1, ns::tex_original}, {2, ns::tex_enhanced}});
@@ -194,20 +187,20 @@ void add_native_screens(FrontendData& data, bool mobile) {
             {ns::enh_colour, native_popup::on_off}, {ns::enh_filter, native_popup::enh_filter},
             {ns::enh_fog, native_popup::enh_fog},   {ns::enh_grade, native_popup::enh_grade},
             {ns::enh_bloom, native_popup::on_off},  {ns::enh_vig, native_popup::on_off},
-            {ns::enh_mb, native_popup::on_off},     {ns::enh_wide, native_popup::widescreen},
+            {ns::enh_mb, native_popup::on_off},
         };
         {
             // Review 2026-10-13 item 3: 11 rows fit in 480 px.
-            const int estep = fit_step(tpl.h, tpl.y, 12);
+            const int estep = fit_step(tpl.h, tpl.y, 11);
             const int eh = std::min(tpl.h, estep - 2);
-            for (size_t i = 0; i < 10; ++i) {
+            for (size_t i = 0; i < 9; ++i) {
                 MenuItem m =
                     value_item(tpl, tpl.y + int(i) * estep, erows[i].first, ns::d_enh, erows[i].second);
                 m.h = eh;
                 enh.items.push_back(m);
             }
             MenuItem back = tpl;
-            back.y = tpl.y + 10 * estep;
+            back.y = tpl.y + 9 * estep;
             back.h = eh;
             back.target = screen_id::native_display;
             back.caption = ns::back;

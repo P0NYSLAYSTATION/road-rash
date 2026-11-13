@@ -135,15 +135,15 @@ int main() {
         const rr::Settings f = rr::parse_settings(rr::format_settings(e));
         check(f.enhancements.interpolate && f.enhancements.filter == rr::TextureFilter::trilinear &&
                   f.enhancements.fog == 40 && f.enhancements.grade == rr::Grade::dusk &&
-                  f.enhancements.draw_slices == 64 && f.widescreen == rr::Widescreen::mode16x9,
+                  f.enhancements.draw_slices == 64 && f.widescreen == rr::Widescreen::off,
               "enhancements round trip");
         const rr::Settings g2 =
             rr::parse_settings("enh_draw_slices=40\nenh_fog=101\nenh_filter=3\nenh_widescreen=9\n");
         check(g2.enhancements.draw_slices == 33 && g2.enhancements.fog == 0 &&
                   g2.enhancements.filter == rr::TextureFilter::nearest && g2.widescreen == d.widescreen,
               "only 33/48/64 slices and in-range values accepted");
-        check(rr::parse_settings("enh_widescreen=2\n").widescreen == rr::Widescreen::mode16x9,
-              "old enh_widescreen migrates");
+        check(rr::parse_settings("enh_widescreen=2\n").widescreen == rr::Widescreen::off,
+              "removed widescreen option cannot return through old settings");
         check(!rr::default_settings().enhancements.any(), "defaults are the original renderer");
         // Review 2026-10-13 item 1: widescreen is a display choice, independent
         // of Visual Style. Enhanced preset, then Display -> Off, stays 4:3.
@@ -167,8 +167,12 @@ int main() {
         // Resolution overrides include 320x240 (-1) and no override (-2).
         rr::Settings p;
         p.render_scale = 3;
+        p.menu_render_scale = 1;
         const rr::Settings q = rr::parse_settings(rr::format_settings(p));
-        check(q.render_scale == 3, "render_scale round trips");
+        check(q.render_scale == 3 && q.menu_render_scale == 1, "independent resolutions round trip");
+        check(rr::format_settings(p).find("\nrender_scale=") == std::string::npos &&
+              rr::format_settings(p).find("\nwidescreen=") == std::string::npos,
+              "removed shared resolution and widescreen are not saved");
         const rr::Settings bad = rr::parse_settings("render_scale=5\nrender_scale=-3\n");
         check(bad.render_scale == rr::default_settings().render_scale,
               "render_scale rejects out-of-range values");

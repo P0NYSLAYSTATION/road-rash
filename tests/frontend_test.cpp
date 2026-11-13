@@ -714,7 +714,9 @@ int main(int argc, char** argv) {
     };
     auto choose_target = [&](int target) {
         for (int i = 0; i < 30 && fe.items()[size_t(fe.focus())].target != target; ++i) key("down");
-        check(fe.items()[size_t(fe.focus())].target == target, "save browser navigation target");
+        check(fe.items()[size_t(fe.focus())].target == target, "popup target " + std::to_string(target) +
+              " reached " + std::to_string(fe.items()[size_t(fe.focus())].target) +
+              " screen " + std::to_string(fe.screen()));
         key("select");
     };
     check(has_target(10002) && !has_target(10001), "first save page has next only");
@@ -810,7 +812,7 @@ int main(int argc, char** argv) {
     check(fe.screen() == screen_id::native_display, "display screen");
     snap("display");
     if (focus_item(2)) key("select"); // Scaling row opens its popup
-    check(fe.items().size() == 11 + 4, "scaling popup opens");
+    check(fe.items().size() == 10 + 4, "scaling popup opens");
     key("down"); // Integer row (popup header + Fit, Integer, ...)
     key("select");
     check(settings.scale_mode == rr::ScaleMode::integer, "scaling choice applies to settings");
@@ -820,57 +822,38 @@ int main(int argc, char** argv) {
                                std::istreambuf_iterator<char>());
         check(text.find("scale_mode=1") != std::string::npos, "scaling choice saved to settings file");
     }
-    if (focus_item(10)) key("select"); // Back row
+    if (focus_item(9)) key("select"); // Back row
     check(fe.screen() == 0x13 && fe.focus() == 2, "back returns to the Display item");
-    // RENDER RESOLUTION: choices persist and remain accessible in Low/Inset.
+    // Menu resolution is independent; race choices live in the original popup.
     fe.enter(screen_id::native_display);
     int res_row = -1;
-    for (size_t i = 0; i < fe.items().size(); ++i)
-        if (fe.items()[i].caption == rr::ns::render_resolution) res_row = int(i);
-    check(res_row >= 0, "display screen has the resolution row");
-    // Start with High, then walk down to the resolution row via row 3.
-    settings.high_resolution = true;
-    settings.inset = false;
-    settings.render_scale = 1;
-    fe.enter(screen_id::native_display);
-    if (focus_item(3)) key("down");
-    check(fe.focus() == res_row, "resolution row focused");
-    const size_t base_items = fe.items().size();
-    key("select");
-    check(fe.items().size() == base_items + 8, "resolution popup opens with seven choices");
-    key("down");
-    key("down");
-    key("down"); // last choice (2560x1920)
-    key("select");
-    check(settings.render_scale == 4, "2560x1920 choice persists");
-    if (focus_item(res_row)) key("select");
-    choose_target(6);
-    check(settings.render_scale == -1 && !settings.high_resolution && !settings.inset,
-          "320x240 selects the native low-resolution framebuffer");
-    settings.high_resolution = true;
-    settings.inset = true;
-    if (focus_item(res_row)) key("select");
-    choose_target(7);
-    check(settings.render_scale == -2 && settings.high_resolution && settings.inset,
-          "no override preserves original resolution flags");
-    settings.inset = false;
-    // Plan 21 Task 8: WIDESCREEN row â€” popup choice persists.
-    int wide_row = -1;
-    for (size_t i = 0; i < fe.items().size(); ++i)
-        if (fe.items()[i].caption == rr::ns::widescreen) wide_row = int(i);
-    check(wide_row >= 0, "display screen has the widescreen row");
-    if (focus_item(size_t(wide_row))) key("select");
-    check(fe.items().size() == 11 + 5, "widescreen popup opens with four choices");
-    key("down");
-    key("down"); // 16:9 row (popup header + Off, 16:10, 16:9, ...)
-    key("select");
-    check(settings.widescreen == rr::Widescreen::mode16x9, "16:9 choice persists");
-    {
-        std::ifstream settings_file((std::filesystem::path(saves).parent_path() / "settings.txt").string());
-        const std::string text((std::istreambuf_iterator<char>(settings_file)),
-                               std::istreambuf_iterator<char>());
-        check(text.find("widescreen=2") != std::string::npos, "widescreen choice saved to settings file");
+    for (size_t i = 0; i < fe.items().size(); ++i) {
+        if (fe.items()[i].caption == rr::ns::menu_resolution) res_row = int(i);
+        check(fe.items()[i].caption != rr::ns::widescreen, "widescreen setting removed");
     }
+    check(res_row >= 0, "display has separate menu resolution");
+    settings.high_resolution = false;
+    settings.inset = false;
+    settings.render_scale = -1;
+    if (focus_item(res_row)) key("select");
+    choose_target(4);
+    check(settings.menu_render_scale == 4 && settings.render_scale == -1 && !settings.high_resolution,
+          "higher menu resolution leaves the race at 320x240");
+    fe.enter(0x13);
+    int race_row = -1;
+    for (size_t i = 0; i < fe.items().size(); ++i)
+        if (fe.items()[i].handler == 0x004457b0) race_row = int(i);
+    check(race_row >= 0, "original Race Resolution remains");
+    for (int choice = 1; choice <= 7; ++choice) {
+        if (focus_item(race_row)) key("select");
+        choose_target(choice);
+        check(settings.menu_render_scale == 4, "race choices leave menu resolution unchanged");
+        check(settings.inset == (choice == 2) && settings.high_resolution == (choice >= 3),
+              "original low/inset/high flags follow the expanded race popup");
+        const int expected = choice == 7 ? 0 : choice == 2 ? -2 : choice == 1 ? -1 : choice - 2;
+        check(settings.render_scale == expected, "all fixed and detected race resolutions apply");
+    }
+    fe.enter(screen_id::native_display);
     // Plan 21 Task 9: VISUAL STYLE â€” Original/Enhanced/Custom + Enhancements screen.
     fe.enter(screen_id::native_display);
     int style_row = -1;
@@ -878,7 +861,7 @@ int main(int argc, char** argv) {
         if (fe.items()[i].caption == rr::ns::visual_style) style_row = int(i);
     check(style_row >= 0, "display screen has the visual style row");
     if (focus_item(size_t(style_row))) key("select");
-    check(fe.items().size() == 11 + 4, "visual style popup opens with three choices");
+    check(fe.items().size() == 10 + 4, "visual style popup opens with three choices");
     snap("visual-style-popup");
     {
         RgbImage scaled;
@@ -914,7 +897,7 @@ int main(int argc, char** argv) {
     key("down"); // On row
     key("select");
     check(settings.enhancements.bloom, "controller toggles Bloom on");
-    if (focus_item(10)) key("select"); // Back row
+    if (focus_item(9)) key("select"); // Back row
     check(fe.screen() == screen_id::native_display, "Back returns to Display");
     {
         std::string style_text;
@@ -922,18 +905,15 @@ int main(int argc, char** argv) {
             if (fe.items()[i].caption == rr::ns::visual_style) style_text = "found";
         check(style_text == "found", "style row still present");
     }
-    settings.high_resolution = false;
-    fe.enter(screen_id::native_display);
     for (bool inset : {false, true}) {
         settings.high_resolution = false;
         settings.inset = inset;
-        settings.render_scale = 1;
+        settings.render_scale = -2;
         fe.enter(screen_id::native_display);
-        check(fe.items()[size_t(res_row)].enabled, "render resolution accessible in Low and Inset");
-        if (focus_item(size_t(res_row))) key("select");
-        key("select");
-        check(settings.high_resolution && !settings.inset,
-              "selecting render resolution switches Low/Inset to High");
+        if (focus_item(res_row)) key("select");
+        choose_target(1);
+        check(!settings.high_resolution && settings.inset == inset && settings.render_scale == -2,
+              "menu resolution never changes low/inset race flags");
     }
     // Native popup hit rectangles must be disjoint and every choice reachable
     // by mouse, including the fourth Window Size choice.
@@ -951,7 +931,7 @@ int main(int argc, char** argv) {
         fe.enter(screen_id::native_display);
         if (focus_item(1)) key("select");
         if (scale == 4) snap("window-size-popup");
-        const auto choice = fe.items()[11 + size_t(scale)];
+        const auto choice = fe.items()[10 + size_t(scale)];
         MenuInput click;
         click.pointer_click = true;
         click.pointer_x = choice.x + choice.w / 2;
@@ -960,49 +940,12 @@ int main(int argc, char** argv) {
         check(settings.window_scale == scale, "Window Size pointer selection applies every scale");
     }
     fe.enter(screen_id::native_display);
-    // Plan 21 Task 10: Wide menus (blurred side fill behind Widescreen; Original style keeps black bars).
     {
-        settings.widescreen = rr::Widescreen::off;
-        RgbImage base43;
-        fe.draw(base43);
-        check(base43.width == 640 && base43.height == 480, "widescreen off menu stays 640x480");
         settings.widescreen = rr::Widescreen::mode16x9;
-        settings.enhancements = rr::Enhancements{};
-        RgbImage orig_wide;
-        fe.draw(orig_wide);
-        check(orig_wide.width == 640 && orig_wide.height == 480,
-              "Original visual style keeps 4:3 menu (black pillarbox bars)");
         settings.enhancements.bloom = true;
-        RgbImage wide;
-        fe.draw(wide);
-        check(wide.width == 852 && wide.height == 480, "16:9 enhanced menu renders 852x480");
-        if (wide.width == 852 && base43.width == 640) {
-            bool centre_exact = true;
-            size_t left_lit = 0, right_lit = 0;
-            for (int y = 0; y < 480; ++y) {
-                for (int x = 0; x < 640; ++x)
-                    if (wide.at(106 + x, y) != base43.at(x, y)) centre_exact = false;
-                for (int x = 0; x < 106; ++x) left_lit += wide.at(x, y) != 0;
-                for (int x = 746; x < 852; ++x) right_lit += wide.at(x, y) != 0;
-            }
-            check(centre_exact, "wide menu 640x480 centre equals 4:3 menu pixel-for-pixel");
-            check(left_lit > 1000 && right_lit > 1000,
-                  "wide menu side bars filled from blurred darkened background");
-        }
-        // Input at (bar + menu-x) hits the menu rect; input in the side bar does not.
-        const auto& row3 = fe.items()[3];
-        MenuInput bar_move;
-        bar_move.pointer_moved = true;
-        bar_move.pointer_x = 10;
-        bar_move.pointer_y = row3.y + 4;
-        press(bar_move);
-        check(fe.focus() != 3, "pointer in side bar does not focus menu row");
-        MenuInput menu_move;
-        menu_move.pointer_moved = true;
-        menu_move.pointer_x = 106 + row3.x + 4;
-        menu_move.pointer_y = row3.y + 4;
-        press(menu_move);
-        check(fe.focus() == 3, "pointer at (bar + menu-x) focuses menu row");
+        RgbImage menu;
+        fe.draw(menu);
+        check(menu.width == 640 && menu.height == 480, "removed widescreen cannot widen menus");
         settings.widescreen = rr::Widescreen::off;
         settings.enhancements = rr::Enhancements{};
     }
