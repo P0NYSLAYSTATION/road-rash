@@ -203,8 +203,8 @@ struct CourseCanvas {
         std::optional<ProfileScope> nodes_scope(std::in_place, profile, FrameProfile::scene_nodes);
         auto nodes = game.assets.scene->draw_nodes(
             game.render_route(), slices, game.blend_camera(), game.depth,
-            [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road, int32_t ceiling, bool back) {
-                return game.rider_nodes(near, far, road, ceiling, back);
+            [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road, int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) {
+                return game.rider_nodes(near, far, road, ceiling, back, lateral_min, lateral_max);
             },
             wide, game.instance.ring.get());
         nodes_scope.reset();

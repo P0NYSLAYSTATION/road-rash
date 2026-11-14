@@ -117,6 +117,9 @@ class TrackRing {
     bool forward_closed(int32_t position, uint8_t half) const {
         return (shoulders_[size_t((uint32_t(position) >> 8) & 127)].closed & (1u << half)) != 0;
     }
+    std::array<int8_t,2> slice_bands(int32_t position) const {
+        return shoulders_[size_t((uint32_t(position) >> 8) & 127)].bands;
+    }
     int32_t slice_countdown(int32_t position) const {
         return shoulders_[size_t((uint32_t(position) >> 8) & 127)].countdown;
     }
@@ -269,6 +272,7 @@ class TrackRing {
         uint8_t count = 0;
         uint8_t closed = 0;
         int8_t countdown = 0;
+        std::array<int8_t,2> bands{4,4}; // original row+1f/+20
         uint8_t motion_valid = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
         std::array<std::array<int32_t, 2>, 2> lanes{};

@@ -21,6 +21,7 @@ static uint64_t hash_bytes(const void* data, size_t size) {
     return h;
 }
 int main(int argc, char** argv) {
+
     const bool benchmark = argc == 2 && std::string(argv[1]) == "--benchmark";
     try {
         rr::Assets assets(rr::test::assets_root());
@@ -49,6 +50,7 @@ int main(int argc, char** argv) {
         for (int scale : {1, 2, 4})
             for (bool wide : {false, true})
                 for (bool rgb : {false, true}) {
+                    std::cerr << "canvas case scale=" << scale << " wide=" << wide << " rgb=" << rgb << '\n';
                     game.widescreen = wide ? rr::Widescreen::mode16x9 : rr::Widescreen::off;
                     const auto slices =
                         rr::project_road(game.race().route(), game.race().camera_position(),
@@ -144,8 +146,8 @@ int main(int argc, char** argv) {
                     auto direct_nodes = game.assets.scene->draw_nodes(
                         game.race().route(), slices, game.race().camera(), game.depth,
                         [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road,
-                            int32_t ceiling, bool back) {
-                            return game.rider_nodes(near, far, road, ceiling, back);
+                            int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) {
+                            return game.rider_nodes(near, far, road, ceiling, back, lateral_min, lateral_max);
                         }, game.logical_width());
                     rr::render_nodes(direct, direct_nodes, rr::view_mode_wide(scale, game.logical_width()), 16);
                     check(no_hud == hash_bytes(direct.row(0), size_t(direct.width()) * direct.height()),
@@ -156,6 +158,10 @@ int main(int argc, char** argv) {
                     // including negative and wrapped scroll.
                     rr::Framebuffer fresh(canvas.scale_w, canvas.scale_h);
                     canvas.draw_horizon_rgb(*game.assets.scene, game.palette, 0, game.logical_width());
+                    const int horizon_rows=320*scale;
+                    std::vector<uint32_t> retained_bottom;
+                    for(int y=horizon_rows;y<canvas.scale_h;++y)
+                        retained_bottom.insert(retained_bottom.end(),canvas.world_rgb.row(y),canvas.world_rgb.row(y)+canvas.scale_w);
                     for (int32_t scroll : {0, -721, 719, INT32_MIN, INT32_MAX}) {
                         game.assets.scene->draw_horizon(fresh, scroll, game.logical_width());
                         {
@@ -164,14 +170,18 @@ int main(int argc, char** argv) {
                                                     game.logical_width());
                             check(counter.count() == 0, "Horizon allocates after warmup");
                         }
-                        for (int y = 0; y < canvas.scale_h; ++y)
+                        for (int y = 0; y < horizon_rows; ++y)
                             for (int x = 0; x < canvas.scale_w; ++x) {
                                 const auto* c = &game.palette.rgbx[4 * fresh.row(y)[x]];
                                 const uint32_t expected =
                                     0xff000000u | (uint32_t(c[0]) << 16) | (uint32_t(c[1]) << 8) | c[2];
-                                check(canvas.rgb.row(y)[x] == expected,
+                                check(canvas.world_rgb.row(y)[x] == expected,
                                       "Retained horizon differs from fresh conversion");
                             }
+                        for(int y=horizon_rows;y<canvas.scale_h;++y)
+                            for(int x=0;x<canvas.scale_w;++x)
+                                check(canvas.world_rgb.row(y)[x]==retained_bottom[size_t(y-horizon_rows)*canvas.scale_w+x],
+                                      "Horizon conversion overwrote the retained world below it");
                     }
                 }
         const auto after = game.race().snapshot();

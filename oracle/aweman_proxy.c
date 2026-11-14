@@ -106,6 +106,7 @@ static int g_terrain_trace;
 static int g_slice_probe = -1;
 /* Explicit render-only boundary fixture; never enabled for simulation replay. */
 static int g_view_pose = -1, g_view_pose_applied, g_view_pose_row_ok;
+static int g_view_pose_half, g_view_pose_x, g_view_pose_height = 150;
 static int g_ai_probe_tick = -1;
 static void capture_terrain_seeded_and_exit(void);
 static void palette_hook_install(void);
@@ -1707,6 +1708,21 @@ static void capture_raster(uintptr_t base, int width, int height, int pitch) {
 // resource header and an FNV-1a hash of mip 0 so a native decoder can identify the resource.
 static int g_scene_written;
 static uint32_t g_scene_nodes;
+static int g_full_scene, g_hill_calls, g_full_active;
+typedef struct { unsigned char node[0xa8], resource[0x60]; uint32_t hash, size; } full_scene_node;
+static full_scene_node* g_full_nodes;
+static uint32_t g_full_count, g_full_capacity;
+static void capture_full_nodes(void);
+static LONG CALLBACK render_capture_exception(EXCEPTION_POINTERS* e) {
+    if (g_full_scene && g_out && e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        CONTEXT* c=e->ContextRecord;
+        fprintf(g_out,"# capture-av eip=%08lx eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx esi=%08lx edi=%08lx active=%d nodes=%u\n",
+            c->Eip,c->Eax,c->Ebx,c->Ecx,c->Edx,c->Esi,c->Edi,g_full_active,g_full_count);
+        fflush(g_out);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static uint32_t fnv(const unsigned char* p, size_t n) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < n; ++i) {
@@ -3489,27 +3505,48 @@ static void dump_rider_objects(FILE* out) {
 static int capture_frame(void) {
     return g_out && g_pixels && !(g_frame % (uint32_t)g_pixel_every);
 }
+// Posed components advance without real 60Hz waits. Settle the original
+// asynchronous MSRR worker so traversal cannot overrun its eight-entry queue.
+// Never used for simulation acceptance or live timing comparisons.
+static void settle_view_families(void) {
+    for (int attempt=0; attempt<2000; ++attempt) {
+        ((rr_frame_fn)0x0044b0e0)();
+        if (RD32(0x004755f4)==RD32(0x004755f0) && !RD32(0x0049e640) &&
+            !RD32(0x0049e630) && !RD32(0x0049e634) && !RD32(0x0049e638) && !RD32(0x0049e63c)) return;
+        Sleep(1);
+    }
+    if (g_out) { fputs("# posed family worker failed to settle\n",g_out); fflush(g_out); }
+    ExitProcess(8);
+}
 static void __fastcall hook_project(uint32_t a, int* b, int c, int* d, int e) {
     if (g_view_pose >= 0 && g_race_started) {
         if (g_sim) ExitProcess(2); /* a posed component cannot be simulation evidence */
         const int target = g_view_pose + 256;
         int steps = 0;
-        while (RD32(0x004b6e5c) != target && steps++ < 512) {
+        const int initial_gap=target-RD32(0x004b6e5c);
+        const int max_steps=(initial_gap<0?-initial_gap:initial_gap)/256+512;
+        /* Posed render-only traversal, never used as simulation evidence. */
+        ((void(__fastcall*)(int))0x004540e0)(g_view_pose_half);
+        while (RD32(0x004b6e5c) != target && steps++ < max_steps) {
+            settle_view_families();
+            if (RD32(0x0049ee4c)==2) ((void(__fastcall*)(int))0x004540e0)(g_view_pose_half);
             const int gap = target - RD32(0x004b6e5c);
             ((void(__fastcall*)(int))0x00454120)(gap > 256 ? 256 : gap < -256 ? -256 : gap);
         }
         if (RD32(0x004b6e5c) != target) ExitProcess(3);
+        settle_view_families();
         const uintptr_t row = (uint32_t)RD32(0x0049e820 + ((g_view_pose & 0x7f00) >> 6));
         g_view_pose_row_ok = readable(row, 12) && RD32(row + 8) == (g_view_pose & ~255);
         g_view_pose_applied = 1;
         a = g_view_pose;
         RD32(0x004bc7e4) = a;
-        d[0] = RD32(0x004bc7d8) = 0;
-        d[1] = RD32(0x004bc7dc) = 150;
-        e = 0;
-        RD8(0x00473498) = 0;
+        d[0] = RD32(0x004bc7d8) = g_view_pose_x;
+        d[1] = RD32(0x004bc7dc) = g_view_pose_height;
+        e = g_view_pose_half;
+        RD8(0x00473498) = (unsigned char)e;
     }
     if (capture_frame()) {
+        g_full_count=0; g_full_active=1;
         snapshot(g_pre, &g_npre);
         g_pre_frame = (int)g_frame;
     }
@@ -3597,6 +3634,56 @@ static void put_regions(FILE* out, snap_region* r, uint32_t n) {
         fwrite(r[i].bytes, 1, r[i].size, out);
     }
 }
+static void capture_full_nodes(void) {
+    if(!g_full_scene || !capture_frame() || !g_full_active) return;
+    const uint32_t base=(uint32_t)RD32(0x0049e66c), end=(uint32_t)RD32(0x0049e660);
+    const uint32_t count=end>=base?(end-base)/0xa8:0;
+    if(!readable(base,(size_t)count*0xa8) || count>100000-g_full_count) ExitProcess(4);
+    const uint32_t needed=g_full_count+count;
+    if(g_hill_calls && g_out) fprintf(g_out,"# full-flush added=%u total=%u flag=%u\n",count,needed,RD8(0x00475620));
+    if(needed>g_full_capacity) {
+        uint32_t capacity=g_full_capacity?g_full_capacity:512;
+        while(capacity<needed) capacity*=2;
+        void* memory=realloc(g_full_nodes,(size_t)capacity*sizeof(*g_full_nodes));
+        if(!memory) ExitProcess(5);
+        g_full_nodes=memory; g_full_capacity=capacity;
+    }
+    for(uint32_t i=0;i<count;++i) {
+        full_scene_node* out=&g_full_nodes[g_full_count++];
+        memcpy(out->node,(void*)(uintptr_t)(base+i*0xa8),0xa8);
+        memset(out->resource,0,0x60); out->hash=out->size=0;
+        const uint32_t resource=*(uint32_t*)(out->node+8);
+        if(!readable(resource,0x60)) continue;
+        memcpy(out->resource,(void*)(uintptr_t)resource,0x60);
+        const uint32_t magic=*(uint32_t*)out->resource;
+        const uint32_t width=*(uint32_t*)(out->resource+0x20), height=*(uint32_t*)(out->resource+0x24);
+        const uint32_t pixels=*(uint32_t*)(out->resource+0x38);
+        if(magic==0xbc614e && width && width<=1024 && height && height<=1024 && readable(pixels,(size_t)width*height)) {
+            out->size=width*height; out->hash=fnv((void*)(uintptr_t)pixels,out->size);
+        }
+    }
+}
+static void __fastcall hook_align_rise(uintptr_t node) {
+    if(g_hill_calls && g_out) fprintf(g_out,"# align-rise node=%u kind=%d count=%d preferred=%u\n",
+        (unsigned)node,RD32(node),RD32(node+0x14)>>8,RD8(node+0x18));
+    ((void(__fastcall*)(uintptr_t))0x00453d10)(node);
+}
+static uint32_t full_node_position(void) {
+    return g_full_count+((uint32_t)RD32(0x0049e660)-(uint32_t)RD32(0x0049e66c))/0xa8;
+}
+static void __fastcall hook_hill_call(uintptr_t road,int bands,int side) {
+    const uint32_t before=full_node_position();
+    ((void(__fastcall*)(uintptr_t,int,int))0x0041c390)(road,bands,side);
+    if(g_hill_calls && g_out && capture_frame()) {
+        const uintptr_t sub=(uint32_t)RD32(road+0xc), owner=(uint32_t)RD32(sub+0x28);
+        fprintf(g_out,"# hill-call sample=%d depth=%d side=%d bands=%d emitted=%u\n",
+            RD32(owner+8)>>8,RD32(road+0x18),side,bands,full_node_position()-before);
+    }
+}
+static void __cdecl hook_list_flush(void) {
+    capture_full_nodes();
+    ((rr_frame_fn)0x00450420)();
+}
 static void dump_scene(void) {
     char path[1024];
     const char* slash = strrchr(g_output, '\\');
@@ -3609,18 +3696,25 @@ static void dump_scene(void) {
     const uint32_t base = (uint32_t)RD32(0x0049e66c), end = (uint32_t)RD32(0x0049e660);
     uint32_t count = end >= base ? (end - base) / 0xa8 : 0;
     if (!readable(base, (size_t)count * 0xa8)) count = 0;
+    if(g_full_scene) count=g_full_count;
     static snap_region post[4097];
     static uint32_t npost;
     snapshot(post, &npost);
     uint32_t npre = g_pre_frame == (int)g_frame ? g_npre : 0, pre_ok = 0, post_ok = 0;
     for (uint32_t i = 0; i < npre; ++i) pre_ok += g_pre[i].bytes != NULL;
     for (uint32_t i = 0; i < npost; ++i) post_ok += post[i].bytes != NULL;
-    const uint32_t header[8] = {0x52524e53u, 4,      g_frame, count, base, (uint32_t)RD32(0x0049e664),
+    const uint32_t header[8] = {0x52524e53u, 4,      g_frame, count, base, g_full_scene?g_full_capacity:(uint32_t)RD32(0x0049e664),
                                 pre_ok,      post_ok};
     fwrite(header, 4, 8, out);
     put_regions(out, g_pre, npre);
     put_regions(out, post, npost);
     for (uint32_t i = 0; i < count; ++i) {
+        if(g_full_scene) {
+            fwrite(g_full_nodes[i].node,1,0xa8,out);
+            fwrite(g_full_nodes[i].resource,1,0x60,out);
+            fwrite(&g_full_nodes[i].hash,4,1,out); fwrite(&g_full_nodes[i].size,4,1,out);
+            continue;
+        }
         const unsigned char* n = (const unsigned char*)(uintptr_t)(base + i * 0xa8);
         fwrite(n, 1, 0xa8, out);
         uint32_t res = 0;
@@ -3684,10 +3778,17 @@ static void __cdecl hook_dash(void) {
     if (capture_frame()) dump_post_dash();
 }
 static void __cdecl hook_draw(void) {
-    if (capture_frame() && RD8(0x00475620)) dump_scene();
+    // The pending-list flag can be zero after an automatic flush. Full
+    // capture still owns a valid frame and must record its remaining tail.
+    const int full_frame = g_full_scene && g_full_active && capture_frame();
+    if (capture_frame() && (full_frame || RD8(0x00475620))) {
+        capture_full_nodes();
+        dump_scene();
+    }
+    g_full_active=0;
     ((rr_frame_fn)0x00450420)();
     g_pixel_written = 0;
-    if (!g_out || !RD8(0x00475620)) return;
+    if (!g_out || (!full_frame && !RD8(0x00475620))) return;
     const uintptr_t base = (uint32_t)RD32(0x004b7ec0);
     const int width = RD32(0x0047539c), height = RD32(0x004753a0), pitch = RD32(0x004b7ec4);
     if (width < 1 || width > 1280 || height < 1 || height > 960 || pitch < width || pitch > 16384) return;
@@ -4771,6 +4872,10 @@ static void dump_frame(uint32_t site) {
     rr_log("camera.x", RD32(0x004bc7d8));
     rr_log("camera.height", RD32(0x004bc7dc));
     rr_log("camera.half", RD8(0x00473498));
+    rr_log("scene.full_list", g_full_scene);
+    // Version 2 covers all six automatic emitter flushes plus the final
+    // frame flush, and does not depend on the pending-list flag.
+    rr_log("scene.full_capture_version", g_full_scene ? 2 : 0);
     if (g_view_pose >= 0) {
         rr_log("component.pose.requested", g_view_pose);
         rr_log("component.pose.applied", g_view_pose_applied);
@@ -5061,6 +5166,9 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_UNTIL_FINISH", buf, sizeof buf)) g_until_finish = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_PIXELS", buf, sizeof buf)) g_pixels = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_FULL_SCENE", buf, sizeof buf)) g_full_scene = atoi(buf) != 0;
+    if (g_full_scene) AddVectoredExceptionHandler(1,render_capture_exception);
+    if (GetEnvironmentVariableA("RR_ORACLE_HILL_CALLS", buf, sizeof buf)) g_hill_calls = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUND_FIXTURE", buf, sizeof buf)) g_ground_fixture = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUND_TRACE", buf, sizeof buf)) g_ground_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_DRIVE", buf, sizeof buf)) {
@@ -5081,6 +5189,11 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_TERRAIN_TRACE", buf, sizeof buf)) g_terrain_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_SLICE_SAMPLE", buf, sizeof buf)) g_slice_probe = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_VIEW_POSE", buf, sizeof buf)) g_view_pose = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_VIEW_HALF", buf, sizeof buf)) {
+        g_view_pose_half = atoi(buf); if(g_view_pose_half<0 || g_view_pose_half>1) return 0;
+    }
+    if (GetEnvironmentVariableA("RR_ORACLE_VIEW_X", buf, sizeof buf)) g_view_pose_x = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_VIEW_HEIGHT", buf, sizeof buf)) g_view_pose_height = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_AI_TARGET_TICK", buf, sizeof buf)) g_ai_probe_tick = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_SOLO", buf, sizeof buf)) g_solo = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_HUMAN", buf, sizeof buf)) g_human = atoi(buf) != 0;
@@ -5139,6 +5252,20 @@ static int rr_install_hooks(void) {
                  {0x00416406, 0x004439f0, hook_frame_1, {0xe8, 0xe5, 0xd5, 0x02, 0}},
                  {0x0041656d, 0x004439f0, hook_frame_2, {0xe8, 0x7e, 0xd4, 0x02, 0}},
                  {0x00443249, 0x004439f0, hook_frame_3, {0xe8, 0xa2, 0x07, 0, 0}},
+                 {0x00453ec9, 0x00453d10, hook_align_rise, {0xe8, 0x42, 0xfe, 0xff, 0xff}},
+                 {0x00453f0b, 0x00453d10, hook_align_rise, {0xe8, 0x00, 0xfe, 0xff, 0xff}},
+                 {0x0043c059, 0x0041c390, hook_hill_call, {0xe8, 0x32, 0x03, 0xfe, 0xff}},
+                 {0x0043c092, 0x0041c390, hook_hill_call, {0xe8, 0xf9, 0x02, 0xfe, 0xff}},
+                 {0x0041d5b1, 0x0041c390, hook_hill_call, {0xe8, 0xda, 0xed, 0xff, 0xff}},
+                 {0x0041d5d4, 0x0041c390, hook_hill_call, {0xe8, 0xb7, 0xed, 0xff, 0xff}},
+                 {0x0041d5f0, 0x0041c390, hook_hill_call, {0xe8, 0x9b, 0xed, 0xff, 0xff}},
+                 {0x0041d613, 0x0041c390, hook_hill_call, {0xe8, 0x78, 0xed, 0xff, 0xff}},
+                 {0x0045048e, 0x00450420, hook_list_flush, {0xe8, 0x8d, 0xff, 0xff, 0xff}},
+                 {0x0045050f, 0x00450420, hook_list_flush, {0xe8, 0x0c, 0xff, 0xff, 0xff}},
+                 {0x004505a4, 0x00450420, hook_list_flush, {0xe8, 0x77, 0xfe, 0xff, 0xff}},
+                 {0x00450744, 0x00450420, hook_list_flush, {0xe8, 0xd7, 0xfc, 0xff, 0xff}},
+                 {0x00450891, 0x00450420, hook_list_flush, {0xe8, 0x8a, 0xfb, 0xff, 0xff}},
+                 {0x00450981, 0x00450420, hook_list_flush, {0xe8, 0x9a, 0xfa, 0xff, 0xff}},
                  {0x004439f5, 0x00450420, hook_draw, {0xe8, 0x26, 0xca, 0, 0}},
                  {0x0044c7b9, 0x00446c30, hook_dash, {0xe8, 0x72, 0xa4, 0xff, 0xff}},
                  {0x00443a5c, 0x00443d70, hook_project, {0xe8, 0x0f, 0x03, 0, 0}},

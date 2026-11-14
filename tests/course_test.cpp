@@ -209,7 +209,14 @@ int main() {
     check(rr::original_course_index(4) == 3, "CLI MEDLY maps to original 3");
     for (int bad : {-1, 5, 6}) {
         bool threw = false;
-        try {
+        {
+        const auto c=rr::read_course(assets.read("DATA/COURSES/NAPA.CRS"));
+        const auto right=rr::make_route(c,true);
+        check(right.at(943).path.rise==-15 && right.at(944).path.rise==-29 &&
+              right.at(945).path.rise==-28 && right.at(944).path.bend==18,
+              "original first Napa merge copies rise bytes without changing branch curvature");
+    }
+    try {
             (void)rr::original_course_index(bad);
         } catch (const std::runtime_error&) {
             threw = true;

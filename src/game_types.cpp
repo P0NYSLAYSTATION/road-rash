@@ -35,9 +35,22 @@ const std::vector<RouteSample>& Game::render_route() const {
         render_base_ = &base;
     }
     const size_t first = blend_camera_position() >> 8;
-    const uint8_t own = race().camera_half();
-    for (size_t i = first > 2 ? first - 2 : 0; i < base.size() && i < first + view_slices + 2; ++i)
-        render_route_[i] = instance.ring->render_sample(int32_t(i * 256), own).value_or(base[i]);
+    uint8_t own = race().camera_half();
+    const size_t begin = first > 2 ? first - 2 : 0;
+    for (size_t i = begin; i < base.size() && i < first + view_slices + 2; ++i) {
+        auto sample = instance.ring->render_sample(int32_t(i * 256), own).value_or(base[i]);
+        if (i>begin && sample.dual && !render_route_[i-1].dual &&
+            (int(sample.event)==4 || int(sample.event)==6)) {
+            // An approaching merge can attach the current road to either
+            // physical half, independently of the earlier split's choice.
+            const auto node=render_route_[i-1].node;
+            if(sample.node!=node && sample.other_node==node) {
+                own^=1;
+                sample=instance.ring->render_sample(int32_t(i*256),own).value_or(base[i]);
+            }
+        }
+        render_route_[i]=sample;
+    }
     return render_route_;
 }
 
@@ -82,7 +95,7 @@ void Game::restart() {
 }
 
 std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& far, int road,
-                                        int32_t ceiling, bool back) const {
+                                        int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) const {
     struct Visible {
         int32_t position;
         size_t index;
@@ -95,14 +108,19 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
     auto rider_pose = [&](size_t i, bool body) -> const ActorPose* {
         return view_ready ? blend_pose(uint32_t(body ? 1000 + i : i + 1)) : nullptr;
     };
+    auto within_lateral = [&](int32_t q8) { const int32_t x=q8/256; return lateral_min<=x && x<lateral_max; };
     for (size_t i = 0; i < race().riders().size(); ++i) {
         const auto& rd = race().riders()[i];
         auto include = [&](const Bike& actor, int route, const ActorAnimationState& state, bool body) {
-            const auto pos = uint32_t(actor.i32(0x1c));
+            if(rd.parked || !rd.live || !(body?rd.half_slice_present:rd.bike_slice_present)) return;
+            const auto* pose = rider_pose(i, body);
+            if(pose && !pose->visible) return;
+            const auto pos = pose ? pose->position_q8 : uint32_t(actor.i32(0x1c));
             if ((pos >> 8) != near.sample || ((pos & 255) >= 128) != back || !state.selected) return;
+            if(!within_lateral(pose?pose->lateral_q8:actor.i32(0x28))) return;
             const auto half = body ? rd.crash_actor.slice_half : rd.slice_half;
             if (near.count == 2 && half.value_or(uint8_t(route)) != road) return;
-            if (const auto* pose = rider_pose(i, body))
+            if (pose)
                 visible.push_back({int32_t(pose->position_q8), i, false, body});
             else
                 visible.push_back({actor.i32(0x1c), i, false, body});
@@ -116,8 +134,9 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
     if (instance.traffic && road == near.own)
         for (size_t i = 0; i < instance.traffic->cars().size(); ++i) {
             const auto& car = instance.traffic->cars()[i];
-            const auto pos = uint32_t(car.position);
-            if (car.active && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back) {
+            const auto* pose=view_ready?blend_pose(uint32_t(2000+i)):nullptr;
+            const auto pos = pose?pose->position_q8:uint32_t(car.position);
+            if (car.active && within_lateral(pose?pose->lateral_q8:car.lateral) && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back) {
                 if (view_ready) {
                     if (const auto* pose = blend_pose(uint32_t(2000 + i)))
                         visible.push_back({int32_t(pose->position_q8), i, true});
@@ -131,7 +150,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         for (size_t i = 0; i < instance.pedestrians->pool().size(); ++i) {
             const auto& p = instance.pedestrians->pool()[i];
             const auto pos = uint32_t(p.body.bike.i32(0x1c));
-            if (p.active && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back)
+            if (p.active && within_lateral(p.body.bike.i32(0x28)) && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back)
                 visible.push_back({int32_t(pos), i, false, false, true});
         }
     std::stable_sort(visible.begin(), visible.end(),
@@ -175,7 +194,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         const auto& b = far.road[road];
         const auto camera = blend_camera();
         // Plan 21 Task 2: drawn position/lateral/ground/heading/roll come
-        // from the blended pose; sample membership above stays live.
+        // from the blended pose, including its sample membership above.
         int32_t pos_q8 = bike.i32(0x1c), lat_q8 = bike.i32(0x28), gnd_q8 = bike.i32(0x24),
                 head = bike.i32(0x5c), roll = bike.i32(0x60);
         if (view_ready) {

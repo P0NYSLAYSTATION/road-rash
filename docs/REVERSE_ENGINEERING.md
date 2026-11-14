@@ -1,5 +1,73 @@
 # Binary evidence and next work
 
+## November 14, 2026 — measured dual-road painter and split metadata
+
+Working-original00443cd0 draws opposite and own road surfaces first, then both
+exterior sides, then the inner gap.0041d500 dispatches both inner shoulders
+before opposite inner hillside, bridge and own inner hillside; it does not gate
+those shoulders on the floor visibility flag. Original row+1f/+20 band limits
+must survive00454890 construction: inferring them from already collapsed points
+allowed spurious degenerate strips. Native adjustment now returns those limits
+and the live ring retains them. Original component comparison imports the actual
+limits. At a common-to-split transition, each edge must follow its own physical
+far half; projecting the right edge through half0 creates an extra shoulder over
+the lane even if its world input correctly names half1. Both formerly failing
+Napa right entries now match486/275 polygons exactly, including order.
+
+0043c035..0043c03d gates type4 marked ground on the road-pair visibility flag;
+type0 deliberately retains its different behavior. A broader prototype lost28
+original City polygons and was rejected.0040be45..0040be89 returns from the
+whole building-shoulder routine when its visible top is horizontally outside
+the viewport, suppressing its curb too. These measured conditions remove hidden
+hillside lane panels and offscreen curbs without losing original City ground.
+
+Accelerated posed traversal must service0044b0e0 and wait for the actual MSRR
+worker/slot guards, or its eight-entry queue can overrun and draw with startup
+family15. Settling before each synthetic advance and final projection makes
+original Canyn282/City226/Medly244/Napa143 terrain nodes match native exactly.
+This is explicitly a settled render component, not original asynchronous timing
+or simulation acceptance. Full list capture covers the six emitter flushes and
+the final flush even when pending flag00475620 is zero. Solid-colour quads have
+no texture coordinates, so texture flip flags do not affect their comparison.
+
+
+## November 14, 2026 — branch heights, occlusion and capture completeness
+
+Evidence is from working `E:/RR/ROADRASH.EXE`, SHA256
+`b845fc4053f2387c863d3fd71d4b1457cefc2eab900d9562511d8d403b6f7563`.
+00453ec0/00453f02 set0x5100 before00453d10 copies81 HTPR rise bytes between
+split/merge arms, preserving bends and shared-resource aliasing. Node+18 zero
+selects+8 as source, otherwise+0c. Splits copy first81; merges copy each arm's
+last81 using its own length. Six live Napa traces confirm81. Right samples
+943/944/945 rise-15/-29/-28; sample944 bend18. Static unmodified right-profile
+expectations are superseded. Evidence: `napa-rise-init-render-20261114.tsv`.
+
+00444080..00444090 takes max(both road maximum rows), then004445d7..004445e2
+takes one cumulative minimum over nearer slices. The previous native per-half
+minimum was wrong. Original posed rows20..26 ceilings:7065273,7065273,7011379,
+6800450,6800450,6800450,6754376; native had already fallen to6639574 at row23.
+Evidence: `build/projection-original.txt`, raw scene memory and
+`build/original-full-v2-window-nodes.log`. Source corrected, runtime unverified.
+0043be89..0043bea5 increments event6's signed countdown for the inner-divider
+phase only. Raw countdown still controls topology and opposite-road visibility.
+Source now separates those uses; runtime unverified.
+
+All direct00450420 flush callsites:004439f5(final),0045048e,0045050f,004505a4,
+00450744,00450891,00450981. The last two were absent from the first full-list
+hook revision. Flag00475620 may be zero at final flush and cannot gate a full
+scene dump. Source revision2 covers all seven (exact instruction bytes checked)
+and records `scene.full_capture_version=2`; compilation/fresh captures pending.
+Earlier215-extra-node speculation was a missing250-node prefix, now superseded.
+Napa270-polygon match remains measured only for its component scene. New Canyn
+206 extras are not proved renderer faults with the old incomplete capture DLL.
+
+00443af0 draws a complete next-nearer terrain pair before preceding scenery.
+00443c00 interleaves outside actors/rails/inside actors by viewer side.
+004386ef..00438708 checks drawn object+50/256 (signed truncation), superseding
+older nonspatial-bucket interpretations. Drawn positions must determine actor
+sample membership as well as within-sample interpolation.
+
+
 ## November 12, 2026 — pedestrian allocation and offline snapshot calls
 
 Disassembly of the working E:/RR/ROADRASH.EXE confirms allocation routine00438930 calls ground evaluator00439b10 at004389dd, stores the returned height at object+24 (004389e6), then copies five placement words from+1c..+2c to+30..+40 (004389f7). Native allocation now evaluates the freshly written current slice before copying previous-placement words. It retains the physical forward neighbor (including the initialized slot template) for fractional hill interpolation instead of assuming future route geometry. New City level3 parked capture exposed original previous-ground20/native0 at tick1; after the fix all4552 ticks match, including the measured placement words. The synthetic sidewalk20 regression also checks allocation without any movement tick.

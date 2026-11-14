@@ -231,7 +231,7 @@ int32_t CourseScene::rail_height(uint32_t section, uint32_t local) const {
     return group ? ((1 << (group->row_shift & 31)) << (group->last_row & 31)) * 4 : 0;
 }
 const CelGroup* CourseScene::building_group(uint32_t section, uint32_t local, uint8_t selector) const {
-    const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    const uint16_t id = render_family(section,local,selector);
     const auto family = families_.find(id);
     if (family == families_.end()) return nullptr;
     const auto offset = family->second.resolve(1, selector & 63);
@@ -241,7 +241,7 @@ const CelGroup* CourseScene::building_group(uint32_t section, uint32_t local, ui
 }
 const CelGroup* CourseScene::rail_group(uint32_t section, uint32_t local, uint8_t selector) const {
     // 0x0044ac00(selector, 6): category 6 entry, a cel group without frames.
-    const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    const uint16_t id = render_family(section,local,selector);
     const auto family = families_.find(id);
     if (family == families_.end()) return nullptr;
     const auto offset = family->second.resolve(6, selector & 63);
@@ -287,7 +287,7 @@ const CelTexture* CourseScene::tunnel_material(uint32_t section, uint32_t local,
                                                int32_t height) const {
     // 0x0040ccf0 / 0x0044ada0: category 3, entry lit (0/1), group kind; the
     // lit set falls back to the plain one when its group is missing.
-    const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    const uint16_t id = render_family(section,local,selector);
     const auto family = families_.find(id);
     if (family == families_.end()) return nullptr;
     auto group = [&](uint32_t entry) -> const CelGroup* {
@@ -330,7 +330,7 @@ const std::vector<SceneryObject>& CourseScene::objects(uint32_t section, uint32_
 }
 const AnimationFrame* CourseScene::object_frame(uint32_t section, uint32_t local,
                                                 const SceneryObject& object) const {
-    const uint16_t id = family_slots_.at(section).at(local)[object.selector >> 6];
+    const uint16_t id = render_family(section,local,object.selector);
     const auto family = families_.find(id);
     if (family == families_.end()) return nullptr;
     const auto offset =
@@ -379,7 +379,7 @@ bool CourseScene::pedestrian_graphics_valid(uint32_t section, uint32_t local, ui
 }
 
 const PedestrianLook* CourseScene::pedestrian_look(uint32_t section, uint32_t local, uint8_t selector) const {
-    const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    const uint16_t id = render_family(section,local,selector);
     return pedestrian_family_look(id, selector);
 }
 
@@ -397,7 +397,7 @@ const PedestrianLook* CourseScene::pedestrian_look(const std::vector<RouteSample
                     id = it->family;
                     break;
                 }
-        } else id = family_slots_.at(s.section).at(s.local)[selector >> 6];
+        } else id = render_family(s.section,s.local,selector);
         if (id) return pedestrian_family_look(id, selector);
         // A section can leave a slot untouched. The original global slot
         // then keeps its incoming family rather than resetting to zero.
@@ -550,7 +550,7 @@ std::vector<std::array<int32_t, 4>> CourseScene::static_collision_boxes(
 }
 const CelTexture* CourseScene::material(uint32_t section, uint32_t local, uint8_t selector, uint8_t category,
                                         std::optional<uint32_t> frame, int32_t width, int32_t height) const {
-    const uint16_t id = family_slots_.at(section).at(local)[selector >> 6];
+    const uint16_t id = render_family(section,local,selector);
     const auto family = families_.find(id);
     if (family == families_.end()) return nullptr;
     const auto offset = family->second.resolve(category, selector & 63, frame);
@@ -580,7 +580,24 @@ void CourseScene::draw_horizon(Framebuffer& fb, int32_t scroll, int32_t logical_
 std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& route,
                                               const std::vector<RoadSlice>& slices, const Camera& camera,
                                               const DepthTable& depths, ActorEmitter actors,
-                                              int32_t logical_width, const TrackRing* ring) const {
+                                              int32_t logical_width, const TrackRing* ring, const std::vector<int32_t>* view_countdowns, const std::array<uint16_t,4>* view_families, const std::vector<std::array<int8_t,2>>* view_bands) const {
+    struct RestoreFamilies {
+        std::optional<std::array<uint16_t,4>>& target;
+        std::optional<std::array<uint16_t,4>> previous;
+        ~RestoreFamilies() { target=previous; }
+    } restore{render_families_,render_families_};
+    // An oracle component comparison can supply the original's live slots.
+    // Normal gameplay retains its existing per-sample family resolution;
+    // changing busy-slot rendering needs separate original-frame evidence.
+    if(view_families) render_families_=*view_families;
+    else render_families_.reset();
+    const bool live_window=ring || view_countdowns;
+    auto live_countdown=[&](uint32_t sample) -> std::optional<int32_t> {
+        if(ring && ring->render_sample(int32_t(sample*256),0)) return ring->slice_countdown(int32_t(sample*256));
+        if(view_countdowns && sample<view_countdowns->size() && (*view_countdowns)[sample]!=INT32_MIN)
+            return (*view_countdowns)[sample];
+        return std::nullopt;
+    };
     struct Road {
         const PathSample* path;
         PathSample path_image;
@@ -622,10 +639,12 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         std::optional<MergeHillProfiles> joined;
         int32_t split_countdown = INT32_MIN;
         if (slice.count == 2) {
+            if(view_countdowns && std::getenv("RR_TERRAIN_VERBOSE") && n<5)
+                std::fprintf(stderr,"scene row%zu half%u sep%d cd%d\n",n,unsigned(slice.own),sample.x_sep,view_countdowns->at(slice.sample));
             size_t start = slice.sample;
-            if (!ring) while (start > 0 && route[start - 1].dual) --start;
-            if (ring && ring->render_sample(int32_t(slice.sample * 256), slice.own))
-                split_countdown = ring->slice_countdown(int32_t(slice.sample * 256));
+            if (!live_window) while (start > 0 && route[start - 1].dual) --start;
+            if (const auto countdown=live_countdown(slice.sample))
+                split_countdown = *countdown;
             else if (route[start].event == RoadEvent::split) {
                 // 00453b60 measures the first separation exceeding both inner
                 // shoulders plus256, at most80 samples into the split.
@@ -641,7 +660,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
                 split_countdown = threshold - int32_t(slice.sample - start);
             }
-            if ((!ring && route[start].event == RoadEvent::merge_window) ||
+            if ((!live_window && route[start].event == RoadEvent::merge_window) ||
                 (split_countdown <= 0 && split_countdown != INT32_MIN)) {
                 const bool first = sample.half == 0;
                 const auto& p0 = first ? sample.path : sample.other;
@@ -651,7 +670,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 const auto& t1 = terrain(first ? sample.other_section : sample.section,
                                          first ? sample.other_local : sample.local);
                 if (t0.type == 4 && t1.type == 4) {
-                    if (ring) {
+                    if (live_window) {
                         // 00454890 already wrote these live ring polylines.
                         // Recover the collapsed band limits without joining the
                         // already-joined geometry a second time.
@@ -674,6 +693,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
             }
         }
+        int32_t slice_maximum_row = INT32_MIN;
         for (int r = 0; r < slice.count; ++r) {
             auto& road = roads[n][r];
             const bool own = slice.count == 1 || r == slice.own;
@@ -693,6 +713,10 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             road.merge_hills = joined.has_value();
             road.split_countdown = split_countdown;
             road.inner_bands = joined ? joined->bands[r] : 3;
+            if (slice.count==2) {
+                if (ring) road.inner_bands=ring->slice_bands(int32_t(slice.sample*256))[r];
+                else if (view_bands) road.inner_bands=view_bands->at(slice.sample)[r];
+            }
             road.kind = tunnel(road.section, road.local) ? 3 : road.terrain->type;
             if (road.terrain->type == 4 && side_street_mark < 0)
                 side_street_mark = 0;
@@ -827,9 +851,17 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 road.sine = wrap(int64_t(sine(lean >> 14)) * 256);
                 road.cosine = wrap(int64_t(sine(wrap(0x200000 - int64_t(lean)) >> 14)) * 256);
             }
-            road.ceiling = ceiling;
-            ceiling = std::min(ceiling, max_row);
+            if(view_countdowns && std::getenv("RR_TERRAIN_VERBOSE") && n>=20 && n<27)
+                std::fprintf(stderr,"ceiling row%zu road%d row%d max%d prior%d\n",n,r,s.screen_y,max_row,ceiling);
+            slice_maximum_row = std::max(slice_maximum_row, max_row);
         }
+        // 00444080..00444090 takes the maximum of both physical roads;
+        // 004445d7..004445e2 then clamps that one slice ceiling against
+        // nearer slices. One half must not independently hide the other.
+        ceiling = std::min(ceiling, slice_maximum_row);
+        for (int r = 0; r < slice.count; ++r) roads[n][r].ceiling = ceiling;
+        if (view_countdowns && std::getenv("RR_TERRAIN_VERBOSE"))
+            std::fprintf(stderr,"ceiling-slice row%zu maximum%d cumulative%d\n",n,slice_maximum_row,ceiling);
     }
     for (size_t n = 0; n + 1 < slices.size(); ++n)
         for (int r = 0; r < std::min(slices[n].count, slices[n + 1].count); ++r) {
@@ -855,9 +887,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         }
     // 00444553..004445d0 hides the opposite roadway once its
     // separation/countdown no longer belongs to the camera's visible window.
-    if (ring && !slices.empty()) {
+    if (live_window && !slices.empty()) {
         const auto& first = route[slices[0].sample];
-        const int32_t camera_countdown = ring->slice_countdown(int32_t(slices[0].sample*256));
+        const int32_t camera_countdown = live_countdown(slices[0].sample).value_or(INT32_MIN);
         for (size_t n=0; n<slices.size(); ++n)
             if (slices[n].count==2) {
                 const auto& sample = route[slices[n].sample];
@@ -865,27 +897,133 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                     roads[n][0].split_countdown, first.dual, camera_countdown,
                     roads[0][0].kind==0, sample.x_sep,
                     road_separation_limits_[std::min(n,size_t(31))]);
+                if(view_countdowns && std::getenv("RR_TERRAIN_VERBOSE") && n<5)
+                    std::fprintf(stderr,"visibility row%zu own%u left%d right%d limit%d\n",n,unsigned(slices[n].own),
+                        int(roads[n][0].visible),int(roads[n][1].visible),road_separation_limits_[std::min(n,size_t(31))]);
             }
     }
-    std::vector<DrawNode> result;
-    auto append = [&](const std::vector<DrawNode>& nodes) {
-        result.insert(result.end(), nodes.begin(), nodes.end());
+    // 0043be89..0043bea5 advances only event6's inner-divider phase.
+    // Keep the raw countdown for topology and opposite-road visibility.
+    auto inner_phase = [&](size_t n) {
+        const int32_t raw = roads[n][0].split_countdown;
+        return raw != INT32_MIN && route[slices[n].sample].event == RoadEvent::merge_window ? raw+1 : raw;
     };
-    // Native ordering (not yet an original-golden match): actors in the front
-    // half of a sample (+0x1c low byte < 0x80) are emitted after the road
-    // surface of the next nearer pair. A rider standing on a sample's near
-    // edge (start grid: low byte 0) reaches below that edge, and the nearer
-    // road strip drawn afterwards otherwise cut its tyres along a scanline.
-    std::vector<DrawNode> front;
+    std::vector<DrawNode> result;
+    std::vector<DrawNode>* emission = &result;
+    auto append = [&](const std::vector<DrawNode>& nodes) {
+        emission->insert(emission->end(), nodes.begin(), nodes.end());
+    };
     // 0x0041d260: a hill/building side's shoulder ends at its shoulder edge
     // (+0x60); a mountain side's at its wall base (+0x70, world +0x14c).
     auto outer = [](const Road& road) { return road.kind == 0 || road.kind == 4 ? 0 : 1; };
     // 0x00443d70: the camera sample's sub-slice is a tunnel.
     const bool camera_in_tunnel = !slices.empty() && roads[0][0].kind == 3;
-    std::vector<DrawNode> rails;
+    // 00443af0: complete the next nearer terrain pair before dispatching
+    // this pair's scenery. 00443c00 partitions objects by their drawn world
+    // lateral coordinate around the two fences, rather than putting all rails
+    // in front of all actors. 004386ef..00438708 truncates Q8 to world units.
+    auto emit_scenery = [&](size_t j) {
+        auto near=slices[j]; auto far=slices[j+1];
+        const int far_event=int(route[far.sample].event);
+        const bool opening_merge=near.count==1 && far.count==2 && (far_event==4 || far_event==6);
+        const int entering_half=opening_merge?far.own:0;
+        if(opening_merge) { far.road[0]=far.road[far.own]; far.count=1; far.own=0; }
+        const bool closing=near.count==2 && far.count==1;
+        const int selected=closing?near.own:0;
+        if(closing) { near.road[0]=near.road[near.own]; near.count=1; near.own=0; }
+        const int count=std::min(near.count,far.count);
+        const bool right_first=count==2 &&
+            (near.screen_x(0,near.road[0].shoulder_right)+near.screen_x(1,near.road[1].shoulder_left))/2>
+                near.centre_q16;
+        for(int i=0;i<count;++i) {
+            const int r=count==2?(i==0?int(right_first):1-int(right_first)):0;
+            const auto& road=roads[j][closing?selected:r]; const auto& old=roads[j+1][opening_merge?entering_half:r];
+            if(!road.visible) continue;
+            const auto& a=far.road[r]; const auto& b=near.road[r]; const auto& path=*road.path;
+            std::array<std::vector<DrawNode>,2> rail_nodes;
+            if(path.event_type==5) {
+                // 0x00443c00/0x0041c200: CESR event 5 guard rails. Parameter 0
+                // selects the category-6 group, 1 is a signed lateral offset
+                // from the shoulder, 2 bits 0/1 enable the left/right rail.
+                const uint8_t selector = path.event_parameters[0];
+                const auto* group = rail_group(road.section, road.local, selector);
+                const int32_t half = (logical_width >> 1) * 65536;
+                const std::array<int, 2> order =
+                    road.hill[0].projected[0].x < half ? std::array<int, 2>{0, 1} : std::array<int, 2>{1, 0};
+                for (const int side : order) {
+                    if (!group || !(path.event_parameters[2] & (1 << side))) continue;
+                    const int32_t lateral =
+                        side ? int8_t(path.event_parameters[1]) : -int8_t(path.event_parameters[1]);
+                    const int32_t height = ((1 << (group->row_shift & 31)) << (group->last_row & 31)) * 4;
+                    const int32_t near_x =
+                        wrap(int64_t(lateral) * near.scale + road.hill[side].projected[0].x);
+                    const int32_t far_x = wrap(int64_t(lateral) * far.scale + old.hill[side].projected[0].x);
+                    const int32_t near_top = wrap(b.screen_y - int64_t(height) * near.scale),
+                                  far_top = wrap(a.screen_y - int64_t(height) * far.scale);
+                    const int32_t width = logical_width * 65536;
+                    if (!((near_x <= width || far_x <= width) && (near_x >= 0 || far_x >= 0))) continue;
+                    const int32_t span = near_x > far_x ? near_x - far_x : far_x - near_x;
+                    const auto& cell = group->select(span, wrap(int64_t(height) * near.scale), logarithms_);
+                    DrawNode rail{{RasterPoint{near_x, near_top}, RasterPoint{far_x, far_top},
+                                   RasterPoint{far_x, a.screen_y}, RasterPoint{near_x, b.screen_y}},
+                                  &cell.texture,
+                                  std::nullopt,
+                                  false,
+                                  false};
+                    rail.flip_u = rail.view_points[1].x < rail.view_points[0].x ||
+                                  rail.view_points[2].x < rail.view_points[3].x;
+                    rail.flip_v = rail.view_points[3].y < rail.view_points[0].y ||
+                                  rail.view_points[2].y < rail.view_points[1].y;
+                    rail.view_depth = {near.depth, far.depth, far.depth, near.depth};
+                    rail_nodes[side].push_back(rail);
+                }
+
+            }
+            auto range=[&](int32_t low,int32_t high) {
+                if(actors) append(actors(near,far,r,road.ceiling,true,low,high));
+                if(near.depth>146)
+                    for(const auto& object:objects(road.section,road.local)) {
+                        const int32_t lateral=object.lateral+road.offset;
+                        if(lateral<low || lateral>=high) continue;
+                        const auto* image=object_frame(road.section,road.local,object);
+                        if(!image || !image->texture) continue;
+                        int32_t ground=terrain_height(*road.terrain,path,*old.terrain,*old.path,
+                            object.lateral*256,128,a.road_x-b.road_x,road.offset);
+                        if(ground>998) ground=0;
+                        auto draw=scenery_node(*image,object,(a.road_x+b.road_x)/2+camera.x,
+                            (a.world_y+b.world_y)/2,ground,near.depth,camera,depths,logical_width);
+                        if(draw.view_points[0].y<road.ceiling) result.push_back(draw);
+                    }
+                if(actors) append(actors(near,far,r,road.ceiling,false,low,high));
+            };
+            if(path.event_type!=5) { range(-10000,10000); continue; }
+            const int32_t offset=int8_t(path.event_parameters[1]);
+            const int32_t left=road.offset+b.shoulder_left-offset;
+            const int32_t right=road.offset+b.shoulder_right+offset;
+            const auto lx=road.hill[0].projected[0].x, rx=road.hill[1].projected[0].x;
+            const std::array<int,5> order=lx>=near.centre_q16?std::array<int,5>{4,3,2,1,0}:
+                rx<=near.centre_q16?std::array<int,5>{0,1,2,3,4}:std::array<int,5>{0,1,4,3,2};
+            for(int item:order) {
+                if(item==0) range(-10000,left);
+                if(item==1) append(rail_nodes[0]);
+                if(item==2) range(left,right);
+                if(item==3) append(rail_nodes[1]);
+                if(item==4) range(right,10000);
+            }
+        }
+    };
     for (size_t n = slices.size(); n-- > 1;) {
         auto near = slices[n - 1];
-        const auto& far = slices[n];
+        auto far = slices[n];
+        const int far_event=int(route[far.sample].event);
+        const bool opening_merge=near.count==1 && far.count==2 && (far_event==4 || far_event==6);
+        const int entering_half=opening_merge?far.own:0;
+        const bool opening_split=near.count==1 && far.count==2 && far_event==2;
+        if(opening_merge) {
+            // 00443f70..00443fa8 links a common road to the continuing
+            // half when the opposite arm re-enters the merge window.
+            far.road[0]=far.road[far.own]; far.count=1; far.own=0;
+        }
         // 004443b0..0044441e links the departing window's selected half
         // to the following single road. Half1 must not stitch to half0's
         // terrain/coordinates when the opposite branch leaves the window.
@@ -897,21 +1035,24 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             near.own = 0;
         }
         const int count = std::min(near.count, far.count);
-        std::vector<DrawNode> pending;
-        pending.swap(front);
+        std::array<std::vector<DrawNode>,2> floors, exteriors, interiors, inner_shoulders;
+        std::vector<DrawNode> bridge;
+        auto side_emission = [&](int road, int side) {
+            emission = count==2 && side==1-road ? &interiors[road] : &exteriors[road];
+        };
         for (int i = 0; i < count; ++i) {
             const int r = count == 2 ? (i == 0 ? 1 - near.own : near.own) : 0;
             const auto& a = far.road[r];
             const auto& b = near.road[r];
             const auto& road = roads[n - 1][close_branch ? closing_half : r];
-            const auto& old = roads[n][r];
+            const auto& old = roads[n][opening_merge?entering_half:r];
             if (!road.visible) continue;
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
             // 0x004547e0 widens the sub-slice's panel grid to its forward
             // neighbor(s). Physical road edges retain the fractional widths.
-            const auto& left_neighbor = roads[n][far.count == 2 && near.count == 1 ? 0 : r];
-            const auto& right_neighbor = roads[n][far.count == 2 && near.count == 1 ? 1 : r];
+            const auto& left_neighbor = roads[n][opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 0 : r)];
+            const auto& right_neighbor = roads[n][opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 1 : r)];
             int32_t left_q8 = path.left_q8, right_q8 = path.right_q8;
             int32_t next_left_q8 = left_neighbor.path->left_q8;
             int32_t next_right_q8 = left_neighbor.path->right_q8;
@@ -952,14 +1093,18 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             panels.terrain_type = road.terrain->type;
             panels.next_terrain_type = old.terrain->type;
             panels.visible = visible;
+            emission = &floors[r];
             append(road_draw_nodes(road_panels(panels, logical_width), roads_));
             // 0x0043bef0 draws marked ground (0x0043b970) only for types 0 and 4.
-            if ((path.marking_flags & 32) && road.kind != 1 && road.kind != 3)
+            //0043c035..0043c03d gates type4's marked ground on the
+            //road pair's visibility; type0's dispatcher deliberately does not.
+            if ((road.kind != 4 || visible) && (path.marking_flags & 32) && road.kind != 1 && road.kind != 3)
                 for (int side = 0; side < 2; ++side) {
                     if (near.count==2 && far.count==2 && side==1-r && road.kind==4) continue;
+                    side_emission(r,side);
                     MarkedGroundInput ground;
                     ground.near_edge = {wrap(near.screen_x(r, side ? b.right : b.left)), b.screen_y};
-                    ground.far_edge = {wrap(far.screen_x(r, side ? a.right : a.left)), a.screen_y};
+                    ground.far_edge = {wrap(far.screen_x(opening_split?side:r, side ? a.right : a.left)), a.screen_y};
                     ground.near_scale = near.scale;
                     ground.far_scale = far.scale;
                     ground.logical_width = logical_width;
@@ -972,17 +1117,21 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                         return index == 3 ? &*roads_.entries[0].texture : &*roads_.terrain.at(index).texture;
                     }));
                 }
-            if (i == count - 1) {
-                append(pending);
-                pending.clear();
-            }
             if (road.terrain->type == 4)
                 for (int side = 0; side < 2; ++side) {
+                    //The common road's two forward edges attach to different
+                    //physical halves at the first departing split sample.
+                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& a=far.road[opening_split?side:r];
+                    side_emission(r,side);
                     const bool inner = near.count==2 && far.count==2 && side==1-r;
                     if ((path.marking_flags & 32) && !inner) continue;
-                    if (near.count == 2 && far.count == 2 && side == 1 - r && road.split_countdown > 0)
+                    if (near.count == 2 && far.count == 2 && side == 1 - r && inner_phase(n-1) > 0)
                         continue; // 0043be80 -> 0041d500 -> 0043bb30 flat divider
-                    if (visible) {
+                    //0041d500 dispatches inner shoulders independently of
+                    //the floor visibility flag;0043bef0 gates the outer ones.
+                    if (visible || inner) {
+                        if(inner) emission=&inner_shoulders[r];
                         ShoulderPanelInput shoulder;
                         shoulder.near_depth = near.depth;
                         shoulder.has_lanes = panels.left_lane_count + panels.right_lane_count != 0;
@@ -995,7 +1144,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                              road.hill[side].world[outer(road)],
                              {b.road_x + camera.x + (side ? b.right : b.left), b.world_y}}};
                         shoulder.strip.projected = {
-                            {{wrap(far.screen_x(r, side ? a.right : a.left)), old.hill[side].projected[0].y},
+                            {{wrap(far.screen_x(opening_split?side:r, side ? a.right : a.left)), old.hill[side].projected[0].y},
                              old.hill[side].projected[outer(old)],
                              road.hill[side].projected[outer(road)],
                              {wrap(near.screen_x(r, side ? b.right : b.left)),
@@ -1004,6 +1153,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                             return material(road.section, road.local, path.side_flags[side], 5, 0, w, h);
                         }));
                     }
+                    side_emission(r,side);
                     if ((path.marking_flags & 24) && !inner) {
                         // 0x0043bef0 type 4, flags 8/16: shoulder followed
                         // by 0x0041d110's cross road, rather than hillside.
@@ -1046,6 +1196,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                         if (i == count - 1 && far.count == 2 &&
                             std::max(roads[n - 1][0].inner_bands, roads[n][0].inner_bands) > 3) {
                             const auto& h0 = roads[n - 1][0];
+                            emission = &bridge;
                             append(merge_hill_bridge(
                                 {roads[n][0].hill[1].projected[3], roads[n][1].hill[0].projected[3],
                                  roads[n - 1][1].hill[0].projected[3], h0.hill[1].projected[3]},
@@ -1053,6 +1204,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                                     return material(h0.section, h0.local, h0.terrain->selectors[1], 1, 2, w,
                                                     h);
                                 }));
+                            side_emission(r,side);
                         }
                     }
                     append(hill_draw_nodes(hills, camera, depths, [&](uint8_t band, int32_t w, int32_t h) {
@@ -1066,6 +1218,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             // mouth, the portal (0x0040d420).
             if (road.kind == 1 || road.kind == 3)
                 for (int side = 0; side < 2; ++side) {
+                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& a=far.road[opening_split?side:r];
+                    side_emission(r,side);
                     const bool tunnel_pair = road.kind == 3 && old.kind == 3;
                     if (visible && !tunnel_pair) {
                         ShoulderPanelInput shoulder;
@@ -1080,7 +1235,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                              road.hill[side].world[outer(road)],
                              {b.road_x + camera.x + (side ? b.right : b.left), b.world_y}}};
                         shoulder.strip.projected = {
-                            {{wrap(far.screen_x(r, side ? a.right : a.left)), old.hill[side].projected[0].y},
+                            {{wrap(far.screen_x(opening_split?side:r, side ? a.right : a.left)), old.hill[side].projected[0].y},
                              old.hill[side].projected[outer(old)],
                              road.hill[side].projected[outer(road)],
                              {wrap(near.screen_x(r, side ? b.right : b.left)),
@@ -1196,6 +1351,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
             if (!(path.marking_flags & 32) && road.terrain->type == 0)
                 for (int side = 0; side < 2; ++side) {
+                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& a=far.road[opening_split?side:r];
+                    side_emission(r,side);
                     // 0x0043bef0 type 0: 0x0040bde0, then 0x0040ba10 for flags 8/16,
                     // the facade 0x0040c770, and 0x0040c450 for flag 16.
                     BuildingShoulderInput shoulder;
@@ -1211,7 +1369,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                     const int32_t fy = side ? old.path->height_right : old.path->height_left,
                                   ny = side ? path.height_right : path.height_left;
                     shoulder.top.projected = {
-                        {{wrap(far.screen_x(r, side ? a.right : a.left)), old.hill[side].projected[0].y},
+                        {{wrap(far.screen_x(opening_split?side:r, side ? a.right : a.left)), old.hill[side].projected[0].y},
                          old.hill[side].projected[0],
                          road.hill[side].projected[0],
                          {wrap(near.screen_x(r, side ? b.right : b.left)), road.hill[side].projected[0].y}}};
@@ -1280,8 +1438,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                         append(side_facade_nodes(
                             facade,
                             [&](uint32_t index) -> const CelGroup* {
-                                const uint16_t id = family_slots_.at(road.section)
-                                                        .at(road.local)[(facade.selector & 0xc0) >> 6];
+                                const uint16_t id = render_family(road.section,road.local,facade.selector);
                                 const auto family = families_.find(id);
                                 if (family == families_.end()) return nullptr;
                                 const auto offset = family->second.resolve(1, index);
@@ -1292,75 +1449,23 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                             logarithms_));
                     }
                 }
-            // 0x00443af0 draws a strip's scenery (0x00443b40) after the next
-            // nearer strip's terrain: the previous pair's guard rails go here.
-            if (i == count - 1) {
-                append(rails);
-                rails.clear();
-            }
-            if (i == count - 1 && path.event_type == 5) {
-                // 0x00443c00/0x0041c200: CESR event 5 guard rails. Parameter 0
-                // selects the category-6 group, 1 is a signed lateral offset
-                // from the shoulder, 2 bits 0/1 enable the left/right rail.
-                const uint8_t selector = path.event_parameters[0];
-                const auto* group = rail_group(road.section, road.local, selector);
-                const int32_t half = (logical_width >> 1) * 65536;
-                const std::array<int, 2> order =
-                    road.hill[0].projected[0].x < half ? std::array<int, 2>{0, 1} : std::array<int, 2>{1, 0};
-                for (const int side : order) {
-                    if (!group || !(path.event_parameters[2] & (1 << side))) continue;
-                    const int32_t lateral =
-                        side ? int8_t(path.event_parameters[1]) : -int8_t(path.event_parameters[1]);
-                    const int32_t height = ((1 << (group->row_shift & 31)) << (group->last_row & 31)) * 4;
-                    const int32_t near_x =
-                        wrap(int64_t(lateral) * near.scale + road.hill[side].projected[0].x);
-                    const int32_t far_x = wrap(int64_t(lateral) * far.scale + old.hill[side].projected[0].x);
-                    const int32_t near_top = wrap(b.screen_y - int64_t(height) * near.scale),
-                                  far_top = wrap(a.screen_y - int64_t(height) * far.scale);
-                    const int32_t width = logical_width * 65536;
-                    if (!((near_x <= width || far_x <= width) && (near_x >= 0 || far_x >= 0))) continue;
-                    const int32_t span = near_x > far_x ? near_x - far_x : far_x - near_x;
-                    const auto& cell = group->select(span, wrap(int64_t(height) * near.scale), logarithms_);
-                    DrawNode rail{{RasterPoint{near_x, near_top}, RasterPoint{far_x, far_top},
-                                   RasterPoint{far_x, a.screen_y}, RasterPoint{near_x, b.screen_y}},
-                                  &cell.texture,
-                                  std::nullopt,
-                                  false,
-                                  false};
-                    rail.flip_u = rail.view_points[1].x < rail.view_points[0].x ||
-                                  rail.view_points[2].x < rail.view_points[3].x;
-                    rail.flip_v = rail.view_points[3].y < rail.view_points[0].y ||
-                                  rail.view_points[2].y < rail.view_points[1].y;
-                    rail.view_depth = {near.depth, far.depth, far.depth, near.depth};
-                    rails.push_back(rail);
-                }
-            }
-            if (actors) append(actors(near, far, r, road.ceiling, true));
-            if (near.depth > 146)
-                for (const auto& object : objects(road.section, road.local)) {
-                    const auto* frame = object_frame(road.section, road.local, object);
-                    if (!frame || !frame->texture) continue;
-                    int32_t ground =
-                        terrain_height(*road.terrain, path, *old.terrain, *old.path, object.lateral * 256,
-                                       128, a.road_x - b.road_x, road.offset);
-                    if (ground > 998) ground = 0;
-                    auto draw = scenery_node(*frame, object, (a.road_x + b.road_x) / 2 + camera.x,
-                                             (a.world_y + b.world_y) / 2, ground, near.depth, camera, depths,
-                                             logical_width);
-                    if (draw.view_points[0].y < road.ceiling) result.push_back(draw);
-                }
-            if (actors) {
-                const auto nodes = actors(near, far, r, road.ceiling, false);
-                front.insert(front.end(), nodes.begin(), nodes.end());
-            }
         }
+        emission = &bridge;
         if (near.count == 2 && far.count == 2 && roads[n-1][0].kind == 4 &&
-            roads[n-1][0].split_countdown > 0)
+            inner_phase(n-1) > 0)
             append(split_divider_nodes(near, far, camera, depths, route[far.sample].x_sep, route[near.sample].x_sep));
-        append(pending);
+        emission = &result;
+        //00443cd0: both floors, both exterior sides, then the inner gap.
+        //Within each stage the opposite half is painted before the own half.
+        for (int i=0;i<count;++i) append(floors[count==2 ? (i==0 ? 1-near.own : near.own) : 0]);
+        for (int i=0;i<count;++i) append(exteriors[count==2 ? (i==0 ? 1-near.own : near.own) : 0]);
+        if (count==2) { append(inner_shoulders[0]); append(inner_shoulders[1]); }
+        if (count==2) append(interiors[1-near.own]);
+        append(bridge);
+        if (count==2) append(interiors[near.own]);
+        if(n+1<slices.size()) emit_scenery(n);
     }
-    append(rails);
-    append(front);
+    if(slices.size()>1) emit_scenery(0);
     return result;
 }
 } // namespace rr

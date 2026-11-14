@@ -39,7 +39,8 @@ int main(int argc, char** argv) {
             const uint32_t position = uint32_t(recorded_position);
             bool matched = false;
             std::string first_difference;
-            for (const auto& route : routes.at(course)) {
+            for (int choice=0;choice<2;++choice) {
+                const auto& route=routes.at(course)[(int(original.at("camera.half"))+choice)&1];
                 if ((position >> 8) >= route.size()) continue;
                 rr::Camera camera{int32_t(original.at("camera.x")) - route[position >> 8].offset,
                                   int32_t(original.at("camera.height"))};
@@ -59,12 +60,19 @@ int main(int argc, char** argv) {
                     const auto p = "slice." + std::to_string(s) + ".";
                     compare(p + "kind", native[s].count);
                     compare(p + "sample", native[s].sample);
+                    if(original.at(p+"kind")!=native[s].count) continue;
                     for (int r = 0; r < native[s].count; ++r) {
                         const auto q = p + "road." + std::to_string(r) + ".";
                         const auto& road = native[s].road[r];
                         compare(q + "depth", native[s].depth);
                         compare(q + "scale", native[s].scale);
-                        compare(q + "centre", native[s].screen_x(r, 0));
+                        // Original +0x30 is the projected graph axis before
+                        // this physical half's RSLD lateral offset. Edges below
+                        // remain relative to the actual roadway origin.
+                        const auto& sample = route[native[s].sample];
+                        const int32_t offset = !sample.dual || r==sample.half
+                                                   ? sample.offset : sample.other_offset;
+                        compare(q + "centre", native[s].screen_x(r, -offset));
                         compare(q + "screen_y", road.screen_y);
                         compare(q + "left", native[s].screen_x(r, road.left));
                         compare(q + "right", native[s].screen_x(r, road.right));

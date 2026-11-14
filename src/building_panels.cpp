@@ -109,8 +109,10 @@ std::vector<DrawNode> building_shoulder_nodes(const BuildingShoulderInput& in, c
         throw std::runtime_error("Invalid building shoulder input");
     const int32_t width = in.logical_width * 65536;
     std::vector<DrawNode> out;
-    if (p[0].y < p[3].y && p[0].y <= in.top.occlusion_row &&
-        (right ? p[1].x >= 0 && p[0].x <= width : p[0].x >= 0 && p[1].x <= width)) {
+    if (p[0].y < p[3].y && p[0].y <= in.top.occlusion_row) {
+        //0040be45..0040be89 returns from the whole shoulder routine when
+        //this visible top is outside the viewport, including its curb.
+        if (!(right ? p[1].x >= 0 && p[0].x <= width : p[0].x >= 0 && p[1].x <= width)) return out;
         const auto* texture = material(0, absolute(sub(p[1].x, p[0].x)), absolute(sub(p[3].y, p[0].y)));
         if (in.near_depth < 1234) {
             std::vector<std::array<RasterPoint, 4>> quads;

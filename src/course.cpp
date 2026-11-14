@@ -123,9 +123,11 @@ Course read_course(const std::vector<uint8_t>& bytes) {
     graph.range(0, 20);
     if (graph.u32(4) != graph.size) throw std::runtime_error("Node resource size mismatch");
     Course course{graph.u32(16), {}, {}};
+    std::vector<uint32_t> path_resources;
     for (size_t i = 0; i < segments.u32(8); ++i) {
         size_t row = 16 + i * 52, path = segments.u32(row + 4), sides = segments.u32(row + 0x14),
                lanes = segments.u32(row + 0x18);
+        path_resources.push_back(uint32_t(path));
         segments.chunk(path, "HTPR", 16, 2);
         const uint32_t count = segments.u32(path + 8);
         CourseSection section;
@@ -343,8 +345,8 @@ Course read_course(const std::vector<uint8_t>& bytes) {
             node.link = graph.u32(offset + 16);
             node.length = graph.u32(offset + 20);
             node.primary = int8_t(graph.u32(offset + 24) >> 8);
+            if (node.kind) node.preferred = uint8_t(graph.u32(offset + 24));
             if (node.kind == 1) {
-                node.preferred = uint8_t(graph.u32(offset + 24));
                 if (node.preferred > 1) throw std::runtime_error("Invalid preferred course branch");
             }
             pending.push_back(node.next);
@@ -360,6 +362,44 @@ Course read_course(const std::vector<uint8_t>& bytes) {
     }
     if (course.nodes.size() != graph.u32(8))
         throw std::runtime_error("Unreachable nodes or incorrect graph count");
+    // 00453d10, called before each window's jitter/probe pass: the original
+    // copies only HTPR rise bytes between arms, preserving each arm's bends.
+    // 00453ec0/00453f02 set the window span to0x5100 before the copy;
+    // live capture confirms all Napa window copies use81 samples.
+    // Preserve shared HTPR resource aliasing across SGS section rows.
+    std::set<uint32_t> aligned;
+    std::function<void(uint32_t)> align=[&](uint32_t at) {
+        while(at && aligned.insert(at).second) {
+            const auto& node=course.nodes.at(at);
+            if(node.kind>2) return;
+            if(node.kind==1 || node.kind==2) {
+                const bool other=node.preferred!=0;
+                const auto& source=course.nodes.at(other?node.previous:node.next);
+                const auto& target=course.nodes.at(other?node.next:node.previous);
+                constexpr uint32_t span=81;
+                if(source.kind!=0 || target.kind!=0 || source.length<span || target.length<span)
+                    throw std::runtime_error("Branch too short for original rise alignment");
+                const uint32_t from=node.kind==2?source.length-span:0;
+                const uint32_t to=node.kind==2?target.length-span:0;
+                for(uint32_t i=0;i<span;++i) {
+                    const int rise=course.sections.at(source.link).samples.at(from+i).rise;
+                    for(size_t section=0;section<path_resources.size();++section)
+                        if(path_resources[section]==path_resources.at(target.link))
+                            course.sections[section].samples.at(to+i).rise=rise;
+                }
+                if(node.kind==1) { align(node.next); at=node.previous; }
+                else at=node.link;
+            } else at=node.next;
+        }
+    };
+    align(course.root);
+    for(auto& section:course.sections) {
+        if(section.samples.empty()) continue;
+        const auto start=section.samples.front().elevation;
+        int32_t elevation=start;
+        for(auto& sample:section.samples) { sample.elevation=elevation; elevation+=sample.rise; }
+        if(section.forward_start) section.forward_start->rise=section.samples.front().rise;
+    }
     mark_course_branches(course);
     return course;
 }

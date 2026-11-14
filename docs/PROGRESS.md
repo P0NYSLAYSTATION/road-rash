@@ -1,5 +1,32 @@
 # Port progress
 
+## November 14, 2026 — original terrain construction and draw order
+
+Standing owner authorization for builds, commits, pushes and releases throughout
+this conversation applies; the preceding permission interpretation was wrong.
+
+The split/dip spill fixes now preserve original branch rise initialization,
+physical forward-edge links, inward band limits, shared slice occlusion and
+floor/exterior/interior painter order. The full posed Napa route passes both
+branches:12,268 frames,50,215 foreground lane probes,zero covered lanes. Seven
+original component windows cover all five courses plus the two formerly failing
+right split entries; terrain polygons and order match exactly, with fresh ground
+queries checked separately. Complete original display-list raster replay also
+matches every pixel in four newly captured course scenes. This establishes these
+components, not full native race-frame parity.
+
+Drawn actor sample membership, parked/null-slice visibility and original lateral
+fence ordering are corrected. The full Release build succeeds. The44-test gate
+initially passed43 and caught a stale cache-test buffer read; the corrected cache
+test verifies retained world/horizon storage across12 configurations. All five
+accepted completed races still match143,764 ticks including RNG, one anchor each.
+New original regressions/cache gate is recorded in VERIFICATION. Windows release
+milestone follows validation; full race rendering work continues afterward.
+Menu pixel parity and widescreen-only issues remain excluded.
+
+[Evidence and next rendering work](agent-handoffs/rendering-work-in-progress-20261114.md).
+
+
 ## November13 — release1.1.19 published
 
 Code commitb377447 is pushed and tagged3do-1.1.19. The clean optimized revision passes152selected native tests with no failures/CTest skips, all five completed Level1 races (143764ticks), the Level5 Highway arrest run (94929ticks), and all ten required police/crash cases. Update18->19 preserves600checked asset/save/soundfont/settings files byte-for-byte and launches successfully. The asset-free installer is published; its public download matches SHA256542219f4ffa60854933cc731f23c13e5fd14aeb44aaf789b9cfe3e3af69a5924. Menu pixels and widescreen-only checks remain owner-excluded. Further higher-level/branch finish combinations remain unmeasured; multiplayer work remains held during gameplay parity completion.

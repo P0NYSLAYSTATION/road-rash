@@ -64,10 +64,10 @@ class CourseScene {
     // Emits imported road, shoulder, hill, building and scenery geometry.
     // Marked transitions and split stitching remain integration work.
     using ActorEmitter =
-        std::function<std::vector<DrawNode>(const RoadSlice&, const RoadSlice&, int, int32_t, bool)>;
+        std::function<std::vector<DrawNode>(const RoadSlice&, const RoadSlice&, int, int32_t, bool, int32_t, int32_t)>;
     std::vector<DrawNode> draw_nodes(const std::vector<RouteSample>& route,
                                      const std::vector<RoadSlice>& slices, const Camera&, const DepthTable&,
-                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr) const;
+                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr, const std::vector<int32_t>* view_countdowns = nullptr, const std::array<uint16_t,4>* view_families = nullptr, const std::vector<std::array<int8_t,2>>* view_bands = nullptr) const;
     void draw_horizon(Framebuffer&, int32_t scroll, int32_t logical_width = 320) const;
     const std::vector<SceneryObject>& objects(uint32_t section, uint32_t local) const;
     const AnimationFrame* object_frame(uint32_t section, uint32_t local, const SceneryObject&) const;
@@ -117,6 +117,10 @@ class CourseScene {
     std::vector<std::vector<std::array<uint8_t, 2>>> undrawn_selectors_;
     std::map<std::pair<uint32_t, uint32_t>, TerrainSlice> base_saved_; // originals of ring-written samples
     std::vector<std::vector<std::array<uint16_t, 4>>> family_slots_;
+    mutable std::optional<std::array<uint16_t,4>> render_families_;
+    uint16_t render_family(uint32_t section,uint32_t local,uint8_t selector) const {
+        return render_families_?(*render_families_)[selector>>6]:family_slots_.at(section).at(local)[selector>>6];
+    }
     struct FamilyTimeline {
         std::vector<FamilyEvent> events;
         int32_t forward_bias = 0;

@@ -49,7 +49,7 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
         p.heading = rd.bike.i32(0x5c);
         p.roll = rd.bike.i32(0x60);
         p.route = rd.route;
-        p.visible = true;
+        p.visible = rd.live && !rd.parked && rd.bike_slice_present;
         v.actors.push_back(p);
         if (rd.crash_active) {
             ActorPose c;
@@ -60,7 +60,7 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
             c.heading = rd.crash_actor.motion.i32(0x5c); // walk-back facing (0x0040a600)
             c.roll = rd.crash_actor.motion.i32(0x60);
             c.route = rd.crash_actor.route;
-            c.visible = true;
+            c.visible = rd.live && !rd.parked && rd.half_slice_present;
             v.actors.push_back(c);
         }
     }

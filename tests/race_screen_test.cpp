@@ -56,7 +56,8 @@ int main(int argc, char** argv) {
     try {
         rr::Assets assets(root, rr::test::media_root());
         const auto exe = assets.read("ROADRASH.EXE");
-        if (argc > 1 && std::string(argv[1]) == "--live-splits") {
+        const bool terrain_sweep=argc>1 && std::string(argv[1])=="--terrain-sweep";
+        if (terrain_sweep || (argc > 1 && std::string(argv[1]) == "--live-splits")) {
             std::set<uint8_t> pavement;
             const auto materials=rr::read_road_materials(exe,assets.read("DATA/GLOBAL.RSC"));
             for(const auto& entry:materials.entries)
@@ -64,25 +65,40 @@ int main(int argc, char** argv) {
                     pavement.insert(mip.pixels.begin(),mip.pixels.end());
             for (uint8_t branch : {uint8_t(0),uint8_t(1)}) {
                 rr::Game game;
-                game.config.course="NAPA"; game.config.opponents=0;
+                game.config.course=SDL_getenv("RR_SWEEP_COURSE")?SDL_getenv("RR_SWEEP_COURSE"):"NAPA"; game.config.opponents=0;
                 game.depth=rr::read_depth_table(exe);
                 game.load_course(assets,exe); game.restart(); game.countdown=0;
+                // This is a posed scene diagnostic, not a race replay. Keep
+                // the ring/camera update, but prevent contacts with traffic,
+                // pedestrians or scenery from starting a wreck/result camera.
+                game.race().set_traffic(nullptr);
+                game.race().set_pedestrians(nullptr);
+                game.race().set_spawn_enabled(false);
+                // The imported route extends beyond the race finish. Posing
+                // through that tail must not start the finished-race camera.
+                game.race().set_finish_course(nullptr);
+                game.race().set_finish_q8(0);
+                game.race().set_static_frames([](uint32_t, uint32_t, uint8_t, bool)
+                    -> const rr::AnimationFrame* { return nullptr; });
+                for (size_t i=1; i<game.race().riders().size(); ++i)
+                    game.race().riders()[i].parked=true;
                 auto& ring=*game.instance.ring;
-                uint32_t start=game.race().position(), end=start+1400*256;
+                uint32_t start=game.race().position(), end=terrain_sweep?uint32_t((game.race().route().size()-40)*256):start+1400*256;
+                if(terrain_sweep && SDL_getenv("RR_SWEEP_LIMIT")) end=std::min(end,uint32_t(std::atoi(SDL_getenv("RR_SWEEP_LIMIT")))*256);
                 bool committed=false, merged=false;
                 int32_t stop=INT32_MAX, last_camera=game.race().camera_x(), max_jump=0;
                 size_t frames=0, overlays=0, transitions=0, lane_probes=0, covered_lanes=0;
                 bool previous_dual=false;
                 rr::Framebuffer frame(640,480), sky(640,480);
                 size_t max_sky=0;
-                for (uint32_t q=start; q<end && int32_t(q)<stop; q+=64) {
+                for (uint32_t q=start; q<end && int32_t(q)<stop; q+=terrain_sweep?256:64) {
                     auto physical=ring.render_sample(int32_t(q),branch);
                     if (!physical) throw std::runtime_error("Live ring lost the controlled rider slice");
-                    if (physical->dual && !committed) {
+                    if (physical->dual && (!committed || int(physical->event)==2)) {
                         ring.commit_branch(branch); committed=true;
                     }
                     if (committed && !physical->dual && physical->event==rr::RoadEvent::merged && !merged) {
-                        merged=true; stop=int32_t(q)+24*256;
+                        merged=true; if(!terrain_sweep) stop=int32_t(q)+24*256;
                     }
                     for (auto& rider:game.race().riders()) rider.frozen=rider.half_frozen=true;
                     auto& me=game.race().riders()[0];
@@ -90,10 +106,15 @@ int main(int argc, char** argv) {
                     me.previous_sample=me.sample; me.sample=q>>8;
                     me.slice_half=physical->dual ? branch : uint8_t(0);
                     me.bike.i32(0x1c)=me.bike.i32(0x138)=int32_t(q);
-                    me.bike.i32(0x28)=(branch ? 64 : -64)*256;
+                    me.bike.i32(0x28)=terrain_sweep?(physical->offset+(physical->path.right-physical->path.left)/2)*256:(branch ? 64 : -64)*256;
                     me.half_mirror.position=int32_t(q); me.half_mirror.sample=q>>8;
                     me.half_mirror.slice_half=me.slice_half; me.half_mirror.lateral=me.bike.i32(0x28);
                     game.race().step(0); game.reset_view_history();
+                    if(me.crash_active || me.busted || me.result_code!=1 || game.race().camera_position()!=q-256)
+                        throw std::runtime_error("Contaminated posed camera q="+std::to_string(q)+
+                            " camera="+std::to_string(game.race().camera_position())+
+                            " crash="+std::to_string(me.crash_active)+" result="+std::to_string(me.result_code)+
+                            " flags="+std::to_string(me.bike.u8(0xc0))+" health="+std::to_string(me.bike.i32(0x2f0)));
                     const int32_t jump=std::abs(game.race().camera_x()-last_camera);
                     if (q>start && jump>max_jump) {
                         max_jump=jump;
@@ -115,7 +136,7 @@ int main(int argc, char** argv) {
                           "render camera and road use the same physical lateral origin");
                     const auto slices=rr::project_road(view,pos,camera,game.depth);
                     for (const auto& slice:slices) {
-                        const auto actual=ring.render_sample(int32_t(slice.sample*256),game.race().camera_half());
+                        const auto actual=ring.render_sample(int32_t(slice.sample*256),view[slice.sample].half);
                         if (!actual) continue;
                         ++overlays;
                         const auto& used=view[slice.sample];
@@ -142,7 +163,7 @@ int main(int argc, char** argv) {
                     // Render the real ring's handoff region, not a static route
                     // with unrelated constructor terrain.
                     const int event=int(live->event);
-                    if (((event==2 || event==5) && live->local<24) ||
+                    if (terrain_sweep || ((event==2 || event==5) && live->local<24) ||
                         ((event==4 || event==6) && physical->local>100) ||
                         (merged && q+8*256>uint32_t(stop))) {
                         const auto rng=game.race().rng_state();
@@ -164,7 +185,26 @@ int main(int argc, char** argv) {
                                    (node.texture && node.texture->name.rfind("RRRAIL",0)==0);
                         }),nodes.end());
                         rr::render_nodes(frame,nodes,rr::view_mode(true),16);
-                        constexpr int32_t row=170*65536;
+                        if(terrain_sweep && SDL_getenv("RR_LIVE_SPLIT_TRACE") && branch==1 && (q>>8)==943) {
+                            rr::Framebuffer diagnostic(640,480);
+                            for(const auto& node:nodes) {
+                                diagnostic.row(50)[320]=255;
+                                rr::render_nodes(diagnostic,{node},rr::view_mode(true),16);
+                                if(diagnostic.row(50)[320]!=255) {
+                                    std::cout<<"sky writer "<<(node.texture?node.texture->name:"flat")<<" depth="<<node.view_depth[0];
+                                    for(const auto& point:node.view_points) std::cout<<" ("<<point.x/65536.0<<','<<point.y/65536.0<<')';
+                                    std::cout<<'\n';
+                                }
+                            }
+                            for(const auto& slice:slices) {
+                                const auto& rs=view[slice.sample];
+                                std::cout<<"road sample="<<slice.sample<<" own="<<int(slice.own)<<" count="<<int(slice.count)<<" event="<<int(rs.event)<<" sep="<<rs.x_sep;
+                                for(int r=0;r<slice.count;++r) std::cout<<" x/y="<<slice.road[r].road_x<<'/'<<slice.road[r].screen_y/65536.0;
+                                std::cout<<'\n';
+                            }
+                        }
+                        for(const int32_t logical_row:terrain_sweep?std::vector<int32_t>{150,170,190,210,230}:std::vector<int32_t>{170}) {
+                        const int32_t row=logical_row*65536;
                         for(size_t n=1;n<slices.size();++n) {
                             const auto& near=slices[n-1]; const auto& far=slices[n];
                             const int r=near.own, f=far.own;
@@ -179,37 +219,40 @@ int main(int argc, char** argv) {
                             ++lane_probes;
                             // One-row tolerance for floor-mapped strip boundaries.
                             for(int dx=-2;dx<=2;++dx)
-                                if(!pavement.count(frame.row(340)[x+dx]) &&
-                                   !pavement.count(frame.row(339)[x+dx]) &&
-                                   !pavement.count(frame.row(341)[x+dx])) {
+                                if(!pavement.count(frame.row(logical_row*2)[x+dx]) &&
+                                   !pavement.count(frame.row(logical_row*2-1)[x+dx]) &&
+                                   !pavement.count(frame.row(logical_row*2+1)[x+dx])) {
                                     ++covered_lanes;
-                                    if(SDL_getenv("RR_LIVE_SPLIT_TRACE")) {
+                                    if(SDL_getenv("RR_LIVE_SPLIT_TRACE") && covered_lanes<20) {
                                         rr::Framebuffer diagnostic(640,480);
                                         const rr::DrawNode* last=nullptr;
                                         for(const auto& node:nodes) {
-                                            diagnostic.row(340)[x+dx]=255;
+                                            diagnostic.row(logical_row*2)[x+dx]=255;
                                             rr::render_nodes(diagnostic,{node},rr::view_mode(true),16);
-                                            if(diagnostic.row(340)[x+dx]!=255) last=&node;
+                                            if(diagnostic.row(logical_row*2)[x+dx]!=255) last=&node;
                                         }
                                         if(last) {
                                             std::cout << "last writer " << (last->texture?last->texture->name:"flat")
-                                                      << " color=" << int(frame.row(340)[x+dx]) << " dx=" << dx;
+                                                      << " color=" << int(frame.row(logical_row*2)[x+dx]) << " dx=" << dx;
                                             for(const auto& point:last->view_points)
                                                 std::cout << " (" << point.x/65536.0 << ',' << point.y/65536.0 << ')';
                                             std::cout << '\n';
                                         }
                                     }
                                     std::cout << "covered lane branch=" << int(branch) << " q=" << q/256.0
-                                              << " x=" << x << '\n';
+                                              << " y=" << logical_row << " x=" << x << " camera_pos=" << pos
+                                              << " camera_x=" << game.race().camera_x() << " height=" << camera.height << '\n';
                                     break;
                                 }
                             break;
+                        }
                         }
                         check(game.race().rng_state()==rng,"live split rendering preserves simulation RNG");
                         size_t changed=0;
                         for(int y=0;y<100;++y) for(int x=0;x<640;++x)
                             changed+=frame.row(y)[x]!=sky.row(y)[x];
                         if(changed>max_sky) {
+                            if(terrain_sweep && changed>30000) std::cout<<"large sky change q="<<q/256.0<<" pixels="<<changed<<"\n";
                             max_sky=changed;
                             if(const char* prefix=SDL_getenv("RR_LIVE_SPLIT_DUMP")) {
                                 std::vector<uint8_t> rgba(640*480*4);
@@ -231,6 +274,77 @@ int main(int argc, char** argv) {
             }
             SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
             return failures ? 1 : 0;
+        }
+        if(argc>1 && std::string(argv[1])=="--actor-placement") {
+            rr::Game game; game.config.course="NAPA"; game.config.opponents=0;
+            game.depth=rr::read_depth_table(exe); game.load_course(assets,exe); game.restart();
+            for(size_t i=1;i<game.race().riders().size();++i) game.race().riders()[i].parked=true;
+            auto traffic=std::move(game.instance.traffic);
+            auto pedestrians=std::move(game.instance.pedestrians);
+            auto& me=game.race().riders()[0];
+            rr::capture_view(game.view_drawn,game.race(),nullptr);
+            const auto camera_position=game.race().camera_position();
+            const auto live=(camera_position&~255u)+16*256+48;
+            const auto drawn=(camera_position&~255u)+9*256+64;
+            me.bike.i32(0x1c)=int32_t(live);
+            game.view_drawn.actors[0].position_q8=drawn; game.view_ready=true;
+            const auto slices=rr::project_road(game.render_route(),camera_position,game.blend_camera(),game.depth);
+            std::vector<rr::DrawNode> drawn_nodes, wrong_slice;
+            for(size_t n=1;n<slices.size();++n) for(bool back:{false,true}) {
+                auto nodes=game.rider_nodes(slices[n-1],slices[n],0,240*65536,back);
+                if(slices[n-1].sample==(drawn>>8)) drawn_nodes.insert(drawn_nodes.end(),nodes.begin(),nodes.end());
+                else wrong_slice.insert(wrong_slice.end(),nodes.begin(),nodes.end());
+            }
+            check(!drawn_nodes.empty() && wrong_slice.empty(),"drawn rider stays in its interpolated sample across a seven-sample live update");
+            game.view_ready=false; me.bike.i32(0x1c)=int32_t(drawn);
+            std::vector<rr::DrawNode> expected;
+            for(size_t n=1;n<slices.size();++n) for(bool back:{false,true}) {
+                auto nodes=game.rider_nodes(slices[n-1],slices[n],0,240*65536,back);
+                expected.insert(expected.end(),nodes.begin(),nodes.end());
+            }
+            bool same=expected.size()==drawn_nodes.size();
+            for(size_t n=0;same && n<expected.size();++n)
+                for(size_t k=0;k<4;++k) same &= expected[n].view_points[k].x==drawn_nodes[n].view_points[k].x &&
+                    expected[n].view_points[k].y==drawn_nodes[n].view_points[k].y;
+            check(same,"interpolated actor projection matches an actor physically placed at that pose");
+            me.crash_active=true;
+            me.bike_slice_present=false;
+            me.half_slice_present=true;
+            rr::ViewState visibility;
+            rr::capture_view(visibility,game.race(),nullptr);
+            check(!visibility.actors[0].visible && visibility.actors[1].id==1000 && visibility.actors[1].visible,
+                  "bike and crash body retain separate physical slice visibility");
+            me.parked=true;
+            rr::capture_view(visibility,game.race(),nullptr);
+            check(!visibility.actors[0].visible && !visibility.actors[1].visible,
+                  "parked bike and crash body are both invisible");
+            for(size_t n=1;n<slices.size();++n)
+                check(game.rider_nodes(slices[n-1],slices[n],0,240*65536,false).empty(),"parked riders with disabled draw callbacks stay invisible");
+            size_t fence_cases=0;
+            const auto& route=game.race().route();
+            for(uint32_t sample=50;sample+40<route.size() && fence_cases<4;++sample) {
+                const auto& rs=route[sample];
+                if(rs.dual || rs.path.event_type!=5 || (rs.path.event_parameters[2]&3)!=3) continue;
+                const rr::Camera camera{(rs.path.right-rs.path.left)/2,150};
+                const auto road=rr::project_road(route,sample*256+128,camera,game.depth);
+                const auto nodes=game.scene()->draw_nodes(route,road,camera,game.depth,
+                    [&](const rr::RoadSlice& near,const rr::RoadSlice&,int,int32_t,bool back,int32_t low,int32_t high) {
+                        if(near.sample!=sample || back) return std::vector<rr::DrawNode>{};
+                        rr::DrawNode marker; marker.flat_index=low==-10000?231:high==10000?233:232;
+                        return std::vector<rr::DrawNode>{marker};
+                    });
+                size_t inside=nodes.size(), last_rail=0, rails=0;
+                for(size_t n=0;n<nodes.size();++n) {
+                    if(nodes[n].flat_index==232) inside=n;
+                    if(nodes[n].texture && nodes[n].texture->name.rfind("RRRAIL",0)==0) { ++rails; last_rail=n; }
+                }
+                if(!rails) continue;
+                check(inside<nodes.size() && inside>last_rail,"fences behind an inside rider are dispatched before that rider");
+                ++fence_cases;
+            }
+            check(fence_cases==4,"four imported fence sections exercise original lateral ordering");
+            SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
+            return failures?1:0;
         }
         if (argc > 1 && std::string(argv[1]) == "--rider-reactions") {
             rr::Game duel;

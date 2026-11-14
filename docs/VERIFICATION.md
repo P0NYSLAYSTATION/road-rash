@@ -1,5 +1,48 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 14, 2026 — terrain parity milestone
+
+The owner's continuing build/push/release authorization applies. The earlier
+claim that fresh authorization was required was mistaken and is superseded.
+
+- Full optimized build succeeds: `build/render-milestone-full-build2.log`.
+  The first full build exposed an unconverted pedestrian ActorEmitter callback;
+  it now receives and applies the original lateral ranges.
+- `build/render-milestone-whole-sweep2.log`: both complete Napa branch sweeps
+  pass,6,134 frames each;24,847+25,368=50,215 lane probes,zero covered lanes.
+  The imported route extends beyond the finish, so this posed diagnostic now
+  disables finish handling and collision sources and asserts an unchanged
+  chase distance. This is terrain integration coverage, not a simulation replay.
+- Seven complete original component windows compare exact native terrain points,
+  materials, flips (irrelevant solid-colour texture flips normalized), polygon
+  counts and order. Hiway197,Canyn282,City226,Medly244,Napa143 nodes, and Napa
+  right entries486/275:zero missing/extra/order differences. Exact original
+  world inputs and band/countdown/family state are imported; projected vertices
+  are independently generated. This is component rendering, not native race
+  construction acceptance. Registered `oracle-terrain-window-*` and
+  `oracle-terrain-split-*` cases also check fresh ground-query parity.
+- `build/{canyn,city,medly,napa}-settled-800-20261114-raster.log`: all original
+  complete display-list nodes rendered,zero unknown textures/differing pixels.
+  Includes actors/scenery from the ORIGINAL list; it does not yet verify native
+  actor/scenery list construction.
+- `build/render-milestone-focused-tests.log`:43/44 pass; cache test crashes on
+  its obsolete presentation-buffer read after retained-world conversion. Fixed
+  to inspect world_rgb, compare only horizon rows and verify lower world rows
+  survive untouched. `build/render-cache-contract.log` passes all12 cases.
+  Final registered original/cache gate: `build/render-milestone-original-gate.log`.
+- `build/render-milestone-five-finishes.json`: strict whole-race acceptance=true,
+  five passes,zero skips/known divergences/failures,143,764 identical ticks
+  including RNG from one anchor per race. Hiway14,084,Napa29,055,Canyn29,620,
+  City33,819,Medly seed2 37,186. No reanchor or golden changes.
+
+The old cross-course diagnostic mismatches were incomplete flush capture and
+unserviced asynchronous MSRR loads during accelerated posing. All seven flush
+sites are now covered; posed traversal settles the original resource worker.
+Neither mechanism is used to alter simulation acceptance. Remaining work:
+full native scenery/actor list construction, multi-frame pixel acceptance and
+broader course/level/branch rendering coverage. Menu/widescreen-only parity excluded.
+
+
 ## November 12, 2026 — offline Windows repair gate
 
 `build/offline-parity-final-build.log` and

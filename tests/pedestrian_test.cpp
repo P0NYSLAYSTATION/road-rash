@@ -553,12 +553,14 @@ Summary natural_race(const Fixture& f, const char* frame_path) {
                 const auto camera = race->camera();
                 const auto slices = rr::project_road(route, race->camera_position(), camera, f.depths);
                 auto actors = [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road,
-                                  int32_t ceiling, bool back) {
+                                  int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) {
                     std::vector<rr::DrawNode> nodes;
                     if (road != near.own) return nodes;
                     for (const auto& q : pedestrians->pool()) {
                         const uint32_t pos = uint32_t(q.body.bike.i32(0x1c));
                         if (!q.active || (pos >> 8) != near.sample || ((pos & 255) >= 128) != back) continue;
+                        const int32_t lateral=q.body.bike.i32(0x28)/256;
+                        if(lateral<lateral_min || lateral>=lateral_max) continue;
                         if (auto node = rr::pedestrian_node(q, near, far, road, route.at(near.sample), camera,
                                                             f.depths, ceiling))
                             nodes.push_back(*node);

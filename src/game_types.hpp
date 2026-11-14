@@ -129,7 +129,7 @@ struct Game {
     void load_course(const Assets& a, const std::vector<uint8_t>& exe);
     void restart();
     std::vector<DrawNode> rider_nodes(const RoadSlice& near, const RoadSlice& far, int road, int32_t ceiling,
-                                      bool back) const;
+                                      bool back, int32_t lateral_min = INT32_MIN, int32_t lateral_max = INT32_MAX) const;
     void tick(uint32_t controls);
     void present_online(const RaceInstance&, int seat);
 };

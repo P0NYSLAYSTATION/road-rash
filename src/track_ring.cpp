@@ -550,6 +550,7 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
     stored.position = ring_q8;
     stored.closed = 0;
     stored.countdown = int8_t(w.countdown);
+    stored.bands = {4,4};
     stored.count = w.dual ? 2 : 1;
     auto& previous = shoulders_[size_t(((uint32_t(ring_q8) >> 8) - 1) & 127)];
     //00454c80: collapsing a committed split leaves the discarded half's
@@ -605,7 +606,7 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
             if (path.marking_flags & 0x40) terrain[h].type = 3;
         }
         const auto raw = terrain;
-        adjust_split_terrain(terrain[0], paths[0], terrain[1], paths[1],
+        stored.bands = adjust_split_terrain(terrain[0], paths[0], terrain[1], paths[1],
                              w.x_sep, w.countdown, windows_->at(w.window).threshold);
         stored.edges[0][1] = w.halves[0].offset + paths[0].right + paths[0].shoulder_right;
         stored.edges[1][0] = w.halves[1].offset - paths[1].left - paths[1].shoulder_left;

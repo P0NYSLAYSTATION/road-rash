@@ -88,7 +88,7 @@ int32_t terrain_height(const TerrainSlice& t, const PathSample& path, const Terr
     if (!span) throw std::runtime_error("Degenerate terrain ground segment");
     return add(mul(sub(outer_height, inner_height), sub(x, inner)) / span, inner_height);
 }
-void adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& right, PathSample& rp,
+std::array<int8_t,2> adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& right, PathSample& rp,
                           int32_t separation, int32_t countdown, int32_t threshold) {
     if (countdown > 0) {
         if (left.type == 4 || countdown > 2) {
@@ -109,9 +109,9 @@ void adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& righ
         }
         lp.shoulder_right = mul(a, factor) >> 16;
         rp.shoulder_left = mul(b, factor) >> 16;
-        return;
+        return {4,4};
     }
-    if (left.type != 4) return;
+    if (left.type != 4) return {4,4};
     using Point = std::array<int32_t, 2>;
     std::array<Point, 4> a{}, b{};
     a[0] = {add(lp.right, lp.shoulder_right), 0};
@@ -145,6 +145,7 @@ void adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& righ
         right.points[band * 2] = b[band + 1];
         right.points[band * 2][0] = sub(right.points[band * 2][0], separation);
     }
+    return joined ? std::array<int8_t,2>{int8_t(i),int8_t(j)} : std::array<int8_t,2>{4,4};
 }
 WallProfile wall_profile(const TerrainSlice& t, const PathSample& path, bool tunnel) {
     WallProfile w;
