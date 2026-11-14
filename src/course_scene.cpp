@@ -566,7 +566,9 @@ void CourseScene::draw_horizon(Framebuffer& fb, int32_t scroll, int32_t logical_
     if (s < 1 || fb.height() != 480 * s || fb.width() != logical_width * 2 * s)
         throw std::runtime_error("Horizon needs a wide*2s x 480s surface");
     const int32_t start = int32_t(((-int64_t(scroll) % 720) + 720) % 720);
-    fb.clear(0);
+    // 00443a80 -> 0044c800 blits the horizon only. It does not clear the
+    // lower backbuffer: steep descents can leave that region unwritten.
+    // The caller retains the clean world image underneath the dashboard.
     // Centre the 720-wide source: the 4:3 picture is the centre crop.
     const int xoff = (720 - logical_width * 2) / 2;
     for (int y = 0; y < 320 * s; ++y)

@@ -1,6 +1,7 @@
 #include "test_assets.hpp"
 // Plan 32 A/B: exercise the real screen loop with controlled frame times.
 #include "race_screen.hpp"
+#include "race_caches.hpp"
 #include "race_helpers.hpp"
 #include "native_screens.hpp"
 #include "pe_strings.hpp"
@@ -29,7 +30,7 @@ SDL_Event event(Uint32 type) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     int failures = 0;
     auto check = [&](bool ok, const char* message) {
         if (!ok) {
@@ -60,9 +61,61 @@ int main() {
         display.renderer = renderer;
         display.settings = &settings;
         rr::Game game;
+        const bool crest_canvas = argc > 1 && std::string(argv[1]) == "--crest-canvas";
+        if (crest_canvas) game.config.course = "HIWAY";
         game.depth = rr::read_depth_table(exe);
         game.load_course(assets, exe);
         game.restart();
+        if (crest_canvas) {
+            game.countdown = 0;
+            game.assets.hud = std::make_unique<rr::Hud>(assets, exe, game.bike, game.metric);
+            const auto& route = game.race().route();
+            const auto camera = game.race().camera();
+            const auto slices = rr::project_road(route, 3477 * 256 + 255, camera, game.depth);
+            const auto nodes = game.assets.scene->draw_nodes(route, slices, camera, game.depth);
+            rr::Framebuffer a(640, 480), b(640, 480);
+            a.clear(17); b.clear(231);
+            rr::render_nodes(a, nodes, rr::view_mode(true), 16);
+            rr::render_nodes(b, nodes, rr::view_mode(true), 16);
+            rr::CourseCanvas canvas;
+            for (bool colour : {false, true}) {
+                game.enhancements.full_colour = colour;
+                // Initialize the real canvas and its native texture storage.
+                canvas.draw(renderer, game, slices, 1, 1);
+                for (int mode : {0, 1, 2}) {
+                    game.mini_dash = mode;
+                    canvas.world_frame.clear(73);
+                    canvas.frame.clear(231); // simulate stale dashboard pixels
+                    canvas.world_rgb.clear(0xff227755);
+                    canvas.rgb.clear(0xffee1122);
+                    canvas.draw(renderer, game, slices, 1, 1);
+                    size_t retained = 0;
+                    bool clean = true;
+                    for (int y = 400; y < 480; ++y)
+                        for (int x = 0; x < 640; ++x) {
+                            if (a.row(y)[x] == b.row(y)[x]) continue;
+                            ++retained;
+                            if (colour) {
+                                clean &= canvas.world_rgb.row(y)[x] == 0xff227755;
+                                if (mode == 2) clean &= canvas.rgb.row(y)[x] == 0xff227755;
+                            } else {
+                                clean &= canvas.world_frame.row(y)[x] == 73;
+                                if (mode == 2) clean &= canvas.frame.row(y)[x] == 73;
+                            }
+                        }
+                    check(clean, "descent retains clean world, excluding HUD and post processing");
+                    check(retained > 1000, "live canvas regression exercises the downhill hole");
+                    std::cout << (colour ? "RGB" : "indexed") << " dash=" << mode
+                              << " retained ground pixels=" << retained << '\n';
+                }
+            }
+            canvas.clear();
+            canvas.workers.reset();
+            SDL_DestroyRenderer(renderer);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return failures ? 1 : 0;
+        }
         check(game.race().riders().size() == 15, "screen builds player plus fourteen opponents");
         const auto names = rr::frontend_strings(rr::read_string_resources(assets.read("TEXT/ENU.DLL")));
         game.rider_names = rr::race_rider_names(exe, game.config, game.race(), names, game.player_name);

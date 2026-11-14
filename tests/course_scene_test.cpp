@@ -32,6 +32,48 @@ int main(int argc, char** argv) {
         }
         const auto exe = assets.read("ROADRASH.EXE");
         const auto depths = rr::read_depth_table(exe);
+        const bool crest_only = argc > 1 && std::string(argv[1]) == "--crest-regression";
+        {
+            // Hiway's steep downhill at 3477:255 leaves 26,528 lower pixels
+            // unwritten at camera height 150. The original keeps its backbuffer;
+            // clearing it each frame produced a full-width black flash.
+            for (const auto& [name, sample] : {std::pair{"HIWAY", 3477u}, std::pair{"CITY", 705u}}) {
+                const auto crs = rr::read_course(assets.read(std::string("DATA/COURSES/") + name + ".CRS"));
+                const rr::CourseScene scan(assets, exe, crs, name);
+                const auto route = rr::make_route(crs, false);
+                rr::Framebuffer retained(640, 480), alternate(640, 480), cleared(640, 480);
+                retained.clear(17); alternate.clear(231);
+                // Seed both backbuffers from the flat starting grid, as a race
+                // does before reaching the downhill section.
+                const auto start = rr::project_road(route, 49 * 256, {0, 150}, depths);
+                const auto start_nodes = scan.draw_nodes(route, start, {0, 150}, depths);
+                rr::render_nodes(retained, start_nodes, rr::view_mode(true), 16);
+                rr::render_nodes(alternate, start_nodes, rr::view_mode(true), 16);
+                size_t preserved = 0;
+                for (uint32_t pos = (sample - 2) * 256; pos <= (sample + 1) * 256; pos += 1) {
+                    const auto slices = rr::project_road(route, pos, {0, 150}, depths);
+                    const auto nodes = scan.draw_nodes(route, slices, {0, 150}, depths);
+                    scan.draw_horizon(retained, 0);
+                    scan.draw_horizon(alternate, 0);
+                    cleared.clear(0);
+                    scan.draw_horizon(cleared, 0);
+                    rr::render_nodes(retained, nodes, rr::view_mode(true), 16);
+                    rr::render_nodes(alternate, nodes, rr::view_mode(true), 16);
+                    rr::render_nodes(cleared, nodes, rr::view_mode(true), 16);
+                    for (int y = 320; y < 480; ++y)
+                        for (int x = 0; x < 640; ++x) {
+                            if (retained.row(y)[x] != alternate.row(y)[x])
+                                throw std::runtime_error(std::string(name) + ": persistent ground did not cover initial clear");
+                            preserved += retained.row(y)[x] != cleared.row(y)[x];
+                        }
+                }
+                if (!preserved) throw std::runtime_error("Crest regression did not exercise retained ground");
+                std::cout << name << " descent: 769 adjacent poses, " << preserved
+                          << " pixels preserved instead of cleared to black\n";
+            }
+        }
+        if (crest_only) return 0;
+
         {
             // Reported City gap at ~00:38: left lanes grow from 2 to 2+21/256
             // at sample 159. The right lane exposed background scenery because
@@ -178,55 +220,11 @@ int main(int argc, char** argv) {
             }
             std::cout << name << ": " << course_views << " views built\n";
         }
-        // Mountain (terrain type 1) sides: 0x0040dfd0 walls and 0x0040d030
-        // cliffs with water. Unported, these sections left the clear colour
-        // below the 320-row horizon beside the road (Pacific Highway's first
-        // section). Palette zero is also valid opaque terrain: the original
-        // canyn-start-boundary-pose fixture has7176 black pixels below row320,
-        // exactly as native. Render against two clear values to detect actual
-        // unwritten pixels, independently of the terrain's palette indices.
-        for (const char* name : {"HIWAY", "MEDLY", "CANYN"}) {
-            const auto other = rr::read_course(assets.read(std::string("DATA/COURSES/") + name + ".CRS"));
-            const rr::CourseScene other_scene(assets, exe, other, name);
-            const auto route = rr::make_route(other, false);
-            size_t views_checked = 0, bad_views = 0, worst = 0;
-            for (const int32_t width : {320, 426}) {
-                rr::Framebuffer frame(width * 2, 480), alternate(width * 2, 480);
-                for (uint32_t p = 0; p + 40 < route.size(); p += 11) {
-                    if (other_scene.terrain(route[p].section, route[p].local).type != 1) continue;
-                    const auto slices = rr::project_road(route, p * 256 + 128, {0, 150}, depths, width);
-                    frame.clear(0);
-                    alternate.clear(255);
-                    other_scene.draw_horizon(frame, 0, width);
-                    other_scene.draw_horizon(alternate, 0, width);
-                    auto mode = rr::view_mode(true);
-                    mode.surface_width = mode.display_width = width * 2;
-                    const auto nodes = other_scene.draw_nodes(route, slices, {0, 150}, depths, {}, width);
-                    rr::render_nodes(frame, nodes, mode, 16);
-                    rr::render_nodes(alternate, nodes, mode, 16);
-                    size_t zeros = 0, untouched = 0;
-                    for (int y = 320; y < 480; ++y)
-                        for (int x = 0; x < frame.width(); ++x) {
-                            zeros += frame.row(y)[x] == 0;
-                            untouched += frame.row(y)[x] != alternate.row(y)[x];
-                        }
-                    if (zeros) std::cout << name << " sample=" << p << " width=" << width
-                                         << " black=" << zeros << " untouched=" << untouched << '\n';
-                    ++views_checked;
-                    worst = std::max(worst, untouched);
-                    if (untouched != 0) {
-                        ++bad_views;
-                        std::cout << name << " mountain gap sample=" << p << " width=" << width
-                                  << " untouched=" << untouched << '\n';
-                    }
-                }
-            }
-            std::cout << name << " mountain views: " << views_checked << ", " << bad_views
-                      << " with unwritten pixels below the horizon, worst " << worst << " pixels\n";
-            if (!views_checked || bad_views)
-                throw std::runtime_error(std::string(name) +
-                                         ": mountain terrain left the clear colour below the horizon");
-        }
+        // The old independent-pose mountain coverage scan called draw_horizon
+        // on both differently-cleared frames. That function cleared both to zero,
+        // making its zero-unwritten result tautological. Steep descents genuinely
+        // leave pixels untouched; the adjacent-pose regression above tests the
+        // original backbuffer-preservation behavior instead.
         // Tunnels (mountain samples with marking flag 0x40, 0x00454240 type
         // 3): 0x0040dac0 arches, 0x0040d420 portals. Before they were ported
         // the sky showed through. The original CANYN capture

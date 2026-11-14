@@ -4835,3 +4835,12 @@ Restored original inactive/active boost-pip artwork and recharge indication in
 full/small, low/high HUD modes. A loaded level 5 race verifies visible pips,
 actual boost consumption and recharge cycling through the real renderer.
 See [recovered behavior and evidence](agent-handoffs/nitro-hud-20261113.md).
+
+
+## Hill flicker and lower backbuffer preservation
+
+Reproduced unwritten lower pixels on steep Hiway/City descents. Restored the
+original horizon-only redraw and retain clean world buffers separately from
+HUD/post processing. Adjacent-pose and indexed/RGB canvas regressions pass.
+The previous mountain write-coverage claim was based on an invalid comparison
+and is superseded. See [original evidence and focused checks](agent-handoffs/hill-backbuffer-20261114.md).

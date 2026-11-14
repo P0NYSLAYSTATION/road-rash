@@ -56,6 +56,10 @@ struct SpriteCache {
 
 struct CourseCanvas {
     Framebuffer frame{640, 480};
+    // Preserve the world backbuffer separately from HUD/post processing.
+    // The original horizon blit leaves rows below its image untouched.
+    Framebuffer world_frame{640, 480};
+    FramebufferRgb world_rgb;
     std::vector<uint8_t> rgba = std::vector<uint8_t>(640 * 480 * 4);
     int scale_w = 640, scale_h = 480; // plan 19 Task 4: 640s x 480s surface
     int wide_w = 320;                 // plan 21 Task 8: logical width of the surface
@@ -72,6 +76,8 @@ struct CourseCanvas {
         scale_w = logical_width * 2 * s;
         scale_h = 480 * s;
         frame = Framebuffer(scale_w, scale_h);
+        world_frame = Framebuffer(scale_w, scale_h);
+        world_rgb = FramebufferRgb();
         rgba.assign(size_t(scale_w) * size_t(scale_h) * 4, 0);
         clear();
     }
@@ -106,11 +112,12 @@ struct CourseCanvas {
         }
         return shown;
     }
-    // Plan 32 E: every horizon pixel is converted, including the zero-filled
-    // lower rows. Storage is retained across frames and rebuilt only on resize.
+    // Convert only the horizon, retaining the clean RGB world below it.
+    // Converting zero-filled scratch rows used to reintroduce the hill flash.
     void draw_horizon_rgb(const CourseScene& scene, const Palette& palette, int32_t scroll,
                           int32_t logical_width) {
-        if (rgb.width() != scale_w || rgb.height() != scale_h) rgb.resize(scale_w, scale_h);
+        if (world_rgb.width() != scale_w || world_rgb.height() != scale_h)
+            world_rgb.resize(scale_w, scale_h);
         scene.draw_horizon(frame, scroll, logical_width);
         uint32_t argb[256];
         for (int i = 0; i < 256; ++i) {
@@ -119,7 +126,8 @@ struct CourseCanvas {
         }
         rows([&](int y) {
             const uint8_t* src = frame.row(y);
-            uint32_t* dst = rgb.row(y);
+            if (y >= 320 * (scale_h / 480)) return;
+            uint32_t* dst = world_rgb.row(y);
             for (int x = 0; x < scale_w; ++x) dst[x] = argb[src[x]];
         });
     }
@@ -209,12 +217,13 @@ struct CourseCanvas {
             }
             // Plan 21 Task 5: fog colour from the horizon's own bottom rows
             // (user's art, computed at runtime); sky/horizon exempt from fog.
-            const uint32_t fog_rgb = fog_colour(rgb.row(0), scale_w, scale_h);
+            const uint32_t fog_rgb = fog_colour(world_rgb.row(0), scale_w, 320 * (scale_h / 480));
             {
                 ProfileScope ps(profile, FrameProfile::raster);
-                render_nodes_rgb_fog(rgb, nodes, view_mode_wide(s, wide), 16, game.palette, game.enhancements,
+                render_nodes_rgb_fog(world_rgb, nodes, view_mode_wide(s, wide), 16, game.palette, game.enhancements,
                                      *workers, fog_rgb);
             }
+            rgb = world_rgb;
             // Grade post-pass (identity when grade == none).
             if (game.enhancements.grade != Grade::none) {
                 ProfileScope ps(profile, FrameProfile::grade);
@@ -303,15 +312,16 @@ struct CourseCanvas {
         } else {
             {
                 ProfileScope ps(profile, FrameProfile::horizon);
-                game.assets.scene->draw_horizon(frame, game.race().horizon_scroll(), wide);
+                game.assets.scene->draw_horizon(world_frame, game.race().horizon_scroll(), wide);
             }
             // The dashboard stays a centred 4:3 image (plan 21 Task 8); side
             // panels are drawn from its edge columns below.
             {
                 ProfileScope ps(profile, FrameProfile::raster);
-                rr::render_nodes_threaded(frame, nodes, view_mode_wide(s, wide), 16, *workers,
+                rr::render_nodes_threaded(world_frame, nodes, view_mode_wide(s, wide), 16, *workers,
                                           game.enhancements.perspective);
             }
+            frame = world_frame;
             if (need_dash) {
                 // Plan 19 Task 8: the dashboard composes at the race scale. Its
                 // RgbImage pixels are palette-mapped into the indexed frame.
