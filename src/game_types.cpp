@@ -39,6 +39,12 @@ void Game::load_course(const Assets& a, const std::vector<uint8_t>& exe) {
 
 void Game::restart() {
     instance = build_race(assets, exe_, config);
+    // 004163f5 / 00416401: the original runs two zero-input driver
+    // steps before the starting-grid fade/countdown is visible. These settle
+    // rider placement against the loaded ring and publish the chase camera.
+    // Deferring them until GO exposed the placement correction as a camera snap.
+    race().step(0);
+    race().step(0);
     const auto& actors_lib = assets.actors->library();
     actor_states.assign(instance.race->riders().size(), {});
     previous_attacks.assign(instance.race->riders().size(), 0);

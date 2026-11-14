@@ -55,6 +55,35 @@ int main(int argc, char** argv) {
     try {
         rr::Assets assets(root, rr::test::media_root());
         const auto exe = assets.read("ROADRASH.EXE");
+        if (argc > 1 && std::string(argv[1]) == "--start-camera") {
+            for (const char* name : {"CITY", "HIWAY", "MEDLY", "NAPA", "CANYN"})
+                for (int level : {0, 4}) {
+                    rr::Game probe;
+                    probe.config.course = name;
+                    probe.config.level = level;
+                    probe.depth = rr::read_depth_table(exe);
+                    probe.load_course(assets, exe);
+                    probe.restart();
+                    check(probe.race().ticks() == 2, "starting grid runs both original setup steps");
+                    const auto initial = probe.race().camera();
+                    while (probe.countdown) probe.tick(0);
+                    const auto before = probe.race().camera();
+                    const auto before_pos = probe.race().camera_position();
+                    probe.tick(0);
+                    const auto after = probe.race().camera();
+                    check(initial.x == before.x && initial.height == before.height,
+                          "countdown keeps the settled grid camera");
+                    check(before.x == after.x && before.height == after.height &&
+                              before_pos == probe.race().camera_position(),
+                          "zero-input control handoff does not snap the camera");
+                    std::cout << name << " L" << level + 1 << " camera " << initial.x << ',' << initial.height
+                              << " -> " << before.x << ',' << before.height << " -> " << after.x << ',' << after.height
+                              << " position " << before_pos << " -> " << probe.race().camera_position()
+                              << " lateral " << probe.race().bike().i32(0x28) << '\n';
+                }
+            SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
+            return failures ? 1 : 0;
+        }
         rr::Settings settings;
         rr::DisplayDriver display;
         display.window = window;
@@ -176,6 +205,7 @@ int main(int argc, char** argv) {
             game.race().riders() = saved;
         }
         game.countdown = 0;
+        const int start_ticks = game.race().ticks();
         rr::RaceOptions options;
         options.custom_keys = true; // zero bindings isolate the host keyboard
         options.show_fps = true;
@@ -184,26 +214,26 @@ int main(int argc, char** argv) {
             rr::RaceScreen screen(game, renderer, options, display);
             uint64_t now = 1000000000ull; // deliberately independent of SDL's clock
             screen.iterate(now);
-            check(game.race().ticks() == 0, "first frame establishes its supplied timestamp");
+            check(game.race().ticks() == start_ticks, "first frame establishes its supplied timestamp");
             screen.iterate(now += 1000000);
-            check(game.race().ticks() == 0, "zero-tick frame");
+            check(game.race().ticks() == start_ticks, "zero-tick frame");
             screen.iterate(now += 16000000);
-            check(game.race().ticks() == 1, "one-tick frame");
+            check(game.race().ticks() == start_ticks + 1, "one-tick frame");
             screen.iterate(now += 34000000);
-            check(game.race().ticks() == 3 && game.view_prev.tick == 2 && game.view_cur.tick == 3,
+            check(game.race().ticks() == start_ticks + 3 && game.view_prev.tick == start_ticks + 2 && game.view_cur.tick == start_ticks + 3,
                   "two-tick catch-up snapshots remain adjacent");
             screen.iterate(now += 67000000);
-            check(game.race().ticks() == 7 && game.view_prev.tick == 6 && game.view_cur.tick == 7,
+            check(game.race().ticks() == start_ticks + 7 && game.view_prev.tick == start_ticks + 6 && game.view_cur.tick == start_ticks + 7,
                   "four-tick catch-up snapshots remain adjacent");
             screen.event(event(SDL_EVENT_WINDOW_FOCUS_LOST));
             screen.iterate(now += 60000000000ull);
-            check(game.race().ticks() == 7 && !game.view_ready, "focus loss freezes and clears history");
+            check(game.race().ticks() == start_ticks + 7 && !game.view_ready, "focus loss freezes and clears history");
             screen.event(event(SDL_EVENT_WINDOW_FOCUS_GAINED));
             screen.event(key(SDLK_RETURN));
             screen.iterate(now += 60000000000ull);
-            check(game.race().ticks() == 7, "resume discards elapsed paused time");
+            check(game.race().ticks() == start_ticks + 7, "resume discards elapsed paused time");
             screen.iterate(now += 17000000);
-            check(game.race().ticks() == 8 && game.view_prev.tick == 8 && game.view_cur.tick == 8,
+            check(game.race().ticks() == start_ticks + 8 && game.view_prev.tick == start_ticks + 8 && game.view_cur.tick == start_ticks + 8,
                   "first resumed tick initializes both snapshots");
             screen.event(event(SDL_EVENT_RENDER_DEVICE_RESET));
             check(screen.iterate(now += 17000000), "renderer reset while active remains usable");
@@ -215,7 +245,7 @@ int main(int argc, char** argv) {
             check(game.race().finished(), "fixture reaches an actual race finish");
             screen.event(key(SDLK_RETURN));
             screen.iterate(now += 17000000);
-            check(game.race().ticks() == 0 && game.countdown == rr::countdown_ticks,
+            check(game.race().ticks() == 2 && game.countdown == rr::countdown_ticks,
                   "restart rebuilds and resets countdown");
             // 0x00415f70 race-start fade: 63 uploads at 14 ms block the race,
             // the 64th callback releases it and the loop clock starts then.
@@ -332,10 +362,21 @@ int main(int argc, char** argv) {
                 check(boost_game.race().nitro_charges() == uses - 1 && used.nitro_pips == uses - 1,
                       "using nitro in a level 5 race removes one displayed pip");
                 screen.iterate(now);
+                // Activation and accumulator drain run at different points in
+                // the original think. Hold boost long enough to actually spend
+                // charge before testing its recharge display.
+                for (int tick = 0; tick < 8; ++tick)
+                    boost_game.tick(rr::control_accelerate | rr::control_nitro);
                 boost_game.tick(0); // stop boost while the charge is below its maximum
                 const auto start = boost_game.assets.hud->state(boost_game.race(), "Player", boost_game.rider_names);
                 const auto next = boost_game.assets.hud->state(boost_game.race(), "Player", boost_game.rider_names);
-                check(start.nitro_pips == 0 && next.nitro_pips == 1,
+                check(!(boost_game.race().bike().u8(0xc0) & 0x20) &&
+                          boost_game.race().riders()[0].nitro_charge / 256 < boost_game.race().nitro().max,
+                      "spent boost is inactive and recharging");
+                // A screen redraw above also advances the original display
+                // cycle. Check its consecutive modulo sequence, not a presumed
+                // phase at this particular simulation tick.
+                check(next.nitro_pips == (start.nitro_pips + 1) % (boost_game.race().nitro_charges() + 1),
                       "original recharge indicator cycles after a spent boost");
             }
             settings.high_resolution = false;
@@ -382,7 +423,7 @@ int main(int argc, char** argv) {
                 screen.iterate(now);
                 check(settings.mini_dash == 1 && rr::capture_race_frame(renderer).pixels == small.pixels,
                       "F10 returns to the small HUD without advancing simulation");
-                check(game.race().ticks() == 0, "dashboard changes do not advance gameplay");
+                check(game.race().ticks() == 2, "dashboard changes do not advance gameplay");
             }
             game.assets.hud = std::move(previous_hud);
             game.palette = previous_palette;
@@ -443,11 +484,12 @@ int main(int argc, char** argv) {
                 game.countdown = 0;
                 game.enhancements.interpolate = interpolate;
                 rr::RaceScreen screen(game, renderer, options, display);
+                const int initial_ticks = game.race().ticks();
                 constexpr uint64_t start = 1000000000ull;
                 screen.iterate(start);
                 for (uint64_t frame = 1; frame <= hz / 3; ++frame)
                     screen.iterate(start + frame * 1000000000ull / hz + 1);
-                check(game.race().ticks() == 20, "30/60/120 FPS advance exactly 20 ticks");
+                check(game.race().ticks() == initial_ticks + 20, "30/60/120 FPS advance exactly 20 ticks");
                 if (!interpolate && hz == 30) {
                     reference = game.race().bike().m;
                     reference_rng = game.race().rng_state();

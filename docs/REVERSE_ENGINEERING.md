@@ -3009,3 +3009,11 @@ original horizon-only redraw and retain clean world buffers separately from
 HUD/post processing. Adjacent-pose and indexed/RGB canvas regressions pass.
 The previous mountain write-coverage claim was based on an invalid comparison
 and is superseded. See [original evidence and focused checks](agent-handoffs/hill-backbuffer-20261114.md).
+
+
+## Starting-grid camera handoff
+
+Restored the two original zero-input setup steps before displaying a local race.
+They settle rider placement and the camera before the countdown, removing the
+first-control-frame lateral snap. All five courses at levels 1 and 5 and the
+related screen/HUD regressions pass. See [original calls and evidence](agent-handoffs/start-camera-20261114.md).
