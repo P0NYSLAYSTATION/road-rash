@@ -4,6 +4,7 @@
 #include "upscale_import.hpp"
 #include "exe_tables.hpp"
 #include "terrain_ground.hpp"
+#include "track_ring.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -59,6 +60,7 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
     if (horizon_.size() != 720 * 320) throw std::runtime_error("Invalid course horizon");
     // 0x00441870: CEL 0x10 (WATER128) is the cliff-foot water template.
     {
+        road_separation_limits_ = read_road_separation_limits(exe);
         const auto global = assets.read("DATA/GLOBAL.RSC");
         for (const auto& entry : read_resources(global))
             if (entry.tag == "CEL " && entry.id == 0x10)
@@ -578,12 +580,14 @@ void CourseScene::draw_horizon(Framebuffer& fb, int32_t scroll, int32_t logical_
 std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& route,
                                               const std::vector<RoadSlice>& slices, const Camera& camera,
                                               const DepthTable& depths, ActorEmitter actors,
-                                              int32_t logical_width) const {
+                                              int32_t logical_width, const TrackRing* ring) const {
     struct Road {
         const PathSample* path;
+        PathSample path_image;
         const TerrainSlice* terrain;
         TerrainSlice terrain_image;
         bool merge_hills = false;
+        bool visible = true;
         int32_t split_countdown = INT32_MIN;
         int inner_bands = 3;
         uint32_t section, local;
@@ -619,8 +623,10 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         int32_t split_countdown = INT32_MIN;
         if (slice.count == 2) {
             size_t start = slice.sample;
-            while (start > 0 && route[start - 1].dual) --start;
-            if (route[start].event == RoadEvent::split) {
+            if (!ring) while (start > 0 && route[start - 1].dual) --start;
+            if (ring && ring->render_sample(int32_t(slice.sample * 256), slice.own))
+                split_countdown = ring->slice_countdown(int32_t(slice.sample * 256));
+            else if (route[start].event == RoadEvent::split) {
                 // 00453b60 measures the first separation exceeding both inner
                 // shoulders plus256, at most80 samples into the split.
                 int32_t threshold = 80;
@@ -635,7 +641,8 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
                 split_countdown = threshold - int32_t(slice.sample - start);
             }
-            if (route[start].event == RoadEvent::merge_window || (split_countdown <= 0 && split_countdown != INT32_MIN)) {
+            if ((!ring && route[start].event == RoadEvent::merge_window) ||
+                (split_countdown <= 0 && split_countdown != INT32_MIN)) {
                 const bool first = sample.half == 0;
                 const auto& p0 = first ? sample.path : sample.other;
                 const auto& p1 = first ? sample.other : sample.path;
@@ -643,10 +650,28 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                                          first ? sample.local : sample.other_local);
                 const auto& t1 = terrain(first ? sample.other_section : sample.section,
                                          first ? sample.other_local : sample.local);
-                if (t0.type == 4 && t1.type == 4)
-                    joined =
-                        merge_hill_profiles(t0, t1, p0.right + p0.shoulder_right, -p1.left - p1.shoulder_left,
-                                            slice.road[1].road_x - slice.road[0].road_x, split_countdown == 0);
+                if (t0.type == 4 && t1.type == 4) {
+                    if (ring) {
+                        // 00454890 already wrote these live ring polylines.
+                        // Recover the collapsed band limits without joining the
+                        // already-joined geometry a second time.
+                        joined = MergeHillProfiles{{t0,t1},{3,3}};
+                        const int32_t separation = sample.x_sep;
+                        const auto left = t0.points[5], right = t1.points[4];
+                        if (left[0] == right[0] + separation && left[1] == right[1]) {
+                            for (int h=0; h<2; ++h)
+                                for (int band=0; band<2; ++band)
+                                    if (joined->terrain[h].points[band*2 + 1-h] ==
+                                        joined->terrain[h].points[5-h]) {
+                                        joined->bands[h] = band+1;
+                                        break;
+                                    }
+                        } else joined->bands = {4,4};
+                    } else
+                        joined = merge_hill_profiles(t0, t1, p0.right + p0.shoulder_right,
+                            -p1.left - p1.shoulder_left, slice.road[1].road_x - slice.road[0].road_x,
+                            split_countdown == 0);
+                }
             }
         }
         for (int r = 0; r < slice.count; ++r) {
@@ -657,6 +682,14 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             road.path = own ? &sample.path : &sample.other;
             road.terrain_image = joined ? joined->terrain[r] : terrain(road.section, road.local);
             road.terrain = &road.terrain_image;
+            // The live ring can lower the inward shoulder at a split. Its
+            // height overlay must reach projection as well as terrain ground.
+            road.path_image = *road.path;
+            if (road.terrain->side_heights) {
+                road.path_image.height_left = (*road.terrain->side_heights)[0];
+                road.path_image.height_right = (*road.terrain->side_heights)[1];
+            }
+            road.path = &road.path_image;
             road.merge_hills = joined.has_value();
             road.split_countdown = split_countdown;
             road.inner_bands = joined ? joined->bands[r] : 3;
@@ -820,6 +853,20 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                     wrap(int64_t(camera.height - y) * scale + 90 * 65536)};
             }
         }
+    // 00444553..004445d0 hides the opposite roadway once its
+    // separation/countdown no longer belongs to the camera's visible window.
+    if (ring && !slices.empty()) {
+        const auto& first = route[slices[0].sample];
+        const int32_t camera_countdown = ring->slice_countdown(int32_t(slices[0].sample*256));
+        for (size_t n=0; n<slices.size(); ++n)
+            if (slices[n].count==2) {
+                const auto& sample = route[slices[n].sample];
+                roads[n][1-slices[n].own].visible = secondary_road_visible(uint8_t(sample.event),
+                    roads[n][0].split_countdown, first.dual, camera_countdown,
+                    roads[0][0].kind==0, sample.x_sep,
+                    road_separation_limits_[std::min(n,size_t(31))]);
+            }
+    }
     std::vector<DrawNode> result;
     auto append = [&](const std::vector<DrawNode>& nodes) {
         result.insert(result.end(), nodes.begin(), nodes.end());
@@ -858,6 +905,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             const auto& b = near.road[r];
             const auto& road = roads[n - 1][close_branch ? closing_half : r];
             const auto& old = roads[n][r];
+            if (!road.visible) continue;
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
             // 0x004547e0 widens the sub-slice's panel grid to its forward
@@ -908,6 +956,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             // 0x0043bef0 draws marked ground (0x0043b970) only for types 0 and 4.
             if ((path.marking_flags & 32) && road.kind != 1 && road.kind != 3)
                 for (int side = 0; side < 2; ++side) {
+                    if (near.count==2 && far.count==2 && side==1-r && road.kind==4) continue;
                     MarkedGroundInput ground;
                     ground.near_edge = {wrap(near.screen_x(r, side ? b.right : b.left)), b.screen_y};
                     ground.far_edge = {wrap(far.screen_x(r, side ? a.right : a.left)), a.screen_y};
@@ -927,8 +976,10 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 append(pending);
                 pending.clear();
             }
-            if (!(path.marking_flags & 32) && road.terrain->type == 4)
+            if (road.terrain->type == 4)
                 for (int side = 0; side < 2; ++side) {
+                    const bool inner = near.count==2 && far.count==2 && side==1-r;
+                    if ((path.marking_flags & 32) && !inner) continue;
                     if (near.count == 2 && far.count == 2 && side == 1 - r && road.split_countdown > 0)
                         continue; // 0043be80 -> 0041d500 -> 0043bb30 flat divider
                     if (visible) {
@@ -953,7 +1004,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                             return material(road.section, road.local, path.side_flags[side], 5, 0, w, h);
                         }));
                     }
-                    if (path.marking_flags & 24) {
+                    if ((path.marking_flags & 24) && !inner) {
                         // 0x0043bef0 type 4, flags 8/16: shoulder followed
                         // by 0x0041d110's cross road, rather than hillside.
                         if (visible) {

@@ -11,6 +11,7 @@
 
 namespace rr {
 class UpscaleCache;
+class TrackRing;
 // A pedestrian family's FAMILIES.RSC category-2 resources, as 0x00440b80
 // loads them: resource 0 RRAN graphics, resource 1 CANS views, and the
 // animation codes 0..6 built from the EXE descriptor tables 0x0046de48,
@@ -66,7 +67,7 @@ class CourseScene {
         std::function<std::vector<DrawNode>(const RoadSlice&, const RoadSlice&, int, int32_t, bool)>;
     std::vector<DrawNode> draw_nodes(const std::vector<RouteSample>& route,
                                      const std::vector<RoadSlice>& slices, const Camera&, const DepthTable&,
-                                     ActorEmitter actors = {}, int32_t logical_width = 320) const;
+                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr) const;
     void draw_horizon(Framebuffer&, int32_t scroll, int32_t logical_width = 320) const;
     const std::vector<SceneryObject>& objects(uint32_t section, uint32_t local) const;
     const AnimationFrame* object_frame(uint32_t section, uint32_t local, const SceneryObject&) const;
@@ -123,6 +124,7 @@ class CourseScene {
     std::vector<FamilyTimeline> family_timelines_;
     std::map<uint32_t, Family> families_;
     RoadMaterials roads_;
+    std::array<int32_t, 32> road_separation_limits_{};
     Cel water_; // GLOBAL.RSC CEL 0x10, cliff-foot water (0x0040d030)
     std::vector<uint8_t> logarithms_, horizon_;
     std::array<RasterPoint, 16> joins_{};

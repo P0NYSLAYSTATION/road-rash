@@ -34,6 +34,7 @@ int32_t blend_heading(int32_t a, int32_t b, uint32_t alpha_q16) {
 void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) {
     v.camera_position_q8 = race.camera_position();
     v.camera = race.camera();
+    v.camera_origin = race.camera_x() - v.camera.x;
     v.camera_route = 0;
     v.tick = uint32_t(race.ticks());
     v.actors.clear();
@@ -83,6 +84,7 @@ void blend_view(ViewState& out, const ViewState& a, const ViewState& b, uint32_t
     out.tick = b.tick;
     out.camera_route = b.camera_route;
     out.camera = b.camera;
+    out.camera_origin = b.camera_origin;
     if (a.camera_route != b.camera_route) {
         out.camera_position_q8 = b.camera_position_q8;
     } else if (uint32_t((b.camera_position_q8 - a.camera_position_q8) & 0xffffffffu) > teleport_q8 &&

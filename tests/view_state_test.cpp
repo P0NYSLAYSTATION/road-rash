@@ -13,6 +13,7 @@ int main() {
     rr::ViewState a, b, out;
     a.camera_position_q8 = 1000;
     b.camera_position_q8 = 1256;
+    b.camera_origin = 250;
     a.actors = {{1, 5000, 0, 0, 0, 0, 0, true}};
     b.actors = {{1, 5100, 256, 0, 0, 0, 0, true}};
     rr::blend_view(out, a, b, 0);
@@ -21,6 +22,7 @@ int main() {
     check(out.camera_position_q8 == 1256 && out.actors[0].position_q8 == 5100, "alpha 1 is b");
     rr::blend_view(out, a, b, 32768);
     check(out.camera_position_q8 == 1128 && out.actors[0].lateral_q8 == 128, "halfway");
+    check(out.camera_origin == 250,"interpolated view keeps the newest camera lateral origin");
     // reverse motion halves along the short path, not the long way around
     a.camera_position_q8 = 1256;
     b.camera_position_q8 = 1000;

@@ -71,6 +71,11 @@ struct Game {
     const CourseScene* scene() const { return assets.scene.get(); }
     TrafficSystem* traffic() { return instance.traffic.get(); }
     const TrafficSystem* traffic() const { return instance.traffic.get(); }
+    // View-only overlay of the actual ring window on the immutable course
+    // route. Kept out of Race/snapshots and reused across paused frames.
+    mutable std::vector<RouteSample> render_route_;
+    mutable const std::vector<RouteSample>* render_base_ = nullptr;
+    const std::vector<RouteSample>& render_route() const;
     bool metric = false;
     std::string player_name = "Player";
     std::vector<std::string> rider_names;
@@ -99,7 +104,7 @@ struct Game {
     uint32_t blend_camera_position() const {
         return view_ready ? view_drawn.camera_position_q8 : race().camera_position();
     }
-    Camera blend_camera() const { return view_ready ? view_drawn.camera : race().camera(); }
+    Camera blend_camera() const;
     int32_t logical_width() const;
     int countdown = 0; // set to countdown_ticks by callers (game_main.cpp)
     // RaceScreen's race-start/race-end palette fade (0x00415d90/0x00415e90)

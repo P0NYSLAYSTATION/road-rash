@@ -75,6 +75,15 @@ DepthTable read_depth_table(const std::vector<uint8_t>& b) {
     throw std::runtime_error("Depth table address not mapped");
 }
 
+int32_t blend_camera_centre(int32_t branch, int32_t common, int32_t distance) {
+    const int64_t magnitude = distance < 0 ? -int64_t(distance) : int64_t(distance);
+    if (magnitude >= 16) return branch;
+    const uint32_t product = (uint32_t(branch) - uint32_t(common)) * uint32_t(magnitude);
+    const int32_t signed_product = product <= INT32_MAX ? int32_t(product)
+        : int32_t(int64_t(product) - 0x100000000LL);
+    return common + signed_product / 16;
+}
+
 std::vector<RoadSlice> project_road(const std::vector<RouteSample>& route, uint32_t position,
                                     const Camera& camera, const DepthTable& table, int32_t logical_width) {
     if (logical_width < view_width || logical_width > 4096)

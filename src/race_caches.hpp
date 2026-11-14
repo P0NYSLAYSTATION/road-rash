@@ -202,11 +202,11 @@ struct CourseCanvas {
         }
         std::optional<ProfileScope> nodes_scope(std::in_place, profile, FrameProfile::scene_nodes);
         auto nodes = game.assets.scene->draw_nodes(
-            game.race().route(), slices, game.race().camera(), game.depth,
+            game.render_route(), slices, game.blend_camera(), game.depth,
             [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road, int32_t ceiling, bool back) {
                 return game.rider_nodes(near, far, road, ceiling, back);
             },
-            wide);
+            wide, game.instance.ring.get());
         nodes_scope.reset();
         if (use_rgb) {
             // Reuse the indexed canvas as horizon scratch; the RGB path

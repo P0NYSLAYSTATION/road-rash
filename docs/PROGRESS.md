@@ -3603,3 +3603,13 @@ offscreen vertex wrapping. Rider rendering now uses the simulation's authoritati
 animation block, including hit reactions and AI poses; body lean follows the
 original own-heading clamp. Thirteen focused tests pass without skips.
 See [original evidence and coverage](agent-handoffs/split-rider-animation-20261114.md).
+
+
+## Live split and merge rendering
+
+Render the actual ring topology, adjusted inner hills and shoulder heights,
+and original opposite-road culling. Restored the16-sample split camera centre
+blend, retained selected branch during the chase lag, and rebased interpolated
+camera X into the drawn slice. The live Napa test covers both branch handoffs
+and761 valid lane probes; original disassembly and scope are recorded in the
+[handoff](agent-handoffs/live-split-camera-20261114.md).

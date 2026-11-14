@@ -16,6 +16,31 @@ int32_t Game::logical_width() const {
     return 320;
 }
 
+Camera Game::blend_camera() const {
+    if (!view_ready) return race().camera();
+    Camera camera = view_drawn.camera;
+    const auto& route = render_route();
+    // The longitudinal interpolation may still be in the preceding common or
+    // branch slice. Rebase the latest absolute camera into that drawn slice,
+    // rather than interpreting a branch-relative x in the common-road frame.
+    camera.x += view_drawn.camera_origin - route.at(blend_camera_position() >> 8).offset;
+    return camera;
+}
+
+const std::vector<RouteSample>& Game::render_route() const {
+    const auto& base = race().route();
+    if (!instance.ring) return base;
+    if (render_base_ != &base || render_route_.size() != base.size()) {
+        render_route_ = base;
+        render_base_ = &base;
+    }
+    const size_t first = blend_camera_position() >> 8;
+    const uint8_t own = race().camera_half();
+    for (size_t i = first > 2 ? first - 2 : 0; i < base.size() && i < first + view_slices + 2; ++i)
+        render_route_[i] = instance.ring->render_sample(int32_t(i * 256), own).value_or(base[i]);
+    return render_route_;
+}
+
 void Game::load_course(const Assets& a, const std::vector<uint8_t>& exe) {
     clear_rgba_mip_cache(); // textures below are rebuilt; pointers may be reused
     exe_ = exe;
@@ -47,6 +72,8 @@ void Game::restart() {
     race().step(0);
     countdown = countdown_ticks;
     reset_view_history();
+    render_base_ = nullptr;
+    render_route_.clear();
     const RaceWiring w = instance.race->wiring();
     SDL_Log("race wiring: terrain=%d traffic=%d pedestrians=%d ring=%d crash_library=%d ride_library=%d "
             "nitro=%d finish=%d personalities=%d",
@@ -73,7 +100,8 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         auto include = [&](const Bike& actor, int route, const ActorAnimationState& state, bool body) {
             const auto pos = uint32_t(actor.i32(0x1c));
             if ((pos >> 8) != near.sample || ((pos & 255) >= 128) != back || !state.selected) return;
-            if (near.count == 2 && route != road) return;
+            const auto half = body ? rd.crash_actor.slice_half : rd.slice_half;
+            if (near.count == 2 && half.value_or(uint8_t(route)) != road) return;
             if (const auto* pose = rider_pose(i, body))
                 visible.push_back({int32_t(pose->position_q8), i, false, body});
             else
@@ -113,7 +141,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         const size_t i = item.index;
         if (item.pedestrian) {
             if (auto node = pedestrian_node(instance.pedestrians->pool()[i], near, far, road,
-                                            race().route().at(near.sample), race().camera(), depth, ceiling,
+                                            render_route().at(near.sample), blend_camera(), depth, ceiling,
                                             logical_width()))
                 output.push_back(*node);
             continue;
@@ -130,7 +158,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
                 }
             }
             if (auto node = traffic_car_node(instance.traffic->library().vehicles().at(car.vehicle), car,
-                                             near, far, road, race().route().at(near.sample), blend_camera(),
+                                             near, far, road, render_route().at(near.sample), blend_camera(),
                                              depth, int32_t(blend_camera_position()), ceiling,
                                              logical_width(), bpos, blat, use_blend))
                 output.push_back(*node);
@@ -138,7 +166,11 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         }
         const auto& rd = race().riders()[i];
         const auto& bike = item.body ? rd.crash_actor.motion : rd.bike;
-        const auto& sample = race().route_for(item.body ? rd.crash_actor.route : rd.route).at(near.sample);
+        auto sample = race().route_for(item.body ? rd.crash_actor.route : rd.route).at(near.sample);
+        if (instance.ring) {
+            const auto half = item.body ? rd.crash_actor.slice_half : rd.slice_half;
+            sample = instance.ring->render_sample(int32_t(near.sample * 256), half.value_or(0)).value_or(sample);
+        }
         const auto& a = near.road[road];
         const auto& b = far.road[road];
         const auto camera = blend_camera();
@@ -205,6 +237,7 @@ void Game::tick(uint32_t controls) {
 }
 void Game::present_online(const RaceInstance& source, int seat) {
     copy_race_presentation(instance, source, seat);
+    render_base_ = nullptr;
 }
 std::string pref_directory() {
     if (const char* o = SDL_getenv("RR_PREF_OVERRIDE")) return o;

@@ -137,7 +137,7 @@ void RaceScreen::draw_scene(FrameProfile* prof) {
     }
     // Road slices centre on the same logical width as the scene builders
     // (synced above), so road, terrain, scenery and actors line up.
-    const auto slices = project_road(g_.race().route(), g_.blend_camera_position(), g_.blend_camera(),
+    const auto slices = project_road(g_.render_route(), g_.blend_camera_position(), g_.blend_camera(),
                                      g_.depth, g_.logical_width());
     if (g_.scene())
         canvas_.draw(renderer_, g_, slices, race_scale, display_.render_threads);

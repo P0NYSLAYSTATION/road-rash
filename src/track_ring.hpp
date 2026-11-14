@@ -160,6 +160,21 @@ class TrackRing {
         sample.path.shoulder_right = s.edges[half][1] - sample.offset - sample.path.right;
         return sample;
     }
+    // Presentation reads only the live occupant of a physical slot. The
+    // retained_sample API deliberately also exposes discarded/stale halves to
+    // physics; those must never become the visible common road.
+    std::optional<RouteSample> render_sample(int32_t position, uint8_t own) const {
+        const auto& cell = shoulders_[size_t((uint32_t(position) >> 8) & 127)];
+        if (!cell.count || (cell.position & ~255) != (position & ~255)) return std::nullopt;
+        const uint8_t half = cell.count == 1 ? 0 : own;
+        auto sample = retained_sample(position, half);
+        if (sample && cell.count == 2) {
+            if (const auto other = retained_sample(position, half ^ 1))
+                sample->other = other->path;
+        }
+        return sample;
+    }
+    uint8_t chosen_half() const { return chosen_half_; }
     void commit_branch(uint8_t half); // 0x004540e0, shared front/back choice
     TrackRingState diagnostic_state() const;
     struct TrackerPoint { int32_t position = 0, local = 0; };

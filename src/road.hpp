@@ -60,6 +60,9 @@ struct RoadSlice {
 // position is Q8 samples along route; nearest slice first. Camera x is
 // relative to the centre of the route's own road at the camera sample.
 // logical_width is the Hor+ view width (320 original, up to 426 wide).
+// 00437ca9..00437cf8: the common/branch centre blend spans16 whole
+// samples on either side of a split/merge, before chase-camera lateral follow.
+int32_t blend_camera_centre(int32_t branch, int32_t common, int32_t distance);
 std::vector<RoadSlice> project_road(const std::vector<RouteSample>& route, uint32_t position,
                                     const Camera& camera, const DepthTable& table,
                                     int32_t logical_width = view_width);

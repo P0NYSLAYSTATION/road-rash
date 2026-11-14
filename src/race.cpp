@@ -4929,12 +4929,38 @@ void Race::advance_ride_animation(Rider& r, bool player) {
     advance_riding_animation(st, bank, fallback, input, uint32_t(ticks_));
 }
 
+int32_t Race::camera_centre(const Rider& rider) const {
+    const auto e = edges(rider, rider.sample);
+    int32_t centre = (e.left + e.right) / 2;
+    if (!ring_) return centre;
+    const int32_t position = int32_t(rider.half_mirror.sample * 256);
+    const auto sample = ring_->render_sample(position, rider.half_mirror.slice_half.value_or(0));
+    if (!sample) return centre;
+    centre = (sample->offset - sample->path.left + sample->offset + sample->path.right) / 2;
+    if (!sample->dual) return centre;
+    int32_t distance = 16;
+    const int event = int(sample->event);
+    if (event == 2 || event == 5)
+        distance = -1 - int32_t(sample->local);
+    else if ((event == 4 || event == 6) && finish_course_) {
+        const auto it = finish_course_->nodes.find(sample->node);
+        if (it != finish_course_->nodes.end()) distance = int32_t(it->second.length) - int32_t(sample->local);
+    }
+    if (distance > -16 && distance < 16)
+        if (const auto common = ring_->render_sample(position + distance * 256, 0)) {
+            const int32_t c = (common->offset - common->path.left + common->offset + common->path.right) / 2;
+            centre = blend_camera_centre(centre, c, distance);
+        }
+    return centre;
+}
+
 void Race::update_camera() {
-    // 0x00437c30 (single road): trail the rider laterally, one sample behind.
+    // 00437c30 follows the rider half, with the original16-sample
+    // common/branch centre blend near split and merge boundaries.
     const Rider& p = riders_[0];
-    const SliceEdges e = edges(p, p.sample);
-    const int32_t centre = (e.left + e.right) / 2;
-    const int32_t d = div256(p.bike.i32(0x28)) - centre;
+    const int32_t centre = camera_centre(p);
+    const int32_t lateral = ring_ && live_schedule_ ? p.half_mirror.lateral : p.bike.i32(0x28);
+    const int32_t d = div256(lateral) - centre;
     int32_t off = d - div_pow2(d, 2);
     if (d - off >= 0xc9)
         off = d - 200;
@@ -5035,9 +5061,25 @@ Race::camera_position() const { // 0x00437c30 reads the player's half (`*(player
     return uint32_t(p < 0 ? 0 : p);
 }
 
+uint8_t Race::camera_half() const {
+    const auto& rider = riders_[0];
+    const uint8_t half = rider.half_mirror.slice_half.value_or(uint8_t(rider.route));
+    // 00443a1e..00443a42 changes the view half only while the player's
+    // slice is dual. A common half0 must not switch a still-dual camera
+    // to the discarded branch during the one-sample chase lag.
+    if (ring_)
+        if (const auto sample = ring_->render_sample(int32_t(rider.half_mirror.sample*256),half))
+            if (!sample->dual) return ring_->chosen_half();
+    return half;
+}
+
 Camera Race::camera() const {
     const size_t s = camera_position() >> 8;
-    return {camera_x_ - route()[s].offset, camera_height_};
+    int32_t origin = route()[s].offset;
+    if (ring_)
+        if (const auto sample = ring_->render_sample(int32_t(s * 256), camera_half()))
+            origin = sample->offset;
+    return {camera_x_ - origin, camera_height_};
 }
 
 int Race::place(size_t index) const {
@@ -5452,9 +5494,8 @@ Race Race::presentation_copy(int seat) const {
     view.camera_back_ = seat_back_[size_t(seat)];
     view.camera_lift_ = view.camera_back_ / 3;
     view.camera_heading_ = seat_heading_[size_t(seat)];
-    const auto edges = view.edges(local, local.sample);
-    const int32_t centre = (edges.left + edges.right) / 2;
-    const int32_t d = div256(local.bike.i32(0x28)) - centre;
+    const int32_t centre = view.camera_centre(local);
+    const int32_t d = div256(local.half_mirror.lateral) - centre;
     int32_t off = d - div_pow2(d, 2);
     if (d - off >= 0xc9)
         off = d - 200;

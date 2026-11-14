@@ -572,6 +572,8 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         sample.dual = w.dual;
         sample.half = h;
         sample.event = RoadEvent(w.event);
+        sample.dx_sep = w.dx_sep;
+        sample.x_sep = w.x_sep;
         if (w.dual) {
             const auto& other = w.halves[h ^ 1];
             sample.other = path_of(other);

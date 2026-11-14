@@ -20,6 +20,14 @@ int main() {
     check(rr::horizon_scroll(-1) == 0 && rr::horizon_scroll(0x400000) == -40 &&
               rr::horizon_scroll(-0x400000) == 40,
           "horizon signed truncation");
+    check(rr::blend_camera_centre(900, 100, 0) == 100 &&
+              rr::blend_camera_centre(900, 100, 8) == 500 &&
+              rr::blend_camera_centre(900, 100, -8) == 500 &&
+              rr::blend_camera_centre(900, 100, 16) == 900,
+          "split camera uses the original sixteen-sample common-centre blend");
+    check(rr::blend_camera_centre(-20, 11, 1) == 10 &&
+              rr::blend_camera_centre(-20, 11, -15) == -18,
+          "split camera signed division truncates toward zero");
     rr::DepthTable table;
     for (int i = 0; i < 4352; ++i)
         table.scale.push_back(i < 128 ? 65536 : (1 << 23) / i); // synthetic, not original data

@@ -619,6 +619,7 @@ class Race {
     uint32_t camera_position() const;
     int32_t horizon_scroll() const { return rr::horizon_scroll(camera_heading_); }
     int32_t camera_x() const { return camera_x_; } // 0x004b7ee8: camera lateral, world units
+    uint8_t camera_half() const;
     Camera camera() const;                         // relative to the route's own road at camera_position()
     int32_t speed() const { return bike().i32(0xec); }
     int gear() const { return bike().i32(0x23c); }
@@ -779,6 +780,7 @@ class Race {
     void crash_entry(Rider&, int32_t reason, std::optional<std::array<int32_t, 3>> rider_impulse,
                      std::optional<std::array<int32_t, 3>> bike_impulse); // reason-tagged crash entry
     void contact(Rider& self, Rider& other);
+    int32_t camera_centre(const Rider&) const;
     void update_camera();
     // In-road BORR hazard pass (plan 16 Task 2): 0x00454240 instantiates only
     // BORR slots strictly inside the road edges via 0x00438930 (pool

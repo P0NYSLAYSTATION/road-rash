@@ -16,6 +16,7 @@ struct ActorPose {
 struct ViewState {
     uint32_t camera_position_q8 = 0; // Race::camera_position()
     Camera camera;                   // x, height
+    int32_t camera_origin = 0;        // physical slice offset used to make camera.x relative
     int camera_route = 0;
     std::vector<ActorPose> actors; // riders, crash riders, cars, cops, stable id order
     uint32_t tick = 0;
