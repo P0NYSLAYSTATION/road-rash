@@ -1,6 +1,8 @@
 #include "actor_nodes.hpp"
 #include "exe_tables.hpp"
 #include <stdexcept>
+#include <algorithm>
+#include <cstdlib>
 namespace rr {
 ActorNodes::ActorNodes(const Assets& assets, const std::vector<uint8_t>& exe, bool high)
     : library_(exe, assets.read("DATA/GLOBAL.RSC")), sprites_(load_rider_sprites(assets, exe, high)) {
@@ -47,12 +49,11 @@ std::vector<DrawNode> ActorNodes::rider(const ActorAnimationFrame& descriptor, s
     projection.clip_ground = true;
     const auto& body = library_.graphics[bank].frames.at(cell.frame);
     int32_t body_roll = body_roll_override ? *body_roll_override : view.roll;
-    if (!body_roll_override) {
-        if (angles.yaw > 0xe0000)
-            body_roll = 0x50000;
-        else if (angles.yaw < -0xe0000)
-            body_roll = -0x50000;
-    }
+    // 00446484..004464b7 tests the object's own drawn heading (+68),
+    // not camera-relative yaw, and clamps the selected roll without forcing
+    // a new lean direction. Camera yaw used to flatten nearby cornering riders.
+    if (!body_roll_override && std::abs(int64_t(orientation.heading)) > 0xe0000)
+        body_roll = std::clamp(body_roll, -0x50000, 0x50000);
     if (body_roll) {
         if (auto node = actor_node_rotated(body, texture(bank, cell.frame, colour), projection, camera,
                                            depths, sin_table_, body_roll, logical_width))

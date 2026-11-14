@@ -23,6 +23,9 @@ int main() {
             b.points[i * 2] = {-300 - i * 200, 20 + i * 20};
             b.points[i * 2 + 1] = {300 + i * 200, 30 + i * 30};
         }
+        const auto flat_join = rr::merge_hill_profiles(a, b, 100, -100, 800, true);
+        check(flat_join.terrain[0].points[3][1] == 0 && flat_join.terrain[1].points[0][1] == 0,
+              "zero-countdown split ridge lies on the road plane");
         auto joined = rr::merge_hill_profiles(a, b, 100, -100, 800);
         check(joined.bands[0] == 2 && joined.bands[1] == 1,
               "merge limits inward hill bands at their meeting point");
@@ -42,6 +45,38 @@ int main() {
         check(joined.bands[0] == 4 && joined.bands[1] == 4 && joined.terrain[0].points == a.points &&
                   joined.terrain[1].points == b.points,
               "separated profiles retain all hills and request a connecting ridge");
+    }
+    {
+        constexpr int q = 65536;
+        rr::RoadSlice near{}, far{};
+        near.count=far.count=2;
+        near.depth=256; far.depth=512;
+        near.scale=q; far.scale=q/2;
+        for (int h=0; h<2; ++h) {
+            near.road[h].road_x=far.road[h].road_x=h ? 100 : -100;
+            near.road[h].right=far.road[h].right=20;
+            near.road[h].left=far.road[h].left=-20;
+            near.road[h].screen_y=200*q;
+            far.road[h].screen_y=150*q;
+        }
+        rr::DepthTable depths; depths.scale.assign(106,q);
+        auto divider=rr::split_divider_nodes(near,far,{0,150},depths,200,200);
+        check(divider.size()==3 && divider[0].flat_index==0xf7 && divider[1].flat_index==0xe5,
+              "original split separator has a centre fill and two edge strips");
+        if (divider.size()==3) {
+            check(divider[0].view_points[0].x==123*q && divider[0].view_points[1].x==197*q &&
+                      divider[0].view_points[2].x==234*q && divider[0].view_points[3].x==86*q,
+                  "split strips keep the original twelve-world-unit widths");
+            check(divider[1].view_points[0].y==150*q && divider[1].view_points[3].y==200*q,
+                  "split separator follows the two projected road rows");
+        }
+        check(rr::split_divider_nodes(near,far,{0,150},depths,24,24).size()==1,
+              "narrow split uses one separator fill");
+        near.depth=210;
+        divider=rr::split_divider_nodes(near,far,{0,150},depths,200,200);
+        check(divider.size()==3 && divider[1].view_points[3].x==80*q &&
+                  divider[1].view_points[3].y==240*q,
+              "depth210 split clip projects its near edge from world coordinates");
     }
     // Rural intersections must tile outward from both shoulders. With
     // hills here instead, the side road is missing under the crossing cars.

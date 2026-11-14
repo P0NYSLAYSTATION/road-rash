@@ -21,6 +21,11 @@ struct HillPanelInput {
     int band_count = 3;
     bool extend_outer = true;
 };
+// 0043bb30 / 0043bdf0: flat separator while a split's inner hills
+// are suppressed, including the depth-210 near clip and 12-unit edge strips.
+std::vector<DrawNode> split_divider_nodes(const RoadSlice& near, const RoadSlice& far,
+                                         const Camera&, const DepthTable&, int32_t far_separation,
+                                         int32_t near_separation);
 struct MergeHillProfiles {
     std::array<TerrainSlice, 2> terrain;
     std::array<int, 2> bands{3, 3}; // 4 means all three bands plus the connecting ridge
@@ -28,7 +33,7 @@ struct MergeHillProfiles {
 // 0x00454890, approaching a merge: join the two inward hill profiles in
 // world space. Each road keeps its own exterior profile unchanged.
 MergeHillProfiles merge_hill_profiles(const TerrainSlice&, const TerrainSlice&, int32_t right_shoulder,
-                                      int32_t left_shoulder, int32_t separation);
+                                      int32_t left_shoulder, int32_t separation, bool flat_ridge = false);
 // 0x0041d620: connect separated terminal inner hill edges, without extending
 // either inner profile to the screen boundary.
 std::vector<DrawNode> merge_hill_bridge(const std::array<RasterPoint, 4>&, int32_t far_depth,

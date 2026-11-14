@@ -3594,3 +3594,12 @@ Restored the two original zero-input setup steps before displaying a local race.
 They settle rider placement and the camera before the countdown, removing the
 first-control-frame lateral snap. All five courses at levels 1 and 5 and the
 related screen/HUD regressions pass. See [original calls and evidence](agent-handoffs/start-camera-20261114.md).
+
+
+## Split terrain and opponent animation
+
+Corrected departing-split inner terrain/separator dispatch and native-resolution
+offscreen vertex wrapping. Rider rendering now uses the simulation's authoritative
+animation block, including hit reactions and AI poses; body lean follows the
+original own-heading clamp. Thirteen focused tests pass without skips.
+See [original evidence and coverage](agent-handoffs/split-rider-animation-20261114.md).

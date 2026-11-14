@@ -1,4 +1,5 @@
 #include "world_renderer.hpp"
+#include "render_threads.hpp"
 #include "golden.hpp"
 #include <algorithm>
 #include <filesystem>
@@ -46,6 +47,28 @@ int main(int argc, char** argv) {
             return 1;
         } catch (const std::runtime_error&) {
         }
+    }
+    {
+        // Original DWORD coordinate mapping: an exterior hill ending at x=5
+        // must not wrap its -50000px offscreen corner onto the road centre.
+        rr::CelTexture texture;
+        texture.bounds = {0,0,7,7};
+        rr::CelMip mip; mip.width=mip.height=8; mip.stride_shift=3; mip.pixels.assign(64,34);
+        texture.mips.push_back(mip);
+        rr::DrawNode hill;
+        hill.texture=&texture;
+        hill.view_points={{{-25000*65536,0},{5*65536,0},{5*65536,240*65536},{-25000*65536,240*65536}}};
+        rr::Framebuffer frame(640,480), threaded(640,480);
+        frame.clear(17);
+        rr::render_nodes(frame,{hill},rr::view_mode(true),16);
+        if (frame.row(200)[5]!=34 || frame.row(200)[320]!=17)
+            throw std::runtime_error("Offscreen hill wrapped across the road");
+        rr::RenderThreads pool(4);
+        threaded.clear(17);
+        rr::render_nodes_threaded(threaded,{hill},rr::view_mode(true),16,pool);
+        if (!std::equal(frame.row(0),frame.row(0)+640*480,threaded.row(0)))
+            throw std::runtime_error("Threaded offscreen hill differs");
+        std::cout << "native-size offscreen hill coordinates preserve the road\n";
     }
     // Plan 19 Task 3: any surface size through the scaled view mapping, with
     // an upscaled level above mip 0 sampled when the quad covers 2x+.

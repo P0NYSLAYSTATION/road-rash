@@ -55,7 +55,7 @@ DrawNode node(const std::array<RasterPoint, 4>& p, const CelTexture* texture,
 }
 } // namespace
 MergeHillProfiles merge_hill_profiles(const TerrainSlice& first, const TerrainSlice& second,
-                                      int32_t right_shoulder, int32_t left_shoulder, int32_t separation) {
+                                      int32_t right_shoulder, int32_t left_shoulder, int32_t separation, bool flat_ridge) {
     MergeHillProfiles out{{first, second}, {1, 1}};
     std::array<RasterPoint, 4> a{}, b{};
     a[0] = {right_shoulder, 0};
@@ -82,7 +82,7 @@ MergeHillProfiles merge_hill_profiles(const TerrainSlice& first, const TerrainSl
     const int32_t span = sub(a[ca].x, a[ca - 1].x);
     if (!span) throw std::runtime_error("Degenerate merge hill profile");
     const int32_t slope = mul(sub(a[ca].y, a[ca - 1].y), 65536) / span;
-    const int32_t y = add(a[ca - 1].y, mul(sub(x, a[ca - 1].x), slope) >> 16);
+    const int32_t y = flat_ridge ? 0 : add(a[ca - 1].y, mul(sub(x, a[ca - 1].x), slope) >> 16);
     for (int i = ca; i < 4; ++i) out.terrain[0].points[i * 2 - 1] = {x, y};
     for (int i = cb; i < 4; ++i) out.terrain[1].points[i * 2 - 2] = {sub(x, separation), y};
     return out;
@@ -116,6 +116,73 @@ std::vector<DrawNode> hill_intersection_nodes(const HillIntersectionInput& in,
                                   {in.far_depth_q8, in.far_depth_q8, in.near_depth_q8, in.near_depth_q8}));
         far.x = fx;
         near.x = nx;
+    }
+    return result;
+}
+std::vector<DrawNode> split_divider_nodes(const RoadSlice& near, const RoadSlice& far,
+                                         const Camera& camera, const DepthTable& depths,
+                                         int32_t far_separation, int32_t near_separation) {
+    std::vector<DrawNode> result;
+    if (near.count != 2 || far.count != 2 || far.road[0].screen_y >= 240 * 65536 ||
+        near.road[0].screen_y == far.road[0].screen_y) return result;
+    auto point = [&](const RoadSlice& slice, int half, int32_t offset) {
+        return RasterPoint{bits(uint32_t(slice.screen_x(half, offset))), slice.road[half].screen_y};
+    };
+    auto clipped = [&](int half, int32_t offset, int32_t far_offset, int32_t width) {
+        RasterPoint p = point(near, half, offset);
+        int32_t span = mul(width, near.scale);
+        if (near.depth <= 210) {
+            // 0043bdf0 moves the near edge to depth210. Its world interpolation
+            // is arithmetic >>8, followed by the original table projection.
+            const int32_t t = 210 - near.depth;
+            const int32_t x0 = add(near.road[half].road_x, offset);
+            const int32_t dx = sub(add(far.road[half].road_x, far_offset), x0);
+            const int32_t y0 = near.road[half].world_y;
+            const int32_t y = add(y0, mul(sub(far.road[half].world_y, y0), t) >> 8);
+            const int32_t scale = depths.scale.at(105);
+            p = {add(mul(add(x0, mul(dx, t) >> 8), scale), near.centre_q16),
+                 add(mul(sub(camera.height, y), scale), 90 * 65536)};
+            span = mul(width, scale);
+        }
+        return std::pair{p, span};
+    };
+    auto flat = [&](std::array<RasterPoint, 4> p, uint8_t colour) {
+        DrawNode n{p, nullptr, colour};
+        result.push_back(n);
+    };
+    const int32_t far_width = mul(12, far.scale);
+    const auto fl = point(far, 0, far.road[0].right);
+    const auto fr = point(far, 1, far.road[1].left);
+    if (far_separation > 24) {
+        const auto [nl, lw] = clipped(0, near.road[0].right, far.road[0].right, 12);
+        const auto [nr, rw] = clipped(1, near.road[1].left - 12, far.road[1].left - 12, 12);
+        // Left strip is centred on the first road's right edge; right strip
+        // is centred on the second road's left edge (0043bba2..0043bcad).
+        const int32_t lx = sub(fl.x, far_width / 2), rx = sub(fr.x, far_width / 2);
+        // Near clipping receives the uncentred road offsets in the original.
+        // At ordinary depths both strips use the same six-unit half width.
+        RasterPoint nlp = nl, nrp = nr;
+        if (near.depth > 210) {
+            nlp.x = sub(nlp.x, lw / 2);
+            nrp.x = add(nrp.x, rw / 2);
+        }
+        flat({RasterPoint{add(lx, far_width), fl.y}, RasterPoint{rx, fr.y},
+              nrp, RasterPoint{add(nlp.x, lw), nlp.y}}, 0xf7);
+        flat({RasterPoint{lx, fl.y}, RasterPoint{add(lx, far_width), fl.y},
+              RasterPoint{add(nlp.x, lw), nlp.y}, nlp}, 0xe5);
+        flat({RasterPoint{rx, fr.y}, RasterPoint{add(rx, far_width), fr.y},
+              RasterPoint{add(nrp.x, rw), nrp.y}, nrp}, 0xe5);
+    } else {
+        const auto [nl, span] = clipped(0, near.road[0].right, far.road[0].right, near_separation);
+        RasterPoint left = nl, right;
+        if (near.depth <= 210)
+            right = {add(left.x, span), left.y};
+        else {
+            left.x = sub(left.x, mul(6, near.scale));
+            right = point(near, 1, near.road[1].left + 6);
+        }
+        flat({RasterPoint{sub(fl.x, far_width / 2), fl.y},
+              RasterPoint{add(fr.x, far_width / 2), fr.y}, right, left}, 0xe5);
     }
     return result;
 }

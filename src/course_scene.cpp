@@ -584,6 +584,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         const TerrainSlice* terrain;
         TerrainSlice terrain_image;
         bool merge_hills = false;
+        int32_t split_countdown = INT32_MIN;
         int inner_bands = 3;
         uint32_t section, local;
         HillRoad hill[2];
@@ -615,10 +616,26 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         const auto& slice = slices[n];
         const auto& sample = route.at(slice.sample);
         std::optional<MergeHillProfiles> joined;
+        int32_t split_countdown = INT32_MIN;
         if (slice.count == 2) {
             size_t start = slice.sample;
             while (start > 0 && route[start - 1].dual) --start;
-            if (route[start].event == RoadEvent::merge_window) {
+            if (route[start].event == RoadEvent::split) {
+                // 00453b60 measures the first separation exceeding both inner
+                // shoulders plus256, at most80 samples into the split.
+                int32_t threshold = 80;
+                for (size_t k = start; k < route.size() && k <= start + 80 && route[k].dual; ++k) {
+                    const auto& v = route[k];
+                    const auto& l = v.half == 0 ? v.path : v.other;
+                    const auto& r = v.half == 0 ? v.other : v.path;
+                    if (v.x_sep > 255 && v.x_sep >= l.shoulder_right + r.shoulder_left + 256) {
+                        threshold = int32_t(k - start);
+                        break;
+                    }
+                }
+                split_countdown = threshold - int32_t(slice.sample - start);
+            }
+            if (route[start].event == RoadEvent::merge_window || (split_countdown <= 0 && split_countdown != INT32_MIN)) {
                 const bool first = sample.half == 0;
                 const auto& p0 = first ? sample.path : sample.other;
                 const auto& p1 = first ? sample.other : sample.path;
@@ -629,7 +646,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 if (t0.type == 4 && t1.type == 4)
                     joined =
                         merge_hill_profiles(t0, t1, p0.right + p0.shoulder_right, -p1.left - p1.shoulder_left,
-                                            slice.road[1].road_x - slice.road[0].road_x);
+                                            slice.road[1].road_x - slice.road[0].road_x, split_countdown == 0);
             }
         }
         for (int r = 0; r < slice.count; ++r) {
@@ -641,6 +658,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             road.terrain_image = joined ? joined->terrain[r] : terrain(road.section, road.local);
             road.terrain = &road.terrain_image;
             road.merge_hills = joined.has_value();
+            road.split_countdown = split_countdown;
             road.inner_bands = joined ? joined->bands[r] : 3;
             road.kind = tunnel(road.section, road.local) ? 3 : road.terrain->type;
             if (road.terrain->type == 4 && side_street_mark < 0)
@@ -819,8 +837,18 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
     const bool camera_in_tunnel = !slices.empty() && roads[0][0].kind == 3;
     std::vector<DrawNode> rails;
     for (size_t n = slices.size(); n-- > 1;) {
-        const auto& near = slices[n - 1];
+        auto near = slices[n - 1];
         const auto& far = slices[n];
+        // 004443b0..0044441e links the departing window's selected half
+        // to the following single road. Half1 must not stitch to half0's
+        // terrain/coordinates when the opposite branch leaves the window.
+        const bool close_branch = near.count == 2 && far.count == 1;
+        const int closing_half = close_branch ? near.own : 0;
+        if (close_branch) {
+            near.road[0] = near.road[near.own];
+            near.count = 1;
+            near.own = 0;
+        }
         const int count = std::min(near.count, far.count);
         std::vector<DrawNode> pending;
         pending.swap(front);
@@ -828,7 +856,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             const int r = count == 2 ? (i == 0 ? 1 - near.own : near.own) : 0;
             const auto& a = far.road[r];
             const auto& b = near.road[r];
-            const auto& road = roads[n - 1][r];
+            const auto& road = roads[n - 1][close_branch ? closing_half : r];
             const auto& old = roads[n][r];
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
@@ -901,6 +929,8 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             }
             if (!(path.marking_flags & 32) && road.terrain->type == 4)
                 for (int side = 0; side < 2; ++side) {
+                    if (near.count == 2 && far.count == 2 && side == 1 - r && road.split_countdown > 0)
+                        continue; // 0043be80 -> 0041d500 -> 0043bb30 flat divider
                     if (visible) {
                         ShoulderPanelInput shoulder;
                         shoulder.near_depth = near.depth;
@@ -950,6 +980,12 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                     hills.overlap = true;
                     hills.join_offsets = joins_;
                     hills.logical_width = logical_width;
+                    if (near.count == 2 && far.count == 2 && side == 1 - r) {
+                        // 00443d5f dispatches the inner gap for every dual strip,
+                        // including departing splits. Only exterior hills may
+                        // grow a fourth band to the viewport edge.
+                        hills.extend_outer = false;
+                    }
                     if (road.merge_hills && side == 1 - r) {
                         // 0x00443cd0 / 0x0041d500: inward profiles meet the
                         // neighboring branch. Only exterior hills extend to
@@ -1267,6 +1303,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 front.insert(front.end(), nodes.begin(), nodes.end());
             }
         }
+        if (near.count == 2 && far.count == 2 && roads[n-1][0].kind == 4 &&
+            roads[n-1][0].split_countdown > 0)
+            append(split_divider_nodes(near, far, camera, depths, route[far.sample].x_sep, route[near.sample].x_sep));
         append(pending);
     }
     append(rails);

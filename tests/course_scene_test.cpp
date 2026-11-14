@@ -32,6 +32,70 @@ int main(int argc, char** argv) {
         }
         const auto exe = assets.read("ROADRASH.EXE");
         const auto depths = rr::read_depth_table(exe);
+        if (argc > 1 && std::string(argv[1]) == "--split-regression") {
+            const auto crs = rr::read_course(assets.read("DATA/COURSES/NAPA.CRS"));
+            const rr::CourseScene split_scene(assets, exe, crs, "NAPA");
+            std::set<uint8_t> pavement;
+            const auto materials = rr::read_road_materials(exe, assets.read("DATA/GLOBAL.RSC"));
+            for (const auto& entry : materials.entries)
+                for (const auto& mip : entry.texture->mips)
+                    pavement.insert(mip.pixels.begin(), mip.pixels.end());
+            size_t checked = 0, covered = 0;
+            for (bool branch : {false, true}) {
+                const auto route = rr::make_route(crs, branch);
+                for (uint32_t start = 32; start + 82 < route.size(); ++start) {
+                    if (route[start].event != rr::RoadEvent::split) continue;
+                    for (uint32_t p = start - 16; p <= start + 80; p += 4) {
+                        rr::Framebuffer frame(640, 480);
+                        split_scene.draw_horizon(frame, 0);
+                        const auto slices = rr::project_road(route, p * 256 + 128, {0, 150}, depths);
+                        auto nodes = split_scene.draw_nodes(route, slices, {0, 150}, depths);
+                        // Test terrain coverage, excluding legitimate roadside
+                        // billboards (station signs and pumps can cover a lane).
+                        std::set<const rr::CelTexture*> scenery;
+                        for (const auto& slice : slices) {
+                            const auto& sample = route[slice.sample];
+                            for (const auto loc : {std::pair{sample.section,sample.local},
+                                                  std::pair{sample.other_section,sample.other_local}})
+                                for (const auto& object : split_scene.objects(loc.first,loc.second))
+                                    if (const auto* frame = split_scene.object_frame(loc.first,loc.second,object))
+                                        if (frame->texture) scenery.insert(frame->texture.get());
+                        }
+                        nodes.erase(std::remove_if(nodes.begin(),nodes.end(),[&](const auto& node) {
+                            return scenery.count(node.texture) != 0;
+                        }),nodes.end());
+                        rr::render_nodes(frame, nodes, rr::view_mode(true), 16);
+                        // Sample inside the player's roadway, clear of centre-line markings
+                        // in the foreground, independent of its bend or branch.
+                        constexpr int32_t y = 170 * 65536;
+                        for (size_t n = 1; n < slices.size(); ++n) {
+                            const auto& near = slices[n-1]; const auto& far = slices[n];
+                            const int r = near.count == 2 ? near.own : 0;
+                            const int f = far.count == 2 ? far.own : 0;
+                            const auto a = far.road[f].screen_y, b = near.road[r].screen_y;
+                            if (!(a < y && y <= b)) continue;
+                            if (far.road[f].right - far.road[f].left < 16 ||
+                                near.road[r].right - near.road[r].left < 16) break;
+                            const int64_t x0 = far.screen_x(f, (3 * far.road[f].left + far.road[f].right) / 4),
+                                          x1 = near.screen_x(r, (3 * near.road[r].left + near.road[r].right) / 4);
+                            const int x = int((x0 + (x1-x0) * (y-a) / (b-a)) >> 15);
+                            if (x < 5 || x >= 635) break;
+                            ++checked;
+                            for (int dx = -2; dx <= 2; ++dx)
+                                if (!pavement.count(frame.row(340)[x+dx])) {
+                                    ++covered;
+                                    std::cout << "split road covered: branch=" << branch << " sample=" << p << " x=" << x << " edges " << near.road[r].left << '/' << near.road[r].right << " far " << far.road[f].left << '/' << far.road[f].right << '\n';
+                                    break;
+                                }
+                            break;
+                        }
+                    }
+                }
+            }
+            std::cout << checked << " split foreground road probes, " << covered << " covered by terrain\n";
+            if (covered || checked < 50) throw std::runtime_error("Split terrain obscures the roadway");
+            return 0;
+        }
         const bool crest_only = argc > 1 && std::string(argv[1]) == "--crest-regression";
         {
             // Hiway's steep downhill at 3477:255 leaves 26,528 lower pixels

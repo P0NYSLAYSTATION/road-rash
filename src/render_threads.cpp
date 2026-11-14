@@ -226,7 +226,12 @@ static void threaded_band(ThreadedCtx& c, int top, int bottom, RasterScratch64& 
                 continue;
             }
         }
-        if (wide_surface) {
+        // 0040ffc0 stores mapped coordinates as DWORDs. A near hill may
+        // be more than32768 pixels offscreen even at640x480; narrowing it
+        // wraps the edge across the whole roadway. Keep that geometry wide.
+        const bool wide_coordinates = wide_surface || minx < INT16_MIN || maxx > INT16_MAX ||
+                                      miny < INT16_MIN || maxy > INT16_MAX;
+        if (wide_coordinates) {
             const int signed_level =
                 texture_mip_level_signed(uint32_t(maxx - minx + 1), uint32_t(maxy - miny + 1), src_w, src_h,
                                          texture.mips.size(), texture.upscaled.size());

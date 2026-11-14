@@ -55,6 +55,84 @@ int main(int argc, char** argv) {
     try {
         rr::Assets assets(root, rr::test::media_root());
         const auto exe = assets.read("ROADRASH.EXE");
+        if (argc > 1 && std::string(argv[1]) == "--rider-reactions") {
+            rr::Game duel;
+            duel.config.course = "NAPA";
+            duel.config.opponents = 1;
+            duel.depth = rr::read_depth_table(exe);
+            duel.load_course(assets, exe);
+            // Controlled flat-road duel: retain the real imported animation,
+            // bike and physics tables without unrelated course statics/traffic.
+            std::vector<rr::RouteSample> flat(2048);
+            for (size_t i=0; i<flat.size(); ++i) {
+                flat[i].path.left=flat[i].path.right=500;
+                flat[i].path.left_q8=flat[i].path.right_q8=512;
+                flat[i].section=0; flat[i].local=uint32_t(i);
+            }
+            rr::Opponent opponent{duel.assets.specs[0],90,0,0,0,1};
+            duel.instance.race=std::make_unique<rr::Race>(flat,flat,duel.assets.physics,
+                duel.assets.specs[0],90,std::vector<rr::Opponent>{opponent});
+            duel.race().set_ride_library(&duel.assets.actors->library(),duel.assets.attack_codes.get());
+            duel.countdown = 0;
+            auto& me = duel.race().riders()[0];
+            auto& target = duel.race().riders()[1];
+            target.frozen = true;
+            me.weapon = 0;
+            me.stamina.strength = 100;
+            target.stamina.current = target.stamina.base = target.stamina.max = 10000;
+            me.bike.i32(0x2f0) = target.bike.i32(0x2f0) = 10000;
+            target.bike.i32(0x1c) = me.bike.i32(0x1c);
+            me.bike.i32(0x28)=0;
+            target.bike.i32(0x28) = 18000;
+            target.half_mirror.position = target.bike.i32(0x1c);
+            target.half_mirror.lateral = target.bike.i32(0x28);
+            target.sample = target.previous_sample = me.sample;
+            target.bike.i32(0x138) = target.bike.i32(0x1c);
+            target.bike.i32(0xec) = target.bike.i32(0xf0) = target.bike.i32(0xf4) = 0;
+            target.bike.i32(0x108) = target.bike.i32(0x10c) = 0;
+            for (int k=0; k<5; ++k) target.bike.i32(0x30+4*k)=target.bike.i32(0x1c+4*k);
+            // Isolate the punch from physical bike separation in this controlled
+            // side-by-side fixture; combat still uses the original reach/damage.
+            me.bike.i32(0x174) = target.bike.i32(0x174) = 1000;
+            me.half_object.i32(0x174) = target.half_object.i32(0x174) = 1000;
+            duel.race().set_live_schedule(true); // resynchronize the relocated fixture's half/walker
+            const int stamina = target.stamina.current;
+            for (int tick = 0; tick < 90 && target.stamina.current == stamina; ++tick)
+                duel.tick(rr::control_punch);
+            check(target.stamina.current < stamina, "actual player punch damages the opponent");
+            target.frozen = false;
+            for (int tick = 0; tick < 8 && (!target.ride_animation.selected || (*target.ride_animation.selected)[0] != 9); ++tick)
+                duel.tick(0);
+            check(target.ride_animation.selected && (*target.ride_animation.selected)[0] == 9,
+                  "landed punch selects the original opponent reaction");
+            auto render = [&]() {
+                const auto slices = rr::project_road(duel.race().route(),duel.race().camera_position(),duel.race().camera(),duel.depth);
+                std::vector<rr::DrawNode> nodes;
+                for (size_t i=1; i<slices.size(); ++i)
+                    for (bool back : {false,true}) {
+                        auto part=duel.rider_nodes(slices[i-1],slices[i],0,240*65536,back);
+                        nodes.insert(nodes.end(),part.begin(),part.end());
+                    }
+                rr::Framebuffer frame(640,480); frame.clear(0);
+                rr::render_nodes(frame,nodes,rr::view_mode(true),16);
+                std::vector<uint8_t> pixels(frame.row(0),frame.row(0)+640*480);
+                return pixels;
+            };
+            const auto reaction = render();
+            const auto original = target.ride_animation;
+            const auto& bank = duel.assets.actors->library();
+            rr::set_animation_with_fallback(target.ride_animation,bank.playback[0],2,duel.race().ticks(),bank.fallback);
+            rr::advance_animation(target.ride_animation,bank.playback[0],duel.race().ticks());
+            const auto neutral = render();
+            check(reaction != neutral, "opponent hit reaction reaches actual rider pixels");
+            rr::set_animation_with_fallback(target.ride_animation,bank.playback[0],6,duel.race().ticks(),bank.fallback);
+            rr::advance_animation(target.ride_animation,bank.playback[0],duel.race().ticks());
+            check(render() != neutral, "simulation-selected AI pose reaches actual rider pixels");
+            target.ride_animation = original;
+            std::cout << "actual punch reaction and AI pose rendered from the simulation animation block\n";
+            SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
+            return failures ? 1 : 0;
+        }
         if (argc > 1 && std::string(argv[1]) == "--start-camera") {
             for (const char* name : {"CITY", "HIWAY", "MEDLY", "NAPA", "CANYN"})
                 for (int level : {0, 4}) {

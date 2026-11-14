@@ -71,9 +71,6 @@ struct Game {
     const CourseScene* scene() const { return assets.scene.get(); }
     TrafficSystem* traffic() { return instance.traffic.get(); }
     const TrafficSystem* traffic() const { return instance.traffic.get(); }
-    std::vector<ActorAnimationState> actor_states;
-    std::vector<int> previous_attacks;
-    std::vector<bool> previous_crashes;
     bool metric = false;
     std::string player_name = "Player";
     std::vector<std::string> rider_names;
@@ -129,7 +126,6 @@ struct Game {
     std::vector<DrawNode> rider_nodes(const RoadSlice& near, const RoadSlice& far, int road, int32_t ceiling,
                                       bool back) const;
     void tick(uint32_t controls);
-    void sync_actor_states();
     void present_online(const RaceInstance&, int seat);
 };
 

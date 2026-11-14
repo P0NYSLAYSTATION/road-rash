@@ -74,7 +74,13 @@ static void render_nodes_impl(Framebuffer& fb, const std::vector<DrawNode>& node
             }
             // else fall through to affine
         }
-        if (wide_surface) {
+        // 0040ffc0 stores mapped coordinates as DWORDs. A near hill may
+        // be more than32768 pixels offscreen even at640x480; narrowing it
+        // wraps the edge across the whole roadway. Keep that geometry wide.
+        const bool wide_coordinates = wide_surface || minx < INT16_MIN || maxx > INT16_MAX ||
+                                      miny < INT16_MIN || maxy > INT16_MAX;
+        if (wide_coordinates) {
+            if (scratch.rows.empty()) scratch.resize(fb.height());
             // Plan 19 Task 3: int32 surface points (Review Focus 5); negative
             // levels sample upscaled[-level-1] with uv scaled by 2^(-level).
             const int signed_level =
