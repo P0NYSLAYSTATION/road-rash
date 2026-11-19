@@ -1,4 +1,7 @@
 /* Synthetic execution of the production actor wrappers: no disc or Wine needed. */
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,6 +13,9 @@
 static FILE* g_out;
 static uint32_t list_base = 0x1000, list_end = 0x1000;
 static unsigned select_calls, billboard_calls;
+static uint32_t full_prefix;
+static int flush_next, suppress_next;
+#define RR_ACTOR_ABSOLUTE_COUNT(base,end) ((int32_t)(full_prefix+((end)-(base))/0xa8))
 static uint32_t expected_bike;
 static int expected_ctx;
 static int* expected_p1;
@@ -45,7 +51,13 @@ static void mock_billboard(int* p1, unsigned* p2, int size, int lateral, int gro
     assert(size == 17 && lateral == -23 && ground == -41);
     assert(pos == 0xfedcba98u && clip == -7);
     ++billboard_calls;
-    list_end += 0xa8;
+    if(flush_next) {
+        full_prefix+=(list_end-list_base)/0xa8;
+        list_end=list_base;
+        flush_next=0;
+    }
+    if(!suppress_next) list_end += 0xa8;
+    suppress_next=0;
     p2[0] += 1; /* The record must retain the input before forwarding. */
 }
 #define RR_ACTOR_SELECT_ORIGINAL mock_select
@@ -89,6 +101,8 @@ int main(void) {
     assert(g_sel[0].f28 == -102 && g_sel[0].f44 == -103 && g_sel[0].f50 == -104);
     assert(g_bb[0].emu == (uint32_t)(uintptr_t)emu && g_bb[0].emuw[0] == 300);
     assert(g_bb[0].nbefore == 0 && g_bb[0].nafter == 1);
+    assert(g_bb[0].actor==expected_bike);
+    assert(g_bb[0].absolute_before==0 && g_bb[0].absolute_after==1);
     assert(g_bb[0].occ_owner == 0x20000700u);
     assert(g_bb[0].occ_row == 0xabcdef01);
     assert(g_bb[0].ctx4 == -201 && g_bb[0].ctx5 == 202 && g_bb[0].ctx6 == -203);
@@ -120,6 +134,19 @@ int main(void) {
     hook_billboard(context, emu, 17, -23, -41, 0xfedcba98u, -7);
     assert(g_nsel == 0 && g_nbb == 0);
     assert(select_calls == 4099 && billboard_calls == 4099);
-    puts("actor record wrappers: forwarding, snapshots, bounds and reset passed");
+    /* A billboard can flush the entire pending list inside its call. The
+       local tail index resets, but its absolute index must stay monotonic. */
+    g_out=stdout;
+    reset_actor_records();
+    full_prefix=500;
+    list_end=list_base+250*0xa8;
+    flush_next=1;
+    hook_billboard(context,emu,17,-23,-41,0xfedcba98u,-7);
+    assert(g_bb[0].nbefore==250 && g_bb[0].nafter==1);
+    assert(g_bb[0].absolute_before==750 && g_bb[0].absolute_after==751);
+    suppress_next=1;
+    hook_billboard(context,emu,17,-23,-41,0xfedcba98u,-7);
+    assert(g_bb[1].absolute_before==751 && g_bb[1].absolute_after==751);
+    puts("actor record wrappers: forwarding, snapshots, bounds, reset, full-list flush and suppressed output passed");
     return 0;
 }

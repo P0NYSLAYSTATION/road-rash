@@ -1,4 +1,5 @@
 #include "scenery.hpp"
+#include "track_ring.hpp"
 #include <algorithm>
 #include <cstring>
 namespace rr {
@@ -10,6 +11,17 @@ int32_t wrap(int64_t v) {
     return result;
 }
 } // namespace
+std::vector<SceneryObject> ring_scenery(const RingStatics& slice) {
+    std::vector<SceneryObject> out;
+    out.reserve(size_t(slice.borr_count)+slice.billboards);
+    for(uint8_t i=0;i<slice.borr_count;++i)
+        out.push_back({0,slice.borr[i],slice.borr_selector,slice.borr_size,0,slice.borr_mirror,false,slice.grounds_ready ? std::optional<int32_t>(slice.borr_ground[i]) : std::nullopt});
+    for(uint8_t i=0;i<slice.billboards;++i) {
+        const auto& object=slice.billboard[i];
+        out.push_back({0,object.offset,object.selector,8,object.type,object.mirror,true,slice.grounds_ready ? std::optional<int32_t>(slice.billboard_ground[i]) : std::nullopt});
+    }
+    return out;
+}
 std::vector<SceneryObject> roadside_objects(const CourseSection& section, std::function<uint32_t()> random) {
     std::vector<SceneryObject> result;
     if (section.roadside_profiles.empty()) return result;
@@ -116,7 +128,7 @@ DrawNode scenery_node(const AnimationFrame& frame, const SceneryObject& object, 
     const int32_t y = wrap(int64_t(camera.height - road_y - ground_y) * projection -
                            int64_t(frame.hotspot[1]) * scale + 90 * 65536);
     const int32_t right = wrap(int64_t(x) + (object.mirror ? -1 : 1) * int64_t(width) * scale),
-                  bottom = wrap(int64_t(y) + int64_t(height + 1) * scale);
+                  bottom = wrap(int64_t(y) + int64_t(height) * scale);
     return {{{{x, y}, {right, y}, {right, bottom}, {x, bottom}}},
             frame.texture.get(),
             std::nullopt,

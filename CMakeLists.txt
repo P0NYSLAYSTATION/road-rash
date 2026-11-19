@@ -328,11 +328,17 @@ else()
             add_test(NAME oracle-terrain-window-${render_course} COMMAND oracle-scene-test --ordered-terrain
                 "${RR_TEST_TERRAIN_WINDOWS_DIR}/${render_fixture}")
             set_tests_properties(oracle-terrain-window-${render_course} PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture")
+            add_test(NAME oracle-static-window-${render_course} COMMAND oracle-scene-test --native-static-window
+                "${RR_TEST_TERRAIN_WINDOWS_DIR}/${render_fixture}")
+            set_tests_properties(oracle-static-window-${render_course} PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture")
         endforeach()
         foreach(render_pose IN ITEMS 2864 4514)
             add_test(NAME oracle-terrain-split-${render_pose} COMMAND oracle-scene-test --ordered-terrain
                 "${RR_TEST_TERRAIN_WINDOWS_DIR}/napa-right-entry-${render_pose}-20261114.tsv")
             set_tests_properties(oracle-terrain-split-${render_pose} PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture")
+            add_test(NAME oracle-static-split-${render_pose} COMMAND oracle-scene-test --native-static-window
+                "${RR_TEST_TERRAIN_WINDOWS_DIR}/napa-right-entry-${render_pose}-20261114.tsv")
+            set_tests_properties(oracle-static-split-${render_pose} PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture")
         endforeach()
         add_executable(oracle-raster-test tests/oracle_raster_test.cpp)
         target_link_libraries(oracle-raster-test PRIVATE rr-resource)

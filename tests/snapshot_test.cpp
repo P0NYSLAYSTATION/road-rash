@@ -169,6 +169,20 @@ int main(int argc, char** argv) {
             for(size_t i=0;i<std::min(a.size(),b.size());++i)if(a[i]!=b[i])std::cerr<<"tracker "<<i<<" "<<a[i]<<" / "<<b[i]<<"\n";
         }
         check(rr::state_hash(live)==rr::state_hash(copy),"real course riders, cars, pedestrians and ring cursors round-trip");
+        size_t retained_props=0;
+        for(int32_t at=live.ring->back_q8()&~255;at<live.ring->front_q8();at+=256) {
+            for(uint8_t half=0;half<2;++half) {
+                const auto a=live.ring->render_statics(at,half),b=copy.ring->render_statics(at,half);
+                check(bool(a)==bool(b),"snapshot preserves scenery slot validity");
+                if(!a || !b) continue;
+                check(a->grounds_ready==b->grounds_ready && a->borr_ground==b->borr_ground &&
+                      a->billboard_ground==b->billboard_ground && a->borr_size==b->borr_size &&
+                      a->borr_mirror==b->borr_mirror,"snapshot preserves cached scenery heights and render flags");
+                check(live.ring->slice_bands(at)==copy.ring->slice_bands(at),"snapshot preserves inward hill band limits");
+                retained_props+=a->grounds_ready*(a->borr_count+a->billboards);
+            }
+        }
+        check(retained_props>0,"snapshot exercises populated construction-time scenery caches");
         for(int t=0;t<120;++t){
             live.race->step(controls);copy.race->step(controls);
             check(rr::state_hash(live)==rr::state_hash(copy),"real restored race continues identically without reanchoring RNG");

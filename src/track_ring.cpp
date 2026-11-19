@@ -239,6 +239,9 @@ void TrackRing::Borr::slots(const PathSample& path, const Random& draw, RingStat
     }
     out.borr_count = uint8_t(count + 1);
     out.borr_selector = selector;
+    const uint32_t word=words->at(size_t(record));
+    out.borr_size=uint8_t((word>>4)&15);
+    out.borr_mirror=(word&0x40000000u)!=0;
 }
 
 void TrackRing::enter(SectionWalker& w, uint32_t offset, bool start) {
@@ -589,6 +592,22 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         stored.edges[h] = {half.offset - path.left - path.shoulder_left,
                            half.offset + path.right + path.shoulder_right};
     }
+    // 0045465b..00454680 / 00451c20: complete the previous slice's
+    // cached prop heights before joining this newly built split terrain.
+    if(static_ground_) {
+        const int32_t target=w.front ? ring_q8-256 : ring_q8;
+        auto& from=shoulders_[size_t((uint32_t(target)>>8)&127)];
+        auto& to=shoulders_[size_t(((uint32_t(target)>>8)+1)&127)];
+        if(from.count && to.count && (from.position&~255)==(target&~255) &&
+           (to.position&~255)==((target+256)&~255)) {
+            for(uint8_t h=0;h<from.count;++h) {
+                const uint8_t next_half=to.count==1 ? 0 : from.count==1 ? w.active : h;
+                auto here=retained_sample(target,h);
+                auto next=(from.closed&(1u<<h)) ? here : retained_sample(target+256,next_half);
+                if(here && next) static_ground_(*here,*next,from.statics[h]);
+            }
+        }
+    }
     //00454890 runs after both halves are built. Its writes include hill
     //heights and polyline joins, not just the narrowing shoulder edges.
     if (w.dual) {
@@ -652,7 +671,7 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
         if (!(r[0] & 0x80000000u)) { // billboard (+0x40 + 16n, two at most): no draw
             if (statics.billboards < 2) {
                 const int32_t offset = (r[1] & 0x800) ? int32_t(r[1] | 0xfffff000u) : int32_t(r[1] & 0xfff);
-                statics.billboard[statics.billboards++] = {uint8_t(r[0] & 15), uint8_t(r[0] >> 8), offset};
+                statics.billboard[statics.billboards++] = {uint8_t(r[0] & 15), uint8_t(r[0] >> 8), offset, (r[0]&0x80)!=0};
             }
             continue;
         }
@@ -664,6 +683,7 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
         mine[i][0] |= 0x3f00u;
         list = &mine;
     }
+    shoulders_[size_t((uint32_t(ring_q8)>>8)&127)].statics[physical_half]=statics;
     if (static_sink_) static_sink_(ring_q8 >> 8, node.link, local, statics);
 }
 

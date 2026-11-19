@@ -4914,3 +4914,17 @@ blend, retained selected branch during the chase lag, and rebased interpolated
 camera X into the drawn slice. The live Napa test covers both branch handoffs
 and761 valid lane probes; original disassembly and scope are recorded in the
 [handoff](agent-handoffs/live-split-camera-20261114.md).
+
+
+## Native scenery windows (2026-11-19)
+
+Seven original native-static-window gates match1976 nodes with zero missing, extra
+or draw-order differences, including both retained Napa split entries. These are
+component comparisons using original world inputs, including cached ground heights.
+Natural actor components match16+56 nodes. Cache/ring/record tests pass after making
+the direct-render cache reference use the same live ring as gameplay.
+[Commands, receipts, initial failures and remaining coverage](agent-handoffs/native-scenery-parity-20261119.md).
+
+Final focused gate25/25 passes without skips; strict five finished human races
+match143764ticks including RNG (single anchor), no divergences. Receipts:
+`build/scenery-final-focused-gate.log`, `build/scenery-five-finishes.json`.

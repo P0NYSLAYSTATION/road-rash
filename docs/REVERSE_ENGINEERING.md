@@ -3104,3 +3104,13 @@ blend, retained selected branch during the chase lag, and rebased interpolated
 camera X into the drawn slice. The live Napa test covers both branch handoffs
 and761 valid lane probes; original disassembly and scope are recorded in the
 [handoff](agent-handoffs/live-split-camera-20261114.md).
+
+
+## Static prop construction and draw sequence (Windows, 2026-11-19)
+
+Working original00438610 orders DZHR types3..11, far actors, remaining DZHR, BORR,
+then near actors.0044b9c9 supplies fixed DZHR scale8; entry+2 is type, not scale.
+00451c20 caches BORR grounds at sub+8c and DZHR grounds at entry+0c, completing
+the preceding slice before the new neighbour's split adjustment. Ground queries
+use physical slice offsets.00450960's one-based row helpers yield the texture-bound
+height, not height+1. [Disassembly and measured windows](agent-handoffs/native-scenery-parity-20261119.md).

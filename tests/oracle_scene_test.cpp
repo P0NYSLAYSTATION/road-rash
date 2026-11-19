@@ -17,6 +17,7 @@
 //     vs dump node colour (+0x38).
 #include "actor_nodes.hpp"
 #include "course_scene.hpp"
+#include "track_ring.hpp"
 #include "terrain_ground.hpp"
 #include "course.hpp"
 #include "golden.hpp"
@@ -140,16 +141,32 @@ int native_actors(const std::string& tsv, const rr::Assets& assets) {
                 const int32_t clip = int32_t(key(frame, "actor.bb." + std::to_string(b) + ".clip"));
                 const int32_t lateral = int32_t(key(frame, "actor.bb." + std::to_string(b) + ".lateral"));
                 const int32_t ground = int32_t(key(frame, "actor.bb." + std::to_string(b) + ".ground"));
-                const int64_t nafter = key(frame, "actor.bb." + std::to_string(b) + ".nafter", -1);
-                if (nafter < 1 || nafter > int64_t(dump.nodes.size()))
-                    continue; // flushed: in photo, not dump
-                // Find the half with this position (scheduler halves mirror +0x1c).
+                const bool full_list=key(frame,"scene.full_list",0)!=0;
+                if(full_list && !key(frame,"actor.bb.absolute_indices",0))
+                    throw std::runtime_error("Full-list actor comparison requires absolute billboard indices; recapture with current hooks");
+                const auto bp="actor.bb."+std::to_string(b)+".";
+                const int64_t nafter=key(frame,bp+(full_list?"absolute_after":"nafter"),-1);
+                const int64_t nbefore=key(frame,bp+(full_list?"absolute_before":"nbefore"),-1);
+                if(full_list && nafter==nbefore) continue; //original call emitted no node
+                if (nafter < 1 || nafter > int64_t(dump.nodes.size())) {
+                    if(full_list) throw std::runtime_error("Absolute billboard index outside complete display list");
+                    continue; //legacy tail capture lost this call in a flush
+                }
+                //The starting grid can place two riders at the same longitudinal
+                //position. New captures retain the actual selected actor address.
                 const rr::scene::RiderObjects* half = nullptr;
-                for (const auto& r : dump.riders) {
-                    if (r.bike.size() < 0x30) continue;
-                    if (blob_i32(r.bike, 0x1c) == pos && blob_i32(r.bike, 0xc4) == 8) {
-                        half = &r;
-                        break;
+                const uint32_t selected=uint32_t(key(frame,bp+"actor",0));
+                if(selected) {
+                    const auto found=halves.find(selected);
+                    if(found!=halves.end()) half=found->second;
+                } else {
+                    if(full_list) throw std::runtime_error("Full-list actor capture lacks selected actor identity");
+                    for (const auto& r : dump.riders) {
+                        if (r.bike.size() < 0xc8) continue;
+                        if (blob_i32(r.bike, 0x1c) == pos && blob_i32(r.bike, 0xc4) == 8) {
+                            half = &r;
+                            break;
+                        }
                     }
                 }
                 if (!half) {
@@ -350,7 +367,7 @@ int native_actors(const std::string& tsv, const rr::Assets& assets) {
 // flips. The dump holds only the post-flush tail, so native nodes without an
 // original counterpart are expected. Scenery and actors are reported only.
 // Riders' ground (+0x24) is checked against 0x00439b10 on the same values.
-int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_ground, bool window_mode, bool check_order) {
+int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_ground, bool window_mode, bool check_order, bool include_statics) {
     const auto golden = rr::golden::load(tsv);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
     const int course = int(golden.frames.at(0).at("course"));
@@ -397,6 +414,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
         auto route = routes[f.at("camera.half") ? 1 : 0];
         std::vector<int32_t> countdowns(route.size(),INT32_MIN);
         std::vector<std::array<int8_t,2>> bands(route.size(),{4,4});
+        std::vector<std::array<std::vector<rr::SceneryObject>,2>> placements(route.size());
         std::array<uint16_t,4> live_families{};
         for(uint32_t slot=0;slot<4;++slot) live_families[slot]=uint16_t(dump.memory.u32(0x004b7f10+slot*4));
         if(window_mode) {
@@ -422,6 +440,27 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
                     rs.node=uint32_t(I(0)); rs.local=uint32_t(I(4))>>8;
                     rs.offset=I(0xcc); rs.path.bend=I(0xb8); rs.path.rise=I(0xbc);
                     rs.path.elevation=I(0xc0);
+                    if(include_statics) {
+                        rr::RingStatics raw;
+                        raw.road_offset=rs.offset;
+                        raw.borr_count=dump.memory.u8(image+0x60);
+                        raw.borr_size=dump.memory.u8(image+0x62);
+                        raw.borr_mirror=(dump.memory.u8(image+0x64)&1)!=0;
+                        raw.borr_selector=dump.memory.u8(image+0x63);
+                        raw.billboards=dump.memory.u8(image+0x3d);
+                        if(raw.borr_count>8 || raw.billboards>2) throw std::runtime_error("Invalid original static count");
+                        for(uint8_t i=0;i<raw.borr_count;++i) {
+                            raw.borr[i]=I(0x6c+4*i)-rs.offset;
+                            raw.borr_ground[i]=I(0x8c+4*i);
+                        }
+                        for(uint8_t i=0;i<raw.billboards;++i) {
+                            const uint32_t at=image+0x40+16*i;
+                            raw.billboard_ground[i]=dump.memory.i32(at+12);
+                            raw.billboard[i]={dump.memory.u8(at+2),dump.memory.u8(at),dump.memory.i32(at+8)-rs.offset,(dump.memory.u8(at+1)&1)!=0};
+                        }
+                        raw.grounds_ready=true;
+                        placements[index][h]=rr::ring_scenery(raw);
+                    }
                     rs.path.marking_flags=dump.memory.u8(image+0x37);
                     rs.path.event_type=dump.memory.u8(image+0x38);
                     for(int p=0;p<3;++p) rs.path.event_parameters[p]=dump.memory.u8(image+0x39+p);
@@ -533,10 +572,13 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
         const uint32_t position = uint32_t(f.at("camera.position"));
         const rr::Camera camera{int32_t(f.at("camera.x")) - route[position >> 8].offset,
                                 int32_t(f.at("camera.height"))};
+        rr::CourseScene::ScenerySource scenery_source;
+        if(window_mode && include_statics)
+            scenery_source=[&](uint32_t sample,uint8_t half){return placements.at(sample)[half];};
         std::multimap<Key, IndexedNode> native;
         size_t native_order = 0;
         for (const auto& n :
-             scene.draw_nodes(route, rr::project_road(route, position, camera, depths), camera, depths,{},320,nullptr,window_mode?&countdowns:nullptr,window_mode?&live_families:nullptr,window_mode?&bands:nullptr)) {
+             scene.draw_nodes(route, rr::project_road(route, position, camera, depths), camera, depths,{},320,nullptr,window_mode?&countdowns:nullptr,window_mode?&live_families:nullptr,window_mode?&bands:nullptr,scenery_source)) {
             std::array<int32_t, 8> v{};
             for (size_t k = 0; k < 4; ++k) {
                 v[2 * k] = n.view_points[k].x;
@@ -553,7 +595,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
                 const auto* t = lib.find(s.hash, s.size);
                 name = t ? t->name : "?";
             }
-            if (!terrain.count(name) && name.rfind("flat",0)!=0) {
+            if (!include_statics && !terrain.count(name) && name.rfind("flat",0)!=0) {
                 ++others;
                 continue;
             }
@@ -647,7 +689,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
             size_t frame_extras=0;
             for(const auto& [key,indexed]:native) {
                 const auto& node = indexed.node;
-                if((node.texture && terrain.count(node.texture->name)) || (!node.texture && node.flat_index)) {
+                if((node.texture && (include_statics || terrain.count(node.texture->name))) || (!node.texture && node.flat_index)) {
                     ++frame_extras;
                     if(std::getenv("RR_TERRAIN_VERBOSE") && frame_extras<12) {
                         std::cout<<"  extra "<<(node.texture?node.texture->name:"flat")<<" at";
@@ -669,7 +711,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
         std::cout << "skip: capture has no scene frames\n";
         return rr::golden::skip;
     }
-    std::cout << frames << " frames: " << matched << " terrain nodes match, " << missing << " missing, "
+    std::cout << frames << " frames: " << matched << (include_statics?" terrain/scenery nodes match, ":" terrain nodes match, ") << missing << " missing, "
               << extras << " extra native terrain nodes; " << others << " scenery/actor nodes not compared; " << grounds << " rider grounds, "
               << ground_failures << " differ; " << cached_ground_differences
               << " stored grounds differ from fresh queries\n";
@@ -679,7 +721,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
 } // namespace
 
 int run(int argc, char** argv) {
-    bool actors_mode = false, terrain_mode = false, check_ground = true, window_mode = false, check_order = false;
+    bool actors_mode = false, terrain_mode = false, check_ground = true, window_mode = false, check_order = false, include_statics = false;
     const std::string dir = rr::golden::oracle_dir();
     std::string tsv = dir + "/city-scene.tsv";
     std::string assets_root = rr::test::assets_root();
@@ -689,6 +731,8 @@ int run(int argc, char** argv) {
             actors_mode = true;
         else if (a == "--native-window")
             terrain_mode = window_mode = true;
+        else if (a == "--native-static-window")
+            terrain_mode = window_mode = check_order = include_statics = true;
         else if (a == "--ordered-terrain")
             terrain_mode = window_mode = check_order = true;
         else if (a == "--native-terrain")
@@ -707,7 +751,7 @@ int run(int argc, char** argv) {
         return rr::golden::skip;
     }
     if (actors_mode) return native_actors(tsv, assets);
-    if (terrain_mode) return native_terrain(tsv, assets, check_ground, window_mode, check_order);
+    if (terrain_mode) return native_terrain(tsv, assets, check_ground, window_mode, check_order, include_statics);
     const auto golden = rr::golden::load(tsv);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
     const int course = int(golden.frames.at(0).at("course"));

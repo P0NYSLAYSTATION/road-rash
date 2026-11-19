@@ -18,17 +18,21 @@ static struct {
     uint32_t bike, ctx, desc[5], a8, b0, b4, bc, view;
     int32_t f1c, f28, f44, f50;
 } g_sel[512];
-static uint32_t g_nsel;
+static uint32_t g_nsel, g_latest_selected_actor;
+#ifndef RR_ACTOR_ABSOLUTE_COUNT
+#define RR_ACTOR_ABSOLUTE_COUNT(base,end) ((end)>=(base) ? (int32_t)(((end)-(base))/0xa8) : -1)
+#endif
 static struct {
     int32_t size, lateral, ground, pre_lat;
-    uint32_t pos;
-    int32_t clip, nbefore, nafter;
+    uint32_t pos, actor;
+    int32_t clip, nbefore, nafter, absolute_before, absolute_after;
     uint32_t occ_owner, occ_row;
     int32_t ctx4, ctx5, ctx6;
     uint32_t emu, emuw[6];
 } g_bb[512];
 static uint32_t g_nbb;
 static void __fastcall hook_select(uint32_t bike, int ctx) {
+    g_latest_selected_actor=bike;
     uint32_t desc = 0, d0 = 0, d1 = 0, d2 = 0, d3 = 0, d4 = 0;
     int32_t f1c = 0, f28 = 0, f44 = 0, f50 = 0;
     if (readable(bike + 0x98, 4)) {
@@ -74,6 +78,7 @@ static void __fastcall hook_billboard(int* p1, unsigned* p2, int size, int later
                                       signed char clip) {
     const uint32_t base = (uint32_t)RD32(0x0049e66c), end = (uint32_t)RD32(0x0049e660);
     const int32_t nbefore = end >= base ? (int32_t)((end - base) / 0xa8) : -1;
+    const int32_t absolute_before = RR_ACTOR_ABSOLUTE_COUNT(base,end);
     const int32_t pre_lat = lateral; // params may not survive the forwarded call; snapshot first
     // Node emu (param_2) words before the call: [0]=+a8 resource, [2]=+b0,
     // [3]=+b4, [4]=+b8, [5]=+bc roll. Settles the emu-vs-address question.
@@ -89,9 +94,12 @@ static void __fastcall hook_billboard(int* p1, unsigned* p2, int size, int later
     g_bb[g_nbb].ground = ground;
     g_bb[g_nbb].pre_lat = pre_lat;
     g_bb[g_nbb].pos = pos;
+    g_bb[g_nbb].actor = g_latest_selected_actor;
     g_bb[g_nbb].clip = clip;
     g_bb[g_nbb].nbefore = nbefore;
     g_bb[g_nbb].nafter = e2 >= base ? (int32_t)((e2 - base) / 0xa8) : -1;
+    g_bb[g_nbb].absolute_before = absolute_before;
+    g_bb[g_nbb].absolute_after = RR_ACTOR_ABSOLUTE_COUNT(base,e2);
     g_bb[g_nbb].emu = emu;
     for (int w = 0; w < 6; ++w) g_bb[g_nbb].emuw[w] = emuw[w];
     // Slice context (param_1): [2] occlusion owner, [4]/[5] road origin,
@@ -118,5 +126,6 @@ static void __fastcall hook_billboard(int* p1, unsigned* p2, int size, int later
 static void reset_actor_records(void) {
     g_nsel = 0;
     g_nbb = 0;
+    g_latest_selected_actor = 0;
 }
 #endif

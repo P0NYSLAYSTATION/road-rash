@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
                         [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road,
                             int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) {
                             return game.rider_nodes(near, far, road, ceiling, back, lateral_min, lateral_max);
-                        }, game.logical_width());
+                        }, game.logical_width(), game.instance.ring.get());
                     rr::render_nodes(direct, direct_nodes, rr::view_mode_wide(scale, game.logical_width()), 16);
                     check(no_hud == hash_bytes(direct.row(0), size_t(direct.width()) * direct.height()),
                           "Retained Original scene differs from direct unthreaded rendering");

@@ -37,14 +37,19 @@ struct RingStatics {
     int physical_half = -1; // -1: standalone fixture identified by section/local
     bool dual = false;
     int32_t road_offset = 0, road_left = 0, road_right = 0;
-    uint8_t borr_count = 0, borr_selector = 0x3f;
+    uint8_t borr_count = 0, borr_selector = 0x3f, borr_size = 8;
+    bool borr_mirror = false;
     std::array<int32_t, 8> borr{};
     uint8_t billboards = 0;
     struct Billboard {
         uint8_t type = 0, selector = 0;
         int32_t offset = 0;
+        bool mirror = false;
     };
     std::array<Billboard, 2> billboard{};
+    bool grounds_ready = false;
+    std::array<int32_t,8> borr_ground{};
+    std::array<int32_t,2> billboard_ground{};
 };
 struct TrackWalkerState {
     int32_t position = 0;
@@ -81,6 +86,8 @@ class TrackRing {
     using StaticSink =
         std::function<void(int32_t ring_sample, uint32_t section, uint32_t local, const RingStatics&)>;
     void set_static_sink(StaticSink sink) { static_sink_ = std::move(sink); }
+    using StaticGround = std::function<void(const RouteSample&, const RouteSample&, RingStatics&)>;
+    void set_static_ground(StaticGround source) { static_ground_ = std::move(source); }
     // Copyable for race snapshots (plan 34 Task 3): course data is shared,
     // the per-node DZHR record lists are copy-on-write.
     TrackRing(const TrackRing&) = default;
@@ -116,6 +123,11 @@ class TrackRing {
     }
     bool forward_closed(int32_t position, uint8_t half) const {
         return (shoulders_[size_t((uint32_t(position) >> 8) & 127)].closed & (1u << half)) != 0;
+    }
+    std::optional<RingStatics> render_statics(int32_t position, uint8_t half) const {
+        const auto& cell=shoulders_[size_t((uint32_t(position)>>8)&127)];
+        if (!cell.count || (cell.position&~255)!=(position&~255) || half>1) return std::nullopt;
+        return cell.statics[cell.count==1?0:half];
     }
     std::array<int8_t,2> slice_bands(int32_t position) const {
         return shoulders_[size_t((uint32_t(position) >> 8) & 127)].bands;
@@ -273,6 +285,7 @@ class TrackRing {
         uint8_t closed = 0;
         int8_t countdown = 0;
         std::array<int8_t,2> bands{4,4}; // original row+1f/+20
+        std::array<RingStatics,2> statics{}; //same live placements used by collision
         uint8_t motion_valid = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
         std::array<std::array<int32_t, 2>, 2> lanes{};
@@ -311,6 +324,7 @@ class TrackRing {
     bool unsupported_ = false;
     SliceSink slice_sink_;
     StaticSink static_sink_;
+    StaticGround static_ground_;
     struct FamilyRequest { uint16_t family; uint8_t slot, type; };
     std::array<FamilyRequest, 8> family_queue_{};
     uint8_t family_read_ = 0, family_write_ = 0;

@@ -34,6 +34,7 @@ class CourseScene {
     CourseScene(const Assets&, const std::vector<uint8_t>& exe, const Course&, const std::string& course_name,
                 uint32_t terrain_seed = 1, int level = 0);
     const TerrainSlice& terrain(uint32_t section, uint32_t local) const;
+    void cache_static_ground(const RouteSample&, const RouteSample&, RingStatics&) const;
     // Oracle fixtures: replace one sample's terrain values (e.g. those an
     // original scene dump holds, drawn from the live race random stream).
     void set_terrain(uint32_t section, uint32_t local, const TerrainSlice& slice) {
@@ -65,9 +66,10 @@ class CourseScene {
     // Marked transitions and split stitching remain integration work.
     using ActorEmitter =
         std::function<std::vector<DrawNode>(const RoadSlice&, const RoadSlice&, int, int32_t, bool, int32_t, int32_t)>;
+    using ScenerySource=std::function<std::vector<SceneryObject>(uint32_t,uint8_t)>;
     std::vector<DrawNode> draw_nodes(const std::vector<RouteSample>& route,
                                      const std::vector<RoadSlice>& slices, const Camera&, const DepthTable&,
-                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr, const std::vector<int32_t>* view_countdowns = nullptr, const std::array<uint16_t,4>* view_families = nullptr, const std::vector<std::array<int8_t,2>>* view_bands = nullptr) const;
+                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr, const std::vector<int32_t>* view_countdowns = nullptr, const std::array<uint16_t,4>* view_families = nullptr, const std::vector<std::array<int8_t,2>>* view_bands = nullptr, ScenerySource scenery_source = {}) const;
     void draw_horizon(Framebuffer&, int32_t scroll, int32_t logical_width = 320) const;
     const std::vector<SceneryObject>& objects(uint32_t section, uint32_t local) const;
     const AnimationFrame* object_frame(uint32_t section, uint32_t local, const SceneryObject&) const;

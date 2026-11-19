@@ -39,6 +39,12 @@ struct Archive {
     template<class A,class B>void value(std::pair<A,B>& v){(*this)(v.first,v.second);}
     void value(PathSample& v){(*this)(v.bend,v.rise,v.left,v.right,v.left_q8,v.right_q8,v.shoulder_left,v.shoulder_right,v.height_left,v.height_right,v.side_flags,v.marking_flags,v.event_type,v.event_parameters,v.zone_end,v.event_start,v.event_end,v.elevation);}
     void value(RouteSample& v){(*this)(v.path,v.node,v.section,v.local,v.offset,v.dual,v.half,v.event,v.other,v.other_node,v.other_section,v.other_local,v.other_offset,v.dx_sep,v.x_sep);}
+    void value(RingStatics::Billboard& v){(*this)(v.type,v.selector,v.offset,v.mirror);}
+    void value(RingStatics& v){
+        (*this)(v.physical_half,v.dual,v.road_offset,v.road_left,v.road_right,v.borr_count,v.borr_selector,v.borr_size,v.borr_mirror,v.borr,v.billboards,v.billboard,v.grounds_ready,v.borr_ground,v.billboard_ground);
+        if(v.physical_half < -1 || v.physical_half>1 || v.borr_count>8 || v.borr_size>15 || v.billboards>2)
+            throw std::runtime_error("Invalid snapshot scenery metadata");
+    }
     void value(Bike& v){value(v.m);}
     void value(ActorAnimationState& v){(*this)(v.animation,v.frame,v.queued,v.loops,v.deadline,v.selected);}
     void value(SoundEventRecord& v){uint8_t code=uint8_t(v.code);(*this)(code,v.lateral,v.height,v.position,v.speed,v.argument,v.source);if(code>22)throw std::runtime_error("Invalid snapshot sound");v.code=SoundEvent(code);}
@@ -113,7 +119,7 @@ struct SnapshotStateCodec {
         auto window=[&](auto& v){a(v.active,v.dx_sep,v.x_sep,v.threshold);if(v.active>1)throw std::runtime_error("Invalid window half");for(auto& h:v.halves)half(h);};
         if(a.reading){for(uint32_t i=0;i<windows;++i){uint32_t key=0;a(key);if(!ring.course_->nodes.contains(key)||ring.windows_->contains(key))throw std::runtime_error("Invalid ring window key");window((*ring.windows_)[key]);}}
         else for(auto& [key,v]:*ring.windows_){auto k=key;a(k);window(v);}
-        for(auto& v:ring.shoulders_)a(v.position,v.count,v.closed,v.countdown,v.motion_valid,v.edges,v.lanes,v.location,v.motion,v.roadway_masks,v.offsets,v.samples);
+        for(auto& v:ring.shoulders_)a(v.position,v.count,v.closed,v.countdown,v.bands,v.statics,v.motion_valid,v.edges,v.lanes,v.location,v.motion,v.roadway_masks,v.offsets,v.samples);
         auto ref=[&](auto& v){a(v.slot,v.half);if(v.slot>=128||v.half>1)throw std::runtime_error("Invalid tracker slice");};
         for(auto& v:ring.trackers_){a(v.active,v.kind,v.position);ref(v.slice);if(v.kind>1)throw std::runtime_error("Invalid tracker kind");}
         for(auto& list:ring.tracker_lists_){a.vector(list,4);for(auto index:list)if(index>=4)throw std::runtime_error("Invalid tracker index");}
@@ -134,7 +140,7 @@ struct SnapshotStateCodec {
     }
     static void state(Archive& a,RaceState& copy){
         auto& r=*copy.race;
-        uint32_t schema=2;a(schema);if(schema!=2)throw std::runtime_error("Unknown snapshot schema");
+        uint32_t schema=3;a(schema);if(schema!=3)throw std::runtime_error("Unknown snapshot schema");
         a(r.countdown_started_,r.pace_band_tick_,r.actor_seat_,r.controls_,r.slot_ac_,r.box_draw_pending_,r.box_draw_camera_);
         a.vector(r.schedule_,32);
         uint32_t ground_count=uint32_t(r.ground_.size());a(ground_count);

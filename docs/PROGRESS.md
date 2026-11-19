@@ -3640,3 +3640,11 @@ blend, retained selected branch during the chase lag, and rebased interpolated
 camera X into the drawn slice. The live Napa test covers both branch handoffs
 and761 valid lane probes; original disassembly and scope are recorded in the
 [handoff](agent-handoffs/live-split-camera-20261114.md).
+
+
+## Native live scenery rendering
+
+Live ring placements now drive scenery drawing, retaining original scale, mirror,
+construction-time ground and actor/scenery painter phases. Seven original course
+and split windows match1976 nodes exactly. Full composed race-frame parity remains
+open; see [evidence and limits](agent-handoffs/native-scenery-parity-20261119.md).

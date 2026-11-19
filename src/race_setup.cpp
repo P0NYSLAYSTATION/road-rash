@@ -413,6 +413,9 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
         if (assets.scene) {
             auto* scene = assets.scene.get();
             Race* r = race.get();
+            out.ring->set_static_ground([scene](const RouteSample& here,const RouteSample& next,RingStatics& statics) {
+                scene->cache_static_ground(here,next,statics);
+            });
             out.ring->set_slice_sink([scene, r](uint32_t section, uint32_t local, const PathSample& path,
                                                 const TerrainSlice& slice) {
                 scene->apply_ring_terrain(section, local, path, slice); // render view

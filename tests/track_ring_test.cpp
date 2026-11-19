@@ -70,6 +70,26 @@ rr::Course window_course(uint32_t branch_length) {
     return c;
 }
 
+void scenery_cache() {
+    const auto course=synthetic_course();
+    rr::TrackRing ring(course,0);
+    uint32_t draws=0,calls=0;
+    const rr::TrackRing::Random random=[&]{++draws;return 0u;};
+    ring.set_static_ground([&](const rr::RouteSample& here,const rr::RouteSample& next,rr::RingStatics& value){
+        check(next.local==here.local+1,"prop ground cache receives adjacent physical slices");
+        ++calls;value.grounds_ready=true;value.borr_ground[0]=-int32_t(here.local);
+    });
+    ring.setup(50*256,random,{});
+    const auto at=ring.render_statics(50*256,0);
+    check(at && at->grounds_ready && at->borr_ground[0]==-50,"live ring retains construction-time prop ground");
+    check(calls==127,"forward construction completes each preceding slice exactly once");
+    check(!ring.render_statics(178*256,0),"render statics reject stale wrapped slot");
+    const auto before=draws;
+    auto copy=ring;
+    const auto saved=copy.render_statics(50*256,0);
+    check(saved && saved->borr_ground==at->borr_ground && draws==before,"ring copy preserves scenery without RNG");
+}
+
 void family_requests() {
     auto course = synthetic_course();
     course.sections[0].family_events = {{0, 1, 0, 10}, {0, 1, 1, 20},
@@ -288,6 +308,7 @@ void window_walks() {
 } // namespace
 
 int main() {
+    scenery_cache();
     family_requests();
     finish_discovery();
     split_shoulders();

@@ -1,4 +1,5 @@
 #include "scenery.hpp"
+#include "track_ring.hpp"
 #include "golden.hpp"
 #include <filesystem>
 #include <iostream>
@@ -24,6 +25,14 @@ int main(int argc, char** argv) {
             objects[1].sample != 2 || objects[1].lateral != 37 || objects[0].selector != 0x83 ||
             !objects[0].static_family)
             throw std::runtime_error("Static event placement");
+        rr::RingStatics retained;
+        retained.borr_count=1;retained.borr[0]=-500;retained.borr_size=5;retained.borr_mirror=true;
+        retained.billboards=1;retained.billboard[0]={3,7,900,true};
+        retained.grounds_ready=true;retained.borr_ground[0]=-12;retained.billboard_ground[0]=27;
+        const auto live=rr::ring_scenery(retained);
+        if(live.size()!=2 || live[0].size!=5 || !live[0].mirror || live[0].ground!=-12 ||
+           live[1].size!=8 || live[1].type!=3 || live[1].ground!=27 || !live[1].mirror)
+            throw std::runtime_error("Live scenery cache lost descriptor or construction height");
         rr::AnimationFrame frame;
         auto texture = std::make_shared<rr::CelTexture>();
         texture->bounds = {0, 0, 48, 17};
@@ -36,7 +45,7 @@ int main(int argc, char** argv) {
         object.size = 8;
         const auto node = rr::scenery_node(frame, object, 0, 0, 0, 512, {0, 150}, table);
         if (node.view_points[0].x != 236 * 65536 || node.view_points[0].y != 148 * 65536 ||
-            node.view_points[2].x != 284 * 65536 || node.view_points[2].y != 166 * 65536)
+            node.view_points[2].x != 284 * 65536 || node.view_points[2].y != 165 * 65536)
             throw std::runtime_error("Billboard projection");
         object.mirror = true;
         const auto mirror = rr::scenery_node(frame, object, 0, 0, 0, 512, {0, 150}, table);

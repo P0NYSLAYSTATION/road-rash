@@ -10,7 +10,10 @@ struct SceneryObject {
     int32_t lateral = 0;
     uint8_t selector = 0, size = 8, type = 0;
     bool mirror = false, static_family = false;
+    std::optional<int32_t> ground; // original 00451c20 construction-time cache
 };
+struct RingStatics;
+std::vector<SceneryObject> ring_scenery(const RingStatics&);
 std::vector<SceneryObject> roadside_objects(const CourseSection&, std::function<uint32_t()> random);
 std::vector<SceneryObject> placed_scenery(const CourseSection&, int level, std::function<uint32_t()> random);
 // DZHR actor record (word0 bit 31) after the 0x00451fc0 level gate and

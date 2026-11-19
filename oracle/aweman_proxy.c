@@ -1713,6 +1713,7 @@ typedef struct { unsigned char node[0xa8], resource[0x60]; uint32_t hash, size; 
 static full_scene_node* g_full_nodes;
 static uint32_t g_full_count, g_full_capacity;
 static void capture_full_nodes(void);
+static uint32_t full_node_position(void);
 static LONG CALLBACK render_capture_exception(EXCEPTION_POINTERS* e) {
     if (g_full_scene && g_out && e->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
         CONTEXT* c=e->ContextRecord;
@@ -3556,6 +3557,7 @@ static void __fastcall hook_project(uint32_t a, int* b, int c, int* d, int e) {
 // two 0x0043af60 view-selection calls and two 0x0044ba40 billboard calls in
 // 0x00446250 at their call sites. Buffered during 0x004439f0 and flushed in
 // dump_frame (records belong to the frame being dumped).
+#define RR_ACTOR_ABSOLUTE_COUNT(base,end) (g_full_scene ? (int32_t)full_node_position() : ((end)>=(base) ? (int32_t)(((end)-(base))/0xa8) : -1))
 #include "actor_record_hooks.h"
 static void flush_actor_records(void) {
     char key[96];
@@ -3589,6 +3591,7 @@ static void flush_actor_records(void) {
         rr_log(key, g_sel[i].f50);
     }
     rr_log("actor.bb.count", g_nbb);
+    rr_log("actor.bb.absolute_indices", g_full_scene);
     for (uint32_t i = 0; i < g_nbb; ++i) {
         snprintf(key, sizeof key, "actor.bb.%u.size", i);
         rr_log(key, g_bb[i].size);
@@ -3598,12 +3601,18 @@ static void flush_actor_records(void) {
         rr_log(key, g_bb[i].ground);
         snprintf(key, sizeof key, "actor.bb.%u.pos", i);
         rr_log(key, g_bb[i].pos);
+        snprintf(key, sizeof key, "actor.bb.%u.actor", i);
+        rr_log(key,g_bb[i].actor);
         snprintf(key, sizeof key, "actor.bb.%u.clip", i);
         rr_log(key, g_bb[i].clip);
         snprintf(key, sizeof key, "actor.bb.%u.nbefore", i);
         rr_log(key, g_bb[i].nbefore);
         snprintf(key, sizeof key, "actor.bb.%u.nafter", i);
         rr_log(key, g_bb[i].nafter);
+        snprintf(key, sizeof key, "actor.bb.%u.absolute_before", i);
+        rr_log(key, g_bb[i].absolute_before);
+        snprintf(key, sizeof key, "actor.bb.%u.absolute_after", i);
+        rr_log(key, g_bb[i].absolute_after);
         snprintf(key, sizeof key, "actor.bb.%u.pre_lat", i);
         rr_log(key, g_bb[i].pre_lat);
         snprintf(key, sizeof key, "actor.bb.%u.occ_owner", i);

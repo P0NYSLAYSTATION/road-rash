@@ -191,6 +191,20 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
 const TerrainSlice& CourseScene::terrain(uint32_t section, uint32_t local) const {
     return terrain_.at(section).at(local);
 }
+// 00451c20 runs when the forward neighbour has been built, before that
+// neighbour's split-height adjustment. These cached heights survive later joins.
+void CourseScene::cache_static_ground(const RouteSample& here, const RouteSample& next,
+                                     RingStatics& statics) const {
+    const auto height=[&](int32_t lateral) {
+        const auto value=terrain_height(terrain(here.section,here.local),here.path,
+            terrain(next.section,next.local),next.path,lateral*256,128,
+            next.offset-here.offset,here.offset);
+        return value>=999 ? 0 : value;
+    };
+    for(uint8_t i=0;i<statics.borr_count;++i) statics.borr_ground[i]=height(statics.borr[i]);
+    for(uint8_t i=0;i<statics.billboards;++i) statics.billboard_ground[i]=height(statics.billboard[i].offset);
+    statics.grounds_ready=true;
+}
 void CourseScene::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample& path,
                                      const TerrainSlice& slice) {
     if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
@@ -580,7 +594,7 @@ void CourseScene::draw_horizon(Framebuffer& fb, int32_t scroll, int32_t logical_
 std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& route,
                                               const std::vector<RoadSlice>& slices, const Camera& camera,
                                               const DepthTable& depths, ActorEmitter actors,
-                                              int32_t logical_width, const TrackRing* ring, const std::vector<int32_t>* view_countdowns, const std::array<uint16_t,4>* view_families, const std::vector<std::array<int8_t,2>>* view_bands) const {
+                                              int32_t logical_width, const TrackRing* ring, const std::vector<int32_t>* view_countdowns, const std::array<uint16_t,4>* view_families, const std::vector<std::array<int8_t,2>>* view_bands, ScenerySource scenery_source) const {
     struct RestoreFamilies {
         std::optional<std::array<uint16_t,4>>& target;
         std::optional<std::array<uint16_t,4>> previous;
@@ -979,21 +993,45 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
 
             }
+            std::vector<SceneryObject> live_objects;
+            const auto* placements=&objects(road.section,road.local);
+            const uint8_t physical_half=uint8_t(closing?selected:r);
+            if (scenery_source) {
+                live_objects=scenery_source(near.sample,physical_half);
+                placements=&live_objects;
+            } else if (ring) {
+                if (const auto statics=ring->render_statics(int32_t(near.sample*256),physical_half)) {
+                    live_objects=ring_scenery(*statics);
+                    placements=&live_objects;
+                }
+            }
             auto range=[&](int32_t low,int32_t high) {
-                if(actors) append(actors(near,far,r,road.ceiling,true,low,high));
-                if(near.depth>146)
-                    for(const auto& object:objects(road.section,road.local)) {
+                // 00438610: DZHR types 3..11 precede the far actors;
+                // remaining DZHR billboards and then BORR precede near actors.
+                for(int pass=0;pass<3;++pass) {
+                    if(pass==1 && actors) append(actors(near,far,r,road.ceiling,true,low,high));
+                    if(near.depth<=146) continue;
+                    for(const auto& object:*placements) {
+                        const int phase=object.static_family ? (object.type>=3 && object.type<=11 ? 0 : 1) : 2;
+                        if(phase!=pass) continue;
                         const int32_t lateral=object.lateral+road.offset;
                         if(lateral<low || lateral>=high) continue;
                         const auto* image=object_frame(road.section,road.local,object);
                         if(!image || !image->texture) continue;
-                        int32_t ground=terrain_height(*road.terrain,path,*old.terrain,*old.path,
-                            object.lateral*256,128,a.road_x-b.road_x,road.offset);
-                        if(ground>998) ground=0;
-                        auto draw=scenery_node(*image,object,(a.road_x+b.road_x)/2+camera.x,
-                            (a.world_y+b.world_y)/2,ground,near.depth,camera,depths,logical_width);
+                        // 00439b10 interpolates physical sub-slice offsets, not
+                        // the camera's curved-road projection coordinates.
+                        int32_t ground=object.ground ? *object.ground :
+                            terrain_height(*road.terrain,path,*old.terrain,*old.path,
+                                object.lateral*256,128,old.offset-road.offset,road.offset);
+                        if(ground>=999) ground=0;
+                        auto draw=scenery_node(*image,object,(wrap(int64_t(a.road_x)+b.road_x)>>1)+camera.x,
+                            wrap(int64_t(a.world_y)+b.world_y)>>1,ground,near.depth,camera,depths,logical_width);
+                        const auto x0=draw.view_points[0].x, x1=draw.view_points[1].x;
+                        // 0044b83d..0044b8d9 rejects fully offscreen props.
+                        if(std::min(x0,x1)>=logical_width*65536 || std::max(x0,x1)<=0) continue;
                         if(draw.view_points[0].y<road.ceiling) result.push_back(draw);
                     }
+                }
                 if(actors) append(actors(near,far,r,road.ceiling,false,low,high));
             };
             if(path.event_type!=5) { range(-10000,10000); continue; }
