@@ -3682,3 +3682,19 @@ Live ring placements now drive scenery drawing, retaining original scale, mirror
 construction-time ground and actor/scenery painter phases. Seven original course
 and split windows match1976 nodes exactly. Full composed race-frame parity remains
 open; see [evidence and limits](agent-handoffs/native-scenery-parity-20261119.md).
+
+
+## Native composed race rendering (November 20, 2026)
+
+Restored the retained riding-half pose after contacts, intersection signal-head
+materials/hotspot history/order, side-specific prop ground at real forks, both
+physical sides at true merges and event4 divider endpoints. Native camera/world
+state now constructs every node in52 sampled Napa and35 sampled Highway lists
+through their finished recordings. Their87 original-list raster checks have zero
+pixel differences. Full Release build and42 focused regressions pass without skips.
+This is sparse rendering evidence, not all-frame/all-course rendering acceptance.
+No more original captures were run after the permitted Napa capture completed;
+its working DLL was restored. [Evidence, corrections and remaining capture needs](agent-handoffs/native-camera-parity-20261120.md).
+
+Strict five-course finished human replay acceptance also passes:143,764 ticks
+including RNG,5passes,0skips or divergences;`build/render-five-finishes.json`.

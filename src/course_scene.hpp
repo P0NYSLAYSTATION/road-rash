@@ -12,6 +12,7 @@
 namespace rr {
 class UpscaleCache;
 class TrackRing;
+struct IntersectionSignal;
 // A pedestrian family's FAMILIES.RSC category-2 resources, as 0x00440b80
 // loads them: resource 0 RRAN graphics, resource 1 CANS views, and the
 // animation codes 0..6 built from the EXE descriptor tables 0x0046de48,
@@ -34,7 +35,8 @@ class CourseScene {
     CourseScene(const Assets&, const std::vector<uint8_t>& exe, const Course&, const std::string& course_name,
                 uint32_t terrain_seed = 1, int level = 0);
     const TerrainSlice& terrain(uint32_t section, uint32_t local) const;
-    void cache_static_ground(const RouteSample&, const RouteSample&, RingStatics&, const TerrainSlice&, const TerrainSlice&) const;
+    void cache_static_ground(const RouteSample&, const RouteSample&, RingStatics&, const TerrainSlice&,
+        const TerrainSlice&,const RouteSample* right=nullptr,const TerrainSlice* right_terrain=nullptr) const;
     // Oracle fixtures: replace one sample's terrain values (e.g. those an
     // original scene dump holds, drawn from the live race random stream).
     void set_terrain(uint32_t section, uint32_t local, const TerrainSlice& slice) {
@@ -62,6 +64,9 @@ class CourseScene {
     void clear_upscaled();
     const CelTexture* material(uint32_t section, uint32_t local, uint8_t selector, uint8_t category,
                                std::optional<uint32_t> frame, int32_t width, int32_t height) const;
+    std::vector<DrawNode> signal_nodes(const IntersectionSignal&,int phase,const RoadSlice& near,
+        const RoadSlice& far,int road,const RouteSample&,const Camera&,const DepthTable&,
+        int32_t ceiling,int32_t logical_width=320) const;
     // Emits imported road, shoulder, hill, building and scenery geometry.
     // Marked transitions and split stitching remain integration work.
     using ActorEmitter =
@@ -129,6 +134,7 @@ class CourseScene {
     };
     std::vector<FamilyTimeline> family_timelines_;
     std::map<uint32_t, Family> families_;
+    mutable std::optional<std::array<int32_t,2>> signal_dimensions_;
     int level_ = 0;
     RoadMaterials roads_;
     std::array<int32_t, 32> road_separation_limits_{};

@@ -668,6 +668,8 @@ class Race {
     void move(Rider&, bool player);
     void vertical(Rider&, Rider* half_owner = nullptr);
     int32_t allocation_ground(const Rider&, const RouteSample& freshly_built) const;
+    int32_t allocation_ground_at(const std::vector<RouteSample>&,const RouteSample&,
+                                 size_t sample,int32_t position,int32_t lateral,uint8_t fraction) const;
     // 0x0043a610 on the sub-slice values of a route sample (absolute laterals).
     struct SubSliceView {
         int32_t e0 = 0, e4 = 0, e8 = 0, ec = 0;

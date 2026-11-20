@@ -121,7 +121,7 @@ std::vector<DrawNode> hill_intersection_nodes(const HillIntersectionInput& in,
 }
 std::vector<DrawNode> split_divider_nodes(const RoadSlice& near, const RoadSlice& far,
                                          const Camera& camera, const DepthTable& depths,
-                                         int32_t far_separation, int32_t near_separation) {
+                                         int32_t far_separation, int32_t near_separation, bool merge_window) {
     std::vector<DrawNode> result;
     if (near.count != 2 || far.count != 2 || far.road[0].screen_y >= 240 * 65536 ||
         near.road[0].screen_y == far.road[0].screen_y) return result;
@@ -181,8 +181,8 @@ std::vector<DrawNode> split_divider_nodes(const RoadSlice& near, const RoadSlice
             left.x = sub(left.x, mul(6, near.scale));
             right = point(near, 1, near.road[1].left + 6);
         }
-        flat({RasterPoint{sub(fl.x, far_width / 2), fl.y},
-              RasterPoint{add(fr.x, far_width / 2), fr.y}, right, left}, 0xe5);
+        flat({RasterPoint{merge_window ? fl.x : sub(fl.x, far_width / 2), fl.y},
+              RasterPoint{merge_window ? fr.x : add(fr.x, far_width / 2), merge_window ? fl.y : fr.y}, right, left}, 0xe5);
     }
     return result;
 }

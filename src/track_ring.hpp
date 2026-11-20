@@ -86,7 +86,7 @@ class TrackRing {
     using StaticSink =
         std::function<void(int32_t ring_sample, uint32_t section, uint32_t local, const RingStatics&)>;
     void set_static_sink(StaticSink sink) { static_sink_ = std::move(sink); }
-    using StaticGround = std::function<void(const RouteSample&, const RouteSample&, RingStatics&, TerrainSlice&, TerrainSlice&)>;
+    using StaticGround = std::function<void(const RouteSample&, const RouteSample&, RingStatics&, TerrainSlice&, TerrainSlice&, const RouteSample*, TerrainSlice*)>;
     void set_static_ground(StaticGround source) { static_ground_ = std::move(source); }
     // Copyable for race snapshots (plan 34 Task 3): course data is shared,
     // the per-node DZHR record lists are copy-on-write.

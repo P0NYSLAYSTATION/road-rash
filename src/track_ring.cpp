@@ -608,10 +608,15 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
                 // The discarded branch has no newly built forward neighbour;
                 // its last slice retains the previous contents of its cache.
                 if(from.closed&(1u<<h)) continue;
-                const uint8_t next_half=to.count==1 ? 0 : from.count==1 ? w.active : h;
+                // A merge window can also reveal a second retained arm;
+                // only a real departing split links the two physical sides.
+                const bool forks=from.count==1 && to.count==2 && to.samples[0].event==RoadEvent::split;
+                const uint8_t next_half=to.count==1 ? 0 : from.count==1 ? (forks ? 0 : w.active) : h;
                 auto here=retained_sample(target,h);
                 auto next=retained_sample(target+256,next_half);
-                if(here && next) static_ground_(*here,*next,from.statics[h],from.raw_ground[h],to.raw_ground[next_half]);
+                auto right=forks ? retained_sample(target+256,1) : std::optional<RouteSample>{};
+                if(here && next) static_ground_(*here,*next,from.statics[h],from.raw_ground[h],to.raw_ground[next_half],
+                    right ? &*right : nullptr,right ? &to.raw_ground[1] : nullptr);
             }
         }
     }

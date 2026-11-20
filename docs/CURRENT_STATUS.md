@@ -1,5 +1,11 @@
 # Current status and evidence
 
+**Windows race rendering, November 20:**42 focused regressions pass without skips.
+Native camera/world construction matches52 Napa and35 Highway sampled composed
+scene lists through finished recordings;87 original-list raster checks have zero
+pixel differences. Remaining complete-course/level/frame-history coverage is
+explicitly open. [Current evidence and capture constraint](agent-handoffs/native-camera-parity-20261120.md).
+
 Generated from `agent-status.json`. Historical entries describe their own checkpoints.
 
 | Area | Implementation | Verification / remaining acceptance | Evidence |

@@ -105,6 +105,7 @@ struct IntersectionSignal {
     int road = 0;
     bool active = false;
     uint64_t free_rank = 0;
+    uint64_t serial = 0;     // creation order for equal-position draw-list insertion
     int index = 0;           // +0xf8: 0..3; odd indices spawn crossing cars; type 0x40 << index
     int side = 0;            // 0x0041ef60 param_2: 0 left shoulder, 1 right
     int32_t phase = 0;       // +0xf0: 0..2, starts (~index & 1) * 2
@@ -112,6 +113,8 @@ struct IntersectionSignal {
     int lane = 0;            // +0xfc byte: zone length - 2 (indices 0/2) or start lanes (1/3)
     int32_t position_q8 = 0; // +0x1c: corner slice * 0x100 + 0x50 / 0xb0
     int32_t lateral_q8 = 0;  // +0x28: middle of that side's shoulder
+    int32_t ground = 0;      // 00438930 construction-time +24/+4c ground
+    uint8_t half = 0;        // physical roadway of the allocated signal
     int controller = -1;     // +0xec
     bool quiet = false;      // 0x0041eca0 bVar13: clears +0xdc (0x0041f220) when true
 };
@@ -187,10 +190,9 @@ class TrafficSystem {
     // 0x0041eca0 crossing traffic at intersections: controllers are placed
     // from type-1..3 zone ends in build_slice; think_intersections advances
     // phases and spawns crossing cars (kinds 1/3) before the car move pass.
-    // 0x00438170 precedes the driver's ring advance and 0x0044dd90. Signal heads are
-    // never drawn: DAT_00468ee8/ef0 have no writer anywhere in the
-    // executable (REA xrefs: only the 0x0041f220 reads), so 0x0041f220's
-    // draws are skipped and the port draws nothing, matching the original.
+    // 0x00438170 precedes the driver's ring advance and 0x0044dd90.
+    // 0041f220 draws signal heads: the 0046dfb0 load-descriptor table
+    // initializes00468ee8/ef0 indirectly (Napa complete-list evidence).
     // distance_moved is the per-step camera advance (0x0044b3b0). player_q8
     // and player_lateral are supplied by Race. tick is the global
     // tick (DAT_004b7ecc bit 3 gates crossing spawns). random is the
@@ -240,6 +242,8 @@ class TrafficSystem {
     void set_obstacle_scan(ObstacleScan scan) { obstacle_scan_ = std::move(scan); }
     // Terrain type of a route sample (0x00454240 +0x3c), for 0x0041eca0's
     // short-phase test; without it the long table is always used.
+    using SignalGround=std::function<int32_t(const std::vector<RouteSample>&,int32_t,int32_t,uint8_t)>;
+    void set_signal_ground(SignalGround source) { signal_ground_=std::move(source); }
     void set_terrain_type(std::function<int(const RouteSample&)> source) {
         terrain_type_ = std::move(source);
     }
@@ -303,6 +307,7 @@ class TrafficSystem {
     std::array<int32_t, 4> drift_rates_{}; // 0x00475694[kind] signed byte * 800
     std::vector<TrafficCar> cars_{pool_size};
     std::vector<SoundEventRecord> events_;
+    uint64_t signal_serial_ = 0;
     uint32_t serial_ = 0; // DAT_004b7e98
     uint64_t free_rank_ = 0;
     uint64_t controller_free_rank_ = 0, signal_free_rank_ = 0;
@@ -328,6 +333,7 @@ class TrafficSystem {
     std::vector<IntersectionSignal> signals_{signal_pool};
     std::vector<TrafficObstacle> obstacles_;
     std::function<int(const RouteSample&)> terrain_type_;
+    SignalGround signal_ground_;
     std::function<void(Bike&, size_t, size_t)> wall_response_;
     std::function<std::optional<std::pair<int32_t, int32_t>>(int32_t)> road_motion_;
     std::function<const TrackRing*(int32_t)> ring_source_;

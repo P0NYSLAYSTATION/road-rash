@@ -297,6 +297,7 @@ int main(int argc, char** argv) {
             }
             check(!drawn_nodes.empty() && wrong_slice.empty(),"drawn rider stays in its interpolated sample across a seven-sample live update");
             game.view_ready=false; me.bike.i32(0x1c)=int32_t(drawn);
+            me.half_mirror.position=int32_t(drawn);
             std::vector<rr::DrawNode> expected;
             for(size_t n=1;n<slices.size();++n) for(bool back:{false,true}) {
                 auto nodes=game.rider_nodes(slices[n-1],slices[n],0,240*65536,back);

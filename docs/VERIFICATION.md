@@ -29,7 +29,7 @@ Receipt:build/windows-v1133-published.json. Installer was not executed.
   Working E:/RR DLL restored; no capture process active.
 - PASS:build/release/oracle-sim-test.exe --render-scene --driver=human
   analysis/oracle/hiway-native-render-finish-20261119.tsv E:/RR.
-  20710ticks identical;35windows;1434prop placements/heights;9896generated
+  20,710 ticks identical;35 windows;1434prop placements/heights;9896generated
   complete-list nodes exact, no missing/extra/order mismatch.
   Log:build/hiway-native-finish-surface.log. Only viewport imported; this does
   not establish native-camera evolution, every race frame or pixel parity.
@@ -4973,3 +4973,28 @@ the direct-render cache reference use the same live ring as gameplay.
 Final focused gate25/25 passes without skips; strict five finished human races
 match143764ticks including RNG (single anchor), no divergences. Receipts:
 `build/scenery-final-focused-gate.log`, `build/scenery-five-finishes.json`.
+
+
+## Native composed rendering and pixel gate (November 20, 2026)
+
+`tools/build-local.ps1 -Configuration Release` passes; log
+`build/native-render-final-build.log`. Focused CTest rendering/ring/actor/scenery/
+traffic/view/snapshot regressions:42/42pass, no skips,129.21sec;
+`build/native-render-final-focused.log`. Registered gates include full retained
+Napa/Highway native scene construction and original-list raster repaint tests.
+Napa:52 windows,13,343 nodes,1,554 placements/heights; Highway:35 windows,9,896 nodes,
+1,434 placements/heights. All scene inputs are native; original viewport is checked,
+not imported. Original-list raster comparisons:87 frames, zero differences and
+unmatched resources. They use captured final pixels as the repaint base and do
+not prove independent background retention. New Napa replay reports12 audio-thread
+RPM timing notes and one golden-only metadata field; do not include these fields
+in a claim of total state equality. Simulation/RNG acceptance is separately receipted.
+
+Initial regressions (Highway merge-window neighbor, stale actor-placement fixture,
+incorrect signal-order test expectation) were fixed; no golden traces were changed.
+Original capture was completed/restored before the owner's no-further-capture
+constraint took effect. No additional captures or installer execution.
+[Detailed commands, evidence scope and new-capture requirements](agent-handoffs/native-camera-parity-20261120.md).
+
+Strict five-course finished human replay acceptance also passes:143,764 ticks
+including RNG,5passes,0skips or divergences;`build/render-five-finishes.json`.

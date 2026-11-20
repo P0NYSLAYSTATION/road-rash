@@ -1270,7 +1270,7 @@ Correction to the section above: layout entry 30 prints `DAT_0049e115`, the rout
   - Every car follows its nearest lane obstacle (`0x0044a070`, mask 0x3f, within `iVar7 << 5`; odd kinds look across the same sample) through `0x00449a80`.
   - Stop line: kind 0 at start + 0xa0, kind 2 at end − 0xa0, crossing cars at the road edge ∓0x60.
   - Red (phase 2) and close-enough yellow brake to 0 at the line; a car already past the line hurries (double speed, accel 0x24).
-  - Car think REA re-confirmation (October 12, 2026; plan 24 Task 1 input): pinned REA 6.4.0 pseudocode whitespace-identical for `0x0044e710` car think (10170 chars — second-largest confirmation to date), `0x0041f1f0` teardown (253) and `0x0041f220` signal draw (1548, dead in the original: heads never drawn). No new semantics beyond this section — the port was built from these exports; only the Step-5 capture + pixel frame remain open. Files: `analysis/oracle/rea-44e710-carthink.md`, `rea-41f1f0-teardown.md`, `rea-41f220-sigdraw.md` (disc-derived, git-ignored).
+  - Car think REA re-confirmation (October 12, 2026; plan 24 Task 1 input): pinned REA 6.4.0 pseudocode whitespace-identical for `0x0044e710` car think (10170 chars — second-largest confirmation to date), `0x0041f1f0` teardown (253) and `0x0041f220` signal draw (1548; the old claim that this path was dead is superseded by the November 20 signal-head evidence below). No new semantics beyond this section — the port was built from these exports; only the Step-5 capture + pixel frame remain open. Files: `analysis/oracle/rea-44e710-carthink.md`, `rea-41f1f0-teardown.md`, `rea-41f220-sigdraw.md` (disc-derived, git-ignored).
 - **Pedestrian signal `0x004415b0`.** Only on slices marked 8/0x10. Signal index 0 (lane ≥ 0) or 2, the nearer of ahead/behind within 0x1e0 (behind wins ties), when within 0x801.
   - Controller chain REA re-confirmation (October 12, 2026; plan 24 Task 1 Step 5 input): pinned REA 6.4.0 pseudocode whitespace-identical for `0x0041eca0` placement (2945 chars), `0x0041ef60` signal setup (910) and `0x0041f040` think (2022). No new semantics beyond the section above — this closes the "trace" half of Step 5's acceptance prerequisites; only the `city-intersection` capture + pixel frame remain open. Files: `analysis/oracle/rea-41eca0-ctlplace.md`, `rea-41ef60-signal.md`, `rea-41f040-think.md` (disc-derived, git-ignored).
 
@@ -3158,3 +3158,36 @@ then near actors.0044b9c9 supplies fixed DZHR scale8; entry+2 is type, not scale
 the preceding slice before the new neighbour's split adjustment. Ground queries
 use physical slice offsets.00450960's one-based row helpers yield the texture-bound
 height, not height+1. [Disassembly and measured windows](agent-handoffs/native-scenery-parity-20261119.md).
+
+
+## Composed race rendering corrections (November 20, 2026)
+
+`004067d0` copies the riding half before collision displacement changes its bike.
+Riding projection and interpolation use that retained position/lateral/roll and
+physical-road membership; crashed bike and body poses remain independent.
+
+**Signal-head correction:** the earlier “dead signal draw” conclusion was false.
+The `0046dfb0` load descriptors at `0046e078..0046e0b4` indirectly initialize
+`00468ee8/00468ef0/00468ef4/00468ef8` from GLOBAL CEL11..14. `0041f220` draws
+housing plus the controller's signal0 phase overlay, uses index bit2 mirroring,
+and uses the construction-time ground height. Housing CCB dimensions start75x159;
+`0044ba62` changes them to indexed bounds127x158 after its first projection call,
+including rejected projections. Each head keeps its prepared hotspot for the
+overlay. Equal-depth heads draw in reverse creation order. Native replay advances
+normal draw-list construction between sampled comparisons to preserve this state.
+
+`00439b10` follows side-specific forward links (`sub+8` left, `sub+c` right).
+The final common slice before a split therefore caches right-side props using the
+right forward branch, regardless of which branch the player chose. Ground caching
+precedes continuity adjustments on both links.
+
+`004442f0..004443ae` retains both physical approaching roads at a real merge
+(event1), joining both to the common forward road. `004443b0..0044441e` instead
+collapses a departing branch window to its selected half. Treating these as one
+case turns an interior hillside into an exterior viewport-filling band.
+`0043bd22..0043bd45` has a separate event4 divider path: its far endpoints come
+from the approaching records' forward lane endpoints (+34/+30), both at the
+forward row (+28), without the six-unit split edge padding. It does not use the
+unused far strip's retained second projection record in this case.
+
+Evidence, measured scope and outstanding checks: [handoff](agent-handoffs/native-camera-parity-20261120.md).

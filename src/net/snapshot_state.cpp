@@ -61,7 +61,7 @@ struct Archive {
     void value(TrafficObstacle& v){(*this)(v.position,v.lateral,v.velocity,v.lateral_velocity,v.type,v.road);}
     void value(TrafficTimers& v){(*this)(v.cruise,v.rate,v.oncoming_reload,v.other_reload,v.oncoming,v.behind,v.ahead,v.density);}
     void value(TrafficCar& v){(*this)(v.road,v.kind,v.vehicle,v.lane,v.position,v.lateral,v.speed,v.phase,v.jitter_a,v.jitter_b,v.jitter_c,v.serial,v.free_rank,v.active,v.pending_remove,v.last_tick,v.next_tick,v.interval,v.dt,v.motion,v.heading,v.signal,v.zone_start,v.zone_end,v.zone_lanes,v.collides,v.steer_error,v.lane_changed);}
-    void value(IntersectionSignal& v){(*this)(v.road,v.active,v.free_rank,v.index,v.side,v.phase,v.accum,v.lane,v.position_q8,v.lateral_q8,v.controller,v.quiet);}
+    void value(IntersectionSignal& v){(*this)(v.road,v.active,v.free_rank,v.serial,v.index,v.side,v.phase,v.accum,v.lane,v.position_q8,v.lateral_q8,v.ground,v.half,v.controller,v.quiet);}
     void value(IntersectionController& v){(*this)(v.road,v.free_rank,v.active,v.durations,v.start_q8,v.end_q8,v.variant,v.lanes,v.position_q8,v.last_tick,v.next_tick,v.signals,v.pending_remove);}
     void value(Pedestrian& v){(*this)(v.active,v.pending_remove,v.free_order,v.body,v.animation,v.draw_animation,v.selector,v.type,v.state,v.side,v.heading,v.pace,v.trigger,v.order,v.lane,v.voice_tick,v.anchor,v.anchor_lateral,v.graphics_evicted,v.last_tick,v.next_tick,v.serial);}
     template<class T>void vector(std::vector<T>& values,size_t maximum){uint32_t count=uint32_t(values.size());value(count);if(count>maximum)throw std::runtime_error("Snapshot object limit");if(reading)values.resize(count);for(auto& v:values)value(v);}
@@ -144,7 +144,7 @@ struct SnapshotStateCodec {
     }
     static void state(Archive& a,RaceState& copy){
         auto& r=*copy.race;
-        uint32_t schema=4;a(schema);if(schema!=4)throw std::runtime_error("Unknown snapshot schema");
+        uint32_t schema=5;a(schema);if(schema!=5)throw std::runtime_error("Unknown snapshot schema");
         a(r.countdown_started_,r.pace_band_tick_,r.actor_seat_,r.controls_,r.slot_ac_,r.box_draw_pending_,r.box_draw_camera_);
         a.vector(r.schedule_,32);
         uint32_t ground_count=uint32_t(r.ground_.size());a(ground_count);
@@ -172,7 +172,7 @@ struct SnapshotStateCodec {
             if(rider.route<0||rider.route>1||rider.sample>=r.routes_[rider.route]->size()||rider.previous_sample>=r.routes_[rider.route]->size()||rider.weapon<0||rider.weapon>3||rider.attack.weapon<0||rider.attack.weapon>3||rider.human>=r.humans()||rider.brain.state<0||rider.brain.state>9)throw std::runtime_error("Invalid snapshot rider");
         }
         bool have=copy.traffic.has_value();a(have);if(have!=copy.traffic.has_value())throw std::runtime_error("Traffic configuration mismatch");
-        if(have){auto& t=*copy.traffic;a(t.tick_,t.scheduled_tick_,t.free_rank_,t.controller_free_rank_,t.signal_free_rank_,t.timers_,t.serial_,t.filled_,t.built_end_,t.zone_events_);a.vector(t.cars_,128);a.vector(t.controllers_,80);a.vector(t.signals_,320);a.vector(t.obstacles_,512);
+        if(have){auto& t=*copy.traffic;a(t.tick_,t.scheduled_tick_,t.free_rank_,t.controller_free_rank_,t.signal_free_rank_,t.signal_serial_,t.timers_,t.serial_,t.filled_,t.built_end_,t.zone_events_);a.vector(t.cars_,128);a.vector(t.controllers_,80);a.vector(t.signals_,320);a.vector(t.obstacles_,512);
             a(t.primary_front_,t.primary_built_end_,t.primary_filled_,t.building_seat_,t.configured_density_);
             uint32_t seat_count=uint32_t(t.seats_.size());a(seat_count);if(seat_count>7)throw std::runtime_error("Invalid traffic seat count");
             if(a.reading)t.seats_.resize(seat_count);
@@ -187,7 +187,7 @@ struct SnapshotStateCodec {
                 if(controller.road<0||controller.road>1)throw std::runtime_error("Invalid controller road");
                 for(int signal:controller.signals)if(signal < -1 || (signal>=0&&size_t(signal)>=t.signals_.size()))throw std::runtime_error("Invalid controller signal");
             }
-            for(const auto& signal:t.signals_)if(signal.road<0||signal.road>1||signal.controller < -1 || (signal.controller>=0&&size_t(signal.controller)>=t.controllers_.size())||signal.phase<0||signal.phase>2)throw std::runtime_error("Invalid intersection signal");
+            for(const auto& signal:t.signals_)if(signal.road<0||signal.road>1||signal.controller < -1 || (signal.controller>=0&&size_t(signal.controller)>=t.controllers_.size())||signal.phase<0||signal.phase>2||signal.half>1)throw std::runtime_error("Invalid intersection signal");
             for(const auto& c:t.cars_)if(c.road<0||c.road>1||(c.active&&(c.vehicle>=t.library_->vehicles().size()||c.kind>3)))throw std::runtime_error("Invalid snapshot car");
         }
         have=copy.pedestrians.has_value();a(have);if(have!=copy.pedestrians.has_value())throw std::runtime_error("Pedestrian configuration mismatch");

@@ -161,6 +161,8 @@ int main(int argc, char** argv) {
             p.draw_animation.emplace();p.draw_animation->selected=std::array<int8_t,2>{1,0};
             p.draw_animation->deadline=123456;break;
         }
+        auto& signal=const_cast<rr::IntersectionSignal&>(live.traffic->signals().back());
+        signal.ground=-123;signal.half=1;signal.serial=987654;
         auto packet=rr::encode_snapshot_state(live);
         check(rr::apply_snapshot_state(copy,packet),"real course snapshot decodes");
         if(rr::state_hash(live)!=rr::state_hash(copy)) {
@@ -175,6 +177,9 @@ int main(int argc, char** argv) {
             for(size_t i=0;i<std::min(a.size(),b.size());++i)if(a[i]!=b[i])std::cerr<<"tracker "<<i<<" "<<a[i]<<" / "<<b[i]<<"\n";
         }
         check(rr::state_hash(live)==rr::state_hash(copy),"real course riders, cars, pedestrians and ring cursors round-trip");
+        const auto& restored_signal=copy.traffic->signals().back();
+        check(restored_signal.ground==-123 && restored_signal.half==1 && restored_signal.serial==987654,
+              "snapshot retains signal construction height, physical roadway and painter order");
         size_t retained_props=0;
         for(int32_t at=live.ring->back_q8()&~255;at<live.ring->front_q8();at+=256) {
             for(uint8_t half=0;half<2;++half) {

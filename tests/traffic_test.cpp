@@ -1370,6 +1370,11 @@ static void test_intersections() {
             if (want[k].side ? g.lateral_q8 <= 1000 * 256 : g.lateral_q8 >= 1000 * 256)
                 throw std::runtime_error("signal on its shoulder");
         }
+        const auto& signal=system.signals();
+        if(!(signal[size_t(c.signals[0])].serial<signal[size_t(c.signals[2])].serial &&
+             signal[size_t(c.signals[2])].serial<signal[size_t(c.signals[3])].serial &&
+             signal[size_t(c.signals[3])].serial<signal[size_t(c.signals[1])].serial))
+            throw std::runtime_error("signal creation order must survive pool-slot reuse");
         // First think at the placing tick with dt 0x1e: even signals 2 -> 0,
         // odd 0 -> 1 -> 2; the next think is 30 ticks later.
         if (system.signals()[size_t(c.signals[0])].phase != 0 ||

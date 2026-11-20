@@ -34,6 +34,17 @@ RoadMaterials read_road_materials(const std::vector<uint8_t>& exe, const std::ve
                 {global.begin() + resource->offset, global.begin() + resource->offset + resource->size});
             if (!cel.texture) throw std::runtime_error("Marked ground lacks indexed texture");
         }
+        const std::array<uint32_t,4> signal_destinations={0x468ee8,0x468ef0,0x468ef4,0x468ef8};
+        const auto signal=std::find(signal_destinations.begin(),signal_destinations.end(),destination);
+        if(signal!=signal_destinations.end()) {
+            const auto resource=std::find_if(resources.begin(),resources.end(),[&](const Resource& item) {
+                return item.tag=="CEL " && item.id==word(p+8)+1;
+            });
+            if(resource==resources.end()) throw std::runtime_error("Missing signal head material");
+            auto& cel=result.signals[size_t(signal-signal_destinations.begin())];
+            cel=read_cel({global.begin()+resource->offset,global.begin()+resource->offset+resource->size});
+            if(!cel.texture) throw std::runtime_error("Signal head lacks indexed texture");
+        }
         const auto found = std::find(destinations.begin(), destinations.end(), destination);
         if (found == destinations.end()) continue;
         const size_t slot = size_t(found - destinations.begin());

@@ -72,6 +72,13 @@ int main() {
         }
         check(rr::split_divider_nodes(near,far,{0,150},depths,24,24).size()==1,
               "narrow split uses one separator fill");
+        far.road[1].screen_y=151*q;
+        const auto merging=rr::split_divider_nodes(near,far,{0,150},depths,0,0,true);
+        check(merging.size()==1 && merging[0].view_points[0].x==120*q &&
+                  merging[0].view_points[1].x==200*q &&
+                  merging[0].view_points[0].y==150*q && merging[0].view_points[1].y==150*q,
+              "merge divider uses forward lane endpoints and one forward row without split edge widths");
+        far.road[1].screen_y=150*q;
         near.depth=210;
         divider=rr::split_divider_nodes(near,far,{0,150},depths,200,200);
         check(divider.size()==3 && divider[1].view_points[3].x==80*q &&

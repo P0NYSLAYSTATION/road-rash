@@ -10,6 +10,26 @@ int main() {
             std::cerr << "FAIL " << what << "\n";
         }
     };
+    {
+        const rr::RouteSample sample{{0,0,500,500,512,512},0,0,0};
+        rr::Race race(std::vector<rr::RouteSample>(128,sample),std::vector<rr::RouteSample>(128,sample),
+                      rr::PhysicsTables{},rr::BikeSpec{},180);
+        auto& rider=race.riders()[0];
+        rider.live=true;rider.parked=false;rider.crash_active=false;
+        rider.bike_slice_present=false;rider.half_slice_present=true;
+        rider.bike.i32(0x1c)=40*256;rider.bike.i32(0x28)=1000;rider.bike.i32(0x60)=200;
+        rider.half_mirror.position=41*256;rider.half_mirror.lateral=8680;rider.half_mirror.yaw=300;
+        rr::ViewState captured;
+        rr::capture_view(captured,race,nullptr);
+        check(captured.actors[0].position_q8==41*256 && captured.actors[0].lateral_q8==8680 &&
+              captured.actors[0].roll==300 && captured.actors[0].visible,
+              "riding presentation retains the half pose before a contact shove");
+        rider.crash_active=true;rider.bike_slice_present=true;
+        rr::capture_view(captured,race,nullptr);
+        check(captured.actors[0].position_q8==40*256 && captured.actors[0].lateral_q8==1000 &&
+              captured.actors[0].roll==200 && captured.actors[0].visible,
+              "a detached crashed bike keeps its independent pose");
+    }
     rr::ViewState a, b, out;
     a.camera_position_q8 = 1000;
     b.camera_position_q8 = 1256;

@@ -15,9 +15,12 @@
 // Standalone fixtures without a track ring retain the fallback slice builder.
 namespace rr {
 int32_t Race::allocation_ground(const Rider& r, const RouteSample& current) const {
-    const auto& b = r.bike;
+    return allocation_ground_at(route_of(r),current,r.sample,r.bike.i32(0x1c),r.bike.i32(0x28),uint8_t(r.bike.i32(0x138)));
+}
+int32_t Race::allocation_ground_at(const std::vector<RouteSample>& route,const RouteSample& current,
+                                  size_t sample,int32_t position,int32_t world_lateral,uint8_t fraction) const {
     const auto& path = current.path;
-    const int32_t lateral = b.i32(0x28) - current.offset * 256;
+    const int32_t lateral = world_lateral - current.offset * 256;
     if (!terrain_source_) {
         const int32_t x = lateral >> 8;
         if (x > path.right)
@@ -27,16 +30,14 @@ int32_t Race::allocation_ground(const Rider& r, const RouteSample& current) cons
         return 0;
     }
     const auto& terrain = ground(current);
-    const uint8_t fraction = uint8_t(b.i32(0x138));
     if (terrain.type != 4 || fraction == 0)
         return terrain_height(terrain, path, terrain, path, lateral, fraction, 0, current.offset);
 
     // The current slice has just been written, but its forward physical
     // slot can still hold the previous ring generation (or the initial slot template).
     // Do not substitute the not-yet-built future route geometry.
-    const auto& route = route_of(r);
-    const auto* ring = nearest_ring(b.i32(0x1c));
-    if (ring && !ring->slice_location(int32_t((r.sample + 1) * 256), current.half)) {
+    const auto* ring = nearest_ring(position);
+    if (ring && !ring->slice_location(int32_t((sample + 1) * 256), current.half)) {
         // 004551c0 initializes unbuilt slots: ground edges e0/e4 are
         // -500/+500, shoulders e8/ec -650/+650. They are not zeroed roads.
         PathSample initial{};
@@ -45,7 +46,7 @@ int32_t Race::allocation_ground(const Rider& r, const RouteSample& current) cons
         return terrain_height(terrain, path, TerrainSlice{}, initial, lateral, fraction,
                               -current.offset, current.offset);
     }
-    size_t next_sample = std::min(r.sample + 1, route.size() - 1);
+    size_t next_sample = std::min(sample + 1, route.size() - 1);
     if (ring) {
         const int64_t back = ring->back_q8() >> 8;
         next_sample = size_t(std::clamp<int64_t>(back + ((int64_t(next_sample) - back) & 127),
@@ -829,6 +830,13 @@ void Race::collide_pedestrians() {
 }
 void Race::attach_terrain_type() {
     if (traffic_ && terrain_source_) {
+        traffic_->set_signal_ground([this](const std::vector<RouteSample>& route,int32_t position,int32_t lateral,uint8_t half) {
+            const size_t sample=size_t(uint32_t(position)>>8);
+            auto current=route_half(route.at(sample),half);
+            if(const auto* ring=nearest_ring(position))
+                current=ring->render_sample(position,half).value_or(current);
+            return allocation_ground_at(route,current,sample,position,lateral,uint8_t(position));
+        });
         traffic_->set_obstacle_scan([this](const TrafficCar& car, int32_t reach) -> std::optional<TrafficObstacle> {
             build_scan_list();
             int at = -1;

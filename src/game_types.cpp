@@ -99,7 +99,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
     struct Visible {
         int32_t position;
         size_t index;
-        bool car, body = false, pedestrian = false;
+        bool car, body = false, pedestrian = false, signal = false;
     };
     std::vector<Visible> visible;
     // Plan 21 Task 2: sample membership uses live positions (which slice
@@ -112,18 +112,19 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
     for (size_t i = 0; i < race().riders().size(); ++i) {
         const auto& rd = race().riders()[i];
         auto include = [&](const Bike& actor, int route, const ActorAnimationState& state, bool body) {
-            if(rd.parked || !rd.live || !(body?rd.half_slice_present:rd.bike_slice_present)) return;
+            const bool riding=!rd.crash_active && !body;
+            if(rd.parked || !rd.live || !((body || riding)?rd.half_slice_present:rd.bike_slice_present)) return;
             const auto* pose = rider_pose(i, body);
             if(pose && !pose->visible) return;
-            const auto pos = pose ? pose->position_q8 : uint32_t(actor.i32(0x1c));
+            const auto pos = pose ? pose->position_q8 : uint32_t(riding ? rd.half_mirror.position : actor.i32(0x1c));
             if ((pos >> 8) != near.sample || ((pos & 255) >= 128) != back || !state.selected) return;
-            if(!within_lateral(pose?pose->lateral_q8:actor.i32(0x28))) return;
-            const auto half = body ? rd.crash_actor.slice_half : rd.slice_half;
+            if(!within_lateral(pose?pose->lateral_q8:riding?rd.half_mirror.lateral:actor.i32(0x28))) return;
+            const auto half = body ? rd.crash_actor.slice_half : riding ? rd.half_mirror.slice_half : rd.slice_half;
             if (near.count == 2 && half.value_or(uint8_t(route)) != road) return;
             if (pose)
                 visible.push_back({int32_t(pose->position_q8), i, false, body});
             else
-                visible.push_back({actor.i32(0x1c), i, false, body});
+                visible.push_back({int32_t(pos), i, false, body});
         };
         if (rd.crash_active) {
             include(rd.bike, rd.route, rd.crash_bike_animation, false);
@@ -157,11 +158,40 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
             if (p.active && within_lateral(p.body.bike.i32(0x28)) && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back)
                 visible.push_back({int32_t(pos), i, false, false, true});
         }
+    if(instance.traffic && assets.scene) {
+        const auto& signals=instance.traffic->signals();
+        std::vector<Visible> heads;
+        for(size_t i=0;i<signals.size();++i) {
+            const auto& signal=signals[i];
+            if(!signal.active || signal.quiet || (near.count==2 && signal.half!=road)) continue;
+            const auto pos=uint32_t(signal.position_q8);
+            if(within_lateral(signal.lateral_q8) && (pos>>8)==near.sample && ((pos&255)>=128)==back)
+                heads.push_back({int32_t(pos),i,false,false,false,true});
+        }
+        std::stable_sort(heads.begin(),heads.end(),[&](const Visible& a,const Visible& b) {
+            return signals[a.index].serial>signals[b.index].serial;
+        });
+        visible.insert(visible.end(),heads.begin(),heads.end());
+    }
     std::stable_sort(visible.begin(), visible.end(),
-                     [](const Visible& a, const Visible& b) { return a.position > b.position; });
+                     [](const Visible& a,const Visible& b) { return a.position>b.position; });
     std::vector<DrawNode> output;
     for (const auto& item : visible) {
         const size_t i = item.index;
+        if(item.signal) {
+            const auto& signals=instance.traffic->signals();
+            const auto& signal=signals[i];
+            int phase=-1;
+            if(signal.controller>=0) {
+                const auto& controller=instance.traffic->controllers().at(size_t(signal.controller));
+                if(controller.signals[0]>=0) phase=signals.at(size_t(controller.signals[0])).phase;
+            }
+            auto sample=render_route().at(near.sample);
+            if(near.count==2) sample=route_half(sample,uint8_t(road));
+            const auto nodes=assets.scene->signal_nodes(signal,phase,near,far,road,sample,blend_camera(),depth,ceiling,logical_width());
+            output.insert(output.end(),nodes.begin(),nodes.end());
+            continue;
+        }
         if (item.pedestrian) {
             auto sample=render_route().at(near.sample);
             if(near.count==2) sample=route_half(sample,uint8_t(road));
@@ -191,9 +221,10 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         }
         const auto& rd = race().riders()[i];
         const auto& bike = item.body ? rd.crash_actor.motion : rd.bike;
-        auto sample = race().route_for(item.body ? rd.crash_actor.route : rd.route).at(near.sample);
+        const bool riding=!rd.crash_active && !item.body;
+        auto sample = race().route_for(item.body ? rd.crash_actor.route : riding ? rd.half_mirror.route : rd.route).at(near.sample);
         if (instance.ring) {
-            const auto half = item.body ? rd.crash_actor.slice_half : rd.slice_half;
+            const auto half = item.body ? rd.crash_actor.slice_half : riding ? rd.half_mirror.slice_half : rd.slice_half;
             sample = instance.ring->render_sample(int32_t(near.sample * 256), half.value_or(0)).value_or(sample);
         }
         const auto& a = near.road[road];
@@ -201,8 +232,11 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         const auto camera = blend_camera();
         // Plan 21 Task 2: drawn position/lateral/ground/heading/roll come
         // from the blended pose, including its sample membership above.
-        int32_t pos_q8 = bike.i32(0x1c), lat_q8 = bike.i32(0x28), gnd_q8 = bike.i32(0x24),
-                head = bike.i32(0x5c), roll = bike.i32(0x60);
+        // 004067d0 copies the riding half before contacts shove its bike.
+        // Projection and interpolation must read that retained half pose.
+        int32_t pos_q8 = riding ? rd.half_mirror.position : bike.i32(0x1c),
+                lat_q8 = riding ? rd.half_mirror.lateral : bike.i32(0x28), gnd_q8 = bike.i32(0x24),
+                head = bike.i32(0x5c), roll = riding ? rd.half_mirror.yaw : bike.i32(0x60);
         if (view_ready) {
             if (const auto* pose = rider_pose(i, item.body)) {
                 pos_q8 = int32_t(pose->position_q8);
@@ -238,7 +272,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         const auto& descriptor =
             assets.actors->library().playback[bank].at(size_t(selected[0]))->at(size_t(selected[1]));
         const auto nodes = assets.actors->rider(descriptor, bank, rd.colour, orientation, projection, camera,
-                                                depth, bike.i32(0x20), nullptr, logical_width());
+                                                depth, riding ? rd.half_mirror.height : bike.i32(0x20), nullptr, logical_width());
         output.insert(output.end(), nodes.begin(), nodes.end());
     }
     return output;

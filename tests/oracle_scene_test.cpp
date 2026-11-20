@@ -1,4 +1,5 @@
 #include "test_assets.hpp"
+#include <filesystem>
 // Natural-frame display-list check: the original's own pending display nodes for a captured race
 // frame (oracle dump_scene) are converted to native DrawNodes, resources identified by their mip-0
 // hash, and rendered over the original frame. Every pixel must equal the original final pixel.
@@ -721,7 +722,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
 } // namespace
 
 int run(int argc, char** argv) {
-    bool actors_mode = false, terrain_mode = false, check_ground = true, window_mode = false, check_order = false, include_statics = false;
+    bool actors_mode = false, terrain_mode = false, check_ground = true, window_mode = false, check_order = false, include_statics = false, discover_scenes = false;
     const std::string dir = rr::golden::oracle_dir();
     std::string tsv = dir + "/city-scene.tsv";
     std::string assets_root = rr::test::assets_root();
@@ -729,6 +730,8 @@ int run(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--native-actors")
             actors_mode = true;
+        else if (a == "--discover-scenes")
+            discover_scenes = true;
         else if (a == "--native-window")
             terrain_mode = window_mode = true;
         else if (a == "--native-static-window")
@@ -754,13 +757,46 @@ int run(int argc, char** argv) {
     if (terrain_mode) return native_terrain(tsv, assets, check_ground, window_mode, check_order, include_statics);
     const auto golden = rr::golden::load(tsv);
     const std::string stem = tsv.substr(0, tsv.size() - 4);
-    const int course = int(golden.frames.at(0).at("course"));
+    // Simulation captures report the selected menu course (1..5); legacy
+    // scene probes report the zero-based runtime table index.
+    const int course = int(golden.frames.at(0).at("course")) - (discover_scenes ? 1 : 0);
+    if(course<0 || course>=5) throw std::runtime_error("Invalid captured scene course");
     const auto lib = rr::testlib::load_texture_library(assets, course_files[course]);
     const auto exe = assets.read("ROADRASH.EXE");
     const auto sprites = rr::load_rider_sprites(assets, exe, std::getenv("RR_SCENE_LOBIKES") == nullptr);
     std::cout << lib.textures.size() << " textures\n";
+    std::vector<rr::golden::Frame> scene_frames;
+    if(discover_scenes) {
+        // SIM traces are indexed by simulation tick, while these files are
+        // indexed by render frame. Read their descriptors from the captured
+        // original memory rather than inventing metadata in the golden trace.
+        const auto source=std::filesystem::path(tsv);
+        const auto prefix=source.stem().string()+"-scene";
+        std::map<uint32_t,rr::golden::Frame> ordered;
+        for(const auto& entry:std::filesystem::directory_iterator(source.parent_path())) {
+            const auto name=entry.path().filename().string();
+            if(!entry.is_regular_file() || !name.starts_with(prefix) || !name.ends_with(".raw") ||
+                name.ends_with("-native.raw")) continue;
+            const auto dump=rr::scene::load(entry.path().string());
+            rr::golden::Frame frame;
+            frame["scene.file"]=frame["pixels.file"]=dump.frame;
+            frame["pixels.width"]=dump.memory.i32(0x0047539c);
+            frame["pixels.height"]=dump.memory.i32(0x004753a0);
+            frame["view.high"]=dump.memory.u8(0x00475380);
+            frame["view.quality_mask"]=dump.memory.u32(0x00475648);
+            if(frame["pixels.width"]<1 || frame["pixels.height"]<1)
+                throw std::runtime_error("Invalid captured framebuffer dimensions");
+            if(!ordered.emplace(dump.frame,std::move(frame)).second)
+                throw std::runtime_error("Duplicate captured scene frame");
+        }
+        for(auto& [index,frame]:ordered) scene_frames.push_back(std::move(frame));
+        if(scene_frames.empty()) throw std::runtime_error("No original scene files discovered");
+    } else {
+        for(const auto& frame:golden.frames)
+            if(frame.count("scene.file") && frame.count("pixels.file")) scene_frames.push_back(frame);
+    }
     int failures = 0, frames = 0;
-    for (const auto& f : golden.frames) {
+    for (const auto& f : scene_frames) {
         if (!f.count("scene.file") || !f.count("pixels.file")) continue;
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(f.at("scene.file")) + ".raw");
         const auto pixels = read_file(stem + "-f" + std::to_string(f.at("pixels.file")) + ".raw");
@@ -790,6 +826,10 @@ int run(int argc, char** argv) {
             } else if (s.bytes[0x66])
                 n.flat_index = s.bytes[0x67];
             else if (!(n.texture = lib.find(s.hash, s.size))) {
+                std::string name;
+                for(size_t k=16;k<32 && s.resource[k];++k) name.push_back(char(s.resource[k]));
+                std::cerr<<"unresolved frame="<<f.at("scene.file")<<" name="<<name
+                    <<" resource="<<s.u32(8)<<" hash="<<s.hash<<" size="<<s.size<<'\n';
                 ++unmatched;
                 continue;
             }

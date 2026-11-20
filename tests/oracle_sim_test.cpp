@@ -642,10 +642,34 @@ static int replay_main(int argc, char** argv) {
         }
         if(render_windows.empty()) throw std::runtime_error("No original render-ring windows");
     }
+    auto build_native_scene = [&]() {
+        rr::Game game;
+        game.config=config;game.depth=rr::read_depth_table(exe);
+        game.assets=std::move(setup.assets);game.instance=std::move(setup.instance);
+        struct RestoreRace {
+            rr::Game& game;rr::RaceSetup& setup;
+            ~RestoreRace(){setup.assets=std::move(game.assets);setup.instance=std::move(game.instance);}
+        } restore{game,setup};
+        game.view_ready=true;
+        game.view_drawn.camera=race.camera();
+        game.view_drawn.camera_position_q8=race.camera_position();
+        game.view_drawn.camera_origin=race.camera_x()-race.camera().x;
+        const auto& route=game.render_route();
+        const auto camera=game.blend_camera();
+        return game.assets.scene->draw_nodes(route,
+            rr::project_road(route,race.camera_position(),camera,game.depth),camera,game.depth,
+            [&](const rr::RoadSlice& near,const rr::RoadSlice& far,int road,int32_t ceiling,bool back,int32_t low,int32_t high) {
+                return game.rider_nodes(near,far,road,ceiling,back,low,high);
+            },320,game.instance.ring.get());
+    };
     auto compare_ring_terrain = [&](size_t frame) {
         if(render_ring && render_ready) {
             const int32_t tick=int32_t(g.frames.at(frame).at("tick"));
             const auto [begin,end]=render_windows.equal_range(tick);
+            // Advance normal native presentation between observations. Shared
+            // CCB dimension normalization (not simulation/RNG) persists across
+            // calls in the original; sparse-only drawing loses that history.
+            if(render_scene && begin==end) (void)build_native_scene();
             for(auto it=begin;it!=end;++it) {
                 const auto& dump=it->second;
                 const uint32_t base=0x004c0a5c-31*0x224;
@@ -713,35 +737,14 @@ static int replay_main(int argc, char** argv) {
                         <<" match="<<same<<'\n';
                 }
                 if(render_scene) {
-                    auto route=race.route();
-                    const uint32_t position=race.camera_position();
-                    const size_t first=position>>8;
-                    const auto own=race.camera_half();
-                    for(size_t n=first>2?first-2:0;n<route.size() && n<first+35;++n)
-                        route[n]=setup.instance.ring->render_sample(int32_t(n*256),own).value_or(route[n]);
-                    const rr::Camera camera=race.camera();
-                    if(position!=dump.memory.u32(0x004bc7e4) || own!=dump.memory.u8(0x00473498) ||
-                        camera.x+route.at(first).offset!=dump.memory.i32(0x004bc7d8) ||
-                        camera.height!=dump.memory.i32(0x004bc7dc))
+                    if(race.camera_position()!=dump.memory.u32(0x004bc7e4) ||
+                        race.camera_half()!=dump.memory.u8(0x00473498) ||
+                        race.camera_x()!=dump.memory.i32(0x004bc7d8) ||
+                        race.camera().height!=dump.memory.i32(0x004bc7dc))
                         throw std::runtime_error("Native viewport differs at tick="+std::to_string(tick)+
                             " frame="+std::to_string(dump.frame)+"; use --render-camera for numeric details");
-                    const auto depth=rr::read_depth_table(exe);
-                    rr::Game game;
-                    game.config=config;game.depth=depth;
-                    game.assets=std::move(setup.assets);game.instance=std::move(setup.instance);
-                    struct RestoreRace {
-                        rr::Game& game;rr::RaceSetup& setup;
-                        ~RestoreRace(){setup.assets=std::move(game.assets);setup.instance=std::move(game.instance);}
-                    } restore{game,setup};
-                    game.view_ready=true;game.view_drawn.camera=camera;
-                    game.view_drawn.camera_position_q8=position;
-                    game.view_drawn.camera_origin=route.at(first).offset;
-                    const auto& live_route=game.render_route();
-                    const auto nodes=game.assets.scene->draw_nodes(live_route,
-                        rr::project_road(live_route,position,camera,depth),camera,depth,
-                        [&](const rr::RoadSlice& near,const rr::RoadSlice& far,int road,int32_t ceiling,bool back,int32_t low,int32_t high) {
-                            return game.rider_nodes(near,far,road,ceiling,back,low,high);
-                        },320,game.instance.ring.get());
+                    const auto nodes=build_native_scene();
+                    const auto& game_actors=*setup.assets.actors;
                     using Key=std::tuple<std::array<int32_t,8>,bool,bool>;
                     std::multimap<Key,size_t> original;
                     for(size_t n=0;n<dump.nodes.size();++n) {
@@ -762,7 +765,7 @@ static int replay_main(int argc, char** argv) {
                             if(want.u32(8)==0x00466684) {
                                 const int32_t colour=int32_t(want.u32(0x38));
                                 const size_t bank=colour==0xde?1:colour==0xdf?3:colour==0xe0?2:0;
-                                if(node.texture==game.assets.actors->texture(bank,want.u32(0x34),colour)) break;
+                                if(node.texture==game_actors.texture(bank,want.u32(0x34),colour)) break;
                                 continue;
                             }
                             if(want.bytes[0x66] ? (!node.texture && node.flat_index && *node.flat_index==want.bytes[0x67]) :
@@ -774,17 +777,35 @@ static int replay_main(int argc, char** argv) {
                                 const int32_t colour=int32_t(want.u32(0x38));
                                 const size_t bank=colour==0xde?1:colour==0xdf?3:colour==0xe0?2:0;
                                 const bool dynamic=want.u32(8)==0x00466684;
-                                if(dynamic ? node.texture==game.assets.actors->texture(bank,want.u32(0x34),colour) :
+                                if(dynamic ? node.texture==game_actors.texture(bank,want.u32(0x34),colour) :
                                     (want.size && !node.texture->mips.empty() && node.texture->mips[0].pixels.size()>=want.size && rr::testlib::fnv(node.texture->mips[0].pixels.data(),want.size)==want.hash)) {
                                     std::cerr<<"same-texture original";for(size_t v=0;v<8;++v)std::cerr<<' '<<int32_t(want.u32(0x44+v*4));std::cerr<<"\n";
                                 }
                             }
                             std::cerr<<"native quad";for(auto value:points)std::cerr<<' '<<value;std::cerr<<"\n";
+                            if(node.texture->mips.empty()) {
+                                for(size_t ri=0;ri<race.riders().size();++ri) {
+                                    const auto& r=race.riders()[ri];
+                                    std::cerr<<"rider "<<ri<<" colour="<<r.colour<<" pos="<<r.bike.i32(0x1c)
+                                        <<" lat="<<r.bike.i32(0x28)<<" half-lat="<<r.half_mirror.lateral
+                                        <<" ground="<<r.bike.i32(0x24)<<" heading="<<r.bike.i32(0x5c)
+                                        <<" roll="<<r.bike.i32(0x60)<<'\n';
+                                }
+                            }
+                        }
+                        if(match==end && !node.texture) {
+                            std::cerr<<"native flat";for(auto value:points)std::cerr<<' '<<value;std::cerr<<"\n";
+                            for(const auto& want:dump.nodes) if(want.bytes[0x66] && int32_t(want.u32(0x44))==points[0]) {
+                                std::cerr<<"same-start original flat";for(size_t v=0;v<8;++v)std::cerr<<' '<<int32_t(want.u32(0x44+v*4));std::cerr<<"\n";
+                            }
                         }
                         if(match==end) throw std::runtime_error("native scene tick="+std::to_string(tick)+" frame="+
                             std::to_string(dump.frame)+" unmatched "+(node.texture?node.texture->name:"flat")+
                             " x="+std::to_string(points[0])+" y="+std::to_string(points[1]));
-                        if(previous && match->second<=*previous) throw std::runtime_error("Native scene draw order differs");
+                        if(previous && match->second<=*previous) throw std::runtime_error("Native scene tick="+
+                            std::to_string(tick)+" frame="+std::to_string(dump.frame)+" draw order original="+
+                            std::to_string(match->second)+" after="+std::to_string(*previous)+" texture="+
+                            (node.texture?node.texture->name:"flat"));
                         previous=match->second;original.erase(match);++render_nodes;
                     }
                     if(!original.empty()) {

@@ -75,7 +75,7 @@ void scenery_cache() {
     rr::TrackRing ring(course,0);
     uint32_t draws=0,calls=0;
     const rr::TrackRing::Random random=[&]{++draws;return 0u;};
-    ring.set_static_ground([&](const rr::RouteSample& here,const rr::RouteSample& next,rr::RingStatics& value,rr::TerrainSlice&,rr::TerrainSlice&){
+    ring.set_static_ground([&](const rr::RouteSample& here,const rr::RouteSample& next,rr::RingStatics& value,rr::TerrainSlice&,rr::TerrainSlice&,const rr::RouteSample*,rr::TerrainSlice*){
         check(next.local==here.local+1,"prop ground cache receives adjacent physical slices");
         ++calls;value.grounds_ready=true;value.borr_ground[0]=-int32_t(here.local);
     });
@@ -307,8 +307,28 @@ void window_walks() {
 }
 } // namespace
 
+void fork_ground_neighbours() {
+    const auto course=window_course(400);
+    rr::TrackRing ring(course,0);
+    bool saw_fork=false;
+    const rr::TrackRing::Random random=[] {return 0u;};
+    ring.set_static_ground([&](const rr::RouteSample&,const rr::RouteSample& left,rr::RingStatics& value,
+        rr::TerrainSlice&,rr::TerrainSlice&,const rr::RouteSample* right,rr::TerrainSlice* terrain) {
+        value.grounds_ready=true;
+        if(!right) return;
+        saw_fork=true;
+        check(terrain && left.node!=right->node && left.half==0 && right->half==1,
+              "common slice ground retains both physical forward branches");
+    });
+    ring.setup(50*256,random,{});
+    ring.commit_branch(1);
+    for(int i=0;i<220;++i) ring.advance(256,random,{});
+    check(saw_fork,"cached ground visits the last common slice before the fork");
+}
+
 int main() {
     scenery_cache();
+    fork_ground_neighbours();
     family_requests();
     finish_discovery();
     split_shoulders();

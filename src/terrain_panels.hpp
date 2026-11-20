@@ -25,7 +25,7 @@ struct HillPanelInput {
 // are suppressed, including the depth-210 near clip and 12-unit edge strips.
 std::vector<DrawNode> split_divider_nodes(const RoadSlice& near, const RoadSlice& far,
                                          const Camera&, const DepthTable&, int32_t far_separation,
-                                         int32_t near_separation);
+                                         int32_t near_separation, bool merge_window = false);
 struct MergeHillProfiles {
     std::array<TerrainSlice, 2> terrain;
     std::array<int, 2> bands{3, 3}; // 4 means all three bands plus the connecting ridge

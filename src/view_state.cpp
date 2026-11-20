@@ -43,13 +43,13 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
         const auto& rd = riders[i];
         ActorPose p;
         p.id = uint32_t(i + 1);
-        p.position_q8 = uint32_t(rd.bike.i32(0x1c));
-        p.lateral_q8 = rd.bike.i32(0x28);
+        p.position_q8 = uint32_t(rd.crash_active ? rd.bike.i32(0x1c) : rd.half_mirror.position);
+        p.lateral_q8 = rd.crash_active ? rd.bike.i32(0x28) : rd.half_mirror.lateral;
         p.height_q8 = rd.bike.i32(0x24);
         p.heading = rd.bike.i32(0x5c);
-        p.roll = rd.bike.i32(0x60);
-        p.route = rd.route;
-        p.visible = rd.live && !rd.parked && rd.bike_slice_present;
+        p.roll = rd.crash_active ? rd.bike.i32(0x60) : rd.half_mirror.yaw;
+        p.route = rd.crash_active ? rd.route : rd.half_mirror.route;
+        p.visible = rd.live && !rd.parked && (rd.crash_active ? rd.bike_slice_present : rd.half_slice_present);
         v.actors.push_back(p);
         if (rd.crash_active) {
             ActorPose c;

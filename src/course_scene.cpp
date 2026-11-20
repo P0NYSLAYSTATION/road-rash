@@ -5,6 +5,8 @@
 #include "exe_tables.hpp"
 #include "terrain_ground.hpp"
 #include "track_ring.hpp"
+#include "traffic.hpp"
+#include "actor_render.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -194,10 +196,16 @@ const TerrainSlice& CourseScene::terrain(uint32_t section, uint32_t local) const
 // 00451c20 runs when the forward neighbour has been built, before that
 // neighbour's split-height adjustment. These cached heights survive later joins.
 void CourseScene::cache_static_ground(const RouteSample& here, const RouteSample& next,
-                                     RingStatics& statics,const TerrainSlice& a,const TerrainSlice& b) const {
+                                     RingStatics& statics,const TerrainSlice& a,const TerrainSlice& b,
+                                     const RouteSample* right,const TerrainSlice* right_terrain) const {
     const auto height=[&](int32_t lateral) {
-        const auto value=terrain_height(a,here.path,b,next.path,lateral*256,128,
-            next.offset-here.offset,here.offset);
+        // 00439b10 follows sub+8 for the left side and sub+c for the right.
+        // On the final common slice these link to different departing branches.
+        const bool use_right=right && right_terrain && lateral>here.path.right;
+        const auto& forward=use_right ? *right : next;
+        const auto& terrain=use_right ? *right_terrain : b;
+        const auto value=terrain_height(a,here.path,terrain,forward.path,lateral*256,128,
+            forward.offset-here.offset,here.offset);
         return value>=999 ? 0 : value;
     };
     for(uint8_t i=0;i<statics.borr_count;++i) statics.borr_ground[i]=height(statics.borr[i]);
@@ -319,6 +327,42 @@ const CelTexture* CourseScene::tunnel_material(uint32_t section, uint32_t local,
     if (!chosen) chosen = group(0);
     return chosen ? &chosen->select(width, height, logarithms_).texture : nullptr;
 }
+std::vector<DrawNode> CourseScene::signal_nodes(const IntersectionSignal& signal,int phase,
+    const RoadSlice& near,const RoadSlice& far,int road,const RouteSample& sample,const Camera& camera,
+    const DepthTable& depths,int32_t ceiling,int32_t logical_width) const {
+    // 0041f220 draws a housing and an overlay selected from controller signal0,
+    // sharing the housing's centred/bottom hotspot and index-bit2 mirroring.
+    ActorProjection projection;
+    projection.road_x=near.road[road].road_x+camera.x;
+    projection.far_x=far.road[road].road_x+camera.x;
+    projection.road_y=near.road[road].world_y;
+    projection.far_y=far.road[road].world_y;
+    projection.lateral=signal.lateral_q8/256-sample.offset;
+    projection.ground=signal.ground;
+    projection.depth=near.depth;
+    projection.fraction=uint8_t(signal.position_q8);
+    projection.flags=(signal.index&2)==0 ? 1 : 0;
+    projection.occlusion=ceiling;
+    AnimationFrame frame;
+    const auto dimensions=signal_dimensions_.value_or(std::array<int32_t,2>{roads_.signals[0].width,roads_.signals[0].height});
+    frame.hotspot={dimensions[0]/2,dimensions[1]};
+    std::vector<DrawNode> nodes;
+    auto append=[&](size_t index) {
+        const auto& cel=roads_.signals[index];
+        if(!cel.texture) return;
+        frame.width=uint16_t(cel.texture->bounds[2]-cel.texture->bounds[0]);
+        frame.height=uint16_t(cel.texture->bounds[3]-cel.texture->bounds[1]);
+        if(auto node=actor_node(frame,&*cel.texture,projection,camera,depths,logical_width)) nodes.push_back(*node);
+    };
+    append(0);
+    // 0044ba62 writes indexed bounds back into the shared housing CCB,
+    // even if projection is rejected. The next head reads those dimensions;
+    // this head's overlay keeps the hotspot prepared before the first call.
+    const auto& bounds=roads_.signals[0].texture->bounds;
+    signal_dimensions_=std::array<int32_t,2>{bounds[2]-bounds[0],bounds[3]-bounds[1]};
+    if(phase>=0 && phase<=2) append(size_t(phase)+1);
+    return nodes;
+}
 void CourseScene::attach_upscaled(const UpscaleCache& cache) {
     const UpscaleIndex index = cache.content_index({2, 4}, {UpscaleMethod::mmpx, UpscaleMethod::ai});
     auto one = [&](CelTexture& tex) { attach_upscaled_indexed(tex, index); };
@@ -329,6 +373,8 @@ void CourseScene::attach_upscaled(const UpscaleCache& cache) {
         if (entry.texture) one(*entry.texture);
     for (auto& terrain : roads_.terrain)
         if (terrain.texture) one(*terrain.texture);
+    for (auto& signal : roads_.signals)
+        if (signal.texture) one(*signal.texture);
     if (water_.texture) one(*water_.texture);
 }
 void CourseScene::clear_upscaled() {
@@ -944,6 +990,8 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         const bool opening_merge=near.count==1 && far.count==2 && (far_event==4 || far_event==6);
         const int entering_half=opening_merge?far.own:0;
         if(opening_merge) { far.road[0]=far.road[far.own]; far.count=1; far.own=0; }
+        const bool closing_merge=near.count==2 && far.count==1 && far_event==1;
+        if(closing_merge) { far.road[1]=far.road[0]; far.count=2; }
         const bool closing=near.count==2 && far.count==1;
         const int selected=closing?near.own:0;
         if(closing) { near.road[0]=near.road[near.own]; near.count=1; near.own=0; }
@@ -953,7 +1001,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 near.centre_q16;
         for(int i=0;i<count;++i) {
             const int r=count==2?(i==0?int(right_first):1-int(right_first)):0;
-            const auto& road=roads[j][closing?selected:r]; const auto& old=roads[j+1][opening_merge?entering_half:r];
+            const auto& road=roads[j][closing?selected:r]; const auto& old=roads[j+1][closing_merge?0:(opening_merge?entering_half:r)];
             if(!road.visible) continue;
             const auto& a=far.road[r]; const auto& b=near.road[r]; const auto& path=*road.path;
             std::array<std::vector<DrawNode>,2> rail_nodes;
@@ -1067,6 +1115,15 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         // 004443b0..0044441e links the departing window's selected half
         // to the following single road. Half1 must not stitch to half0's
         // terrain/coordinates when the opposite branch leaves the window.
+        // 004442f0..004443ae keeps both physical sides at a real merge
+        // (event 1), linking each to the common forward road. Collapsing
+        // to the player's arm here turns an inner hillside into an exterior.
+        auto far_roads=roads[n];
+        const bool closing_merge=near.count==2 && far.count==1 && far_event==1;
+        if(closing_merge) {
+            far.road[1]=far.road[0]; far.count=2;
+            far_roads[1]=far_roads[0];
+        }
         const bool close_branch = near.count == 2 && far.count == 1;
         const int closing_half = close_branch ? near.own : 0;
         if (close_branch) {
@@ -1085,14 +1142,14 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             const auto& a = far.road[r];
             const auto& b = near.road[r];
             const auto& road = roads[n - 1][close_branch ? closing_half : r];
-            const auto& old = roads[n][opening_merge?entering_half:r];
+            const auto& old = far_roads[opening_merge?entering_half:r];
             if (!road.visible) continue;
             const bool visible = b.screen_y >= a.screen_y && road.ceiling >= a.screen_y;
             const auto& path = *road.path;
             // 0x004547e0 widens the sub-slice's panel grid to its forward
             // neighbor(s). Physical road edges retain the fractional widths.
-            const auto& left_neighbor = roads[n][opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 0 : r)];
-            const auto& right_neighbor = roads[n][opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 1 : r)];
+            const auto& left_neighbor = far_roads[opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 0 : r)];
+            const auto& right_neighbor = far_roads[opening_merge?entering_half:(far.count == 2 && near.count == 1 ? 1 : r)];
             int32_t left_q8 = path.left_q8, right_q8 = path.right_q8;
             int32_t next_left_q8 = left_neighbor.path->left_q8;
             int32_t next_right_q8 = left_neighbor.path->right_q8;
@@ -1166,7 +1223,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 for (int side = 0; side < 2; ++side) {
                     //The common road's two forward edges attach to different
                     //physical halves at the first departing split sample.
-                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& old=far_roads[opening_split?side:(opening_merge?entering_half:r)];
                     const auto& a=far.road[opening_split?side:r];
                     side_emission(r,side);
                     const bool inner = near.count==2 && far.count==2 && side==1-r;
@@ -1239,11 +1296,11 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                         hills.extend_outer = false;
                         hills.band_count = std::max(road.inner_bands, old.inner_bands);
                         if (i == count - 1 && far.count == 2 &&
-                            std::max(roads[n - 1][0].inner_bands, roads[n][0].inner_bands) > 3) {
+                            std::max(roads[n - 1][0].inner_bands, far_roads[0].inner_bands) > 3) {
                             const auto& h0 = roads[n - 1][0];
                             emission = &bridge;
                             append(merge_hill_bridge(
-                                {roads[n][0].hill[1].projected[3], roads[n][1].hill[0].projected[3],
+                                {far_roads[0].hill[1].projected[3], far_roads[1].hill[0].projected[3],
                                  roads[n - 1][1].hill[0].projected[3], h0.hill[1].projected[3]},
                                 far.depth, near.depth, logical_width, [&](int32_t w, int32_t h) {
                                     return material(h0.section, h0.local, h0.terrain->selectors[1], 1, 2, w,
@@ -1263,7 +1320,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             // mouth, the portal (0x0040d420).
             if (road.kind == 1 || road.kind == 3)
                 for (int side = 0; side < 2; ++side) {
-                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& old=far_roads[opening_split?side:(opening_merge?entering_half:r)];
                     const auto& a=far.road[opening_split?side:r];
                     side_emission(r,side);
                     const bool tunnel_pair = road.kind == 3 && old.kind == 3;
@@ -1396,7 +1453,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 }
             if (!(path.marking_flags & 32) && road.terrain->type == 0)
                 for (int side = 0; side < 2; ++side) {
-                    const auto& old=roads[n][opening_split?side:(opening_merge?entering_half:r)];
+                    const auto& old=far_roads[opening_split?side:(opening_merge?entering_half:r)];
                     const auto& a=far.road[opening_split?side:r];
                     side_emission(r,side);
                     // 0x0043bef0 type 0: 0x0040bde0, then 0x0040ba10 for flags 8/16,
@@ -1498,7 +1555,20 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         emission = &bridge;
         if (near.count == 2 && far.count == 2 && roads[n-1][0].kind == 4 &&
             inner_phase(n-1) > 0)
-            append(split_divider_nodes(near, far, camera, depths, route[far.sample].x_sep, route[near.sample].x_sep));
+        {
+            auto divider_far=far;
+            const bool merge_window=int(route[near.sample].event)==4;
+            if(merge_window) {
+                // 0043bd22 uses the near records' forward lane endpoints
+                // (+34/+30), not the far strip's physical shoulder edges.
+                for(int h=0;h<2;++h) {
+                    const auto& from=roads[n-1][h];
+                    divider_far.road[h].right=((from.path->right_q8+255)/256)*250+from.offset-far_roads[h].offset;
+                    divider_far.road[h].left=-((from.path->left_q8+255)/256)*250+from.offset-far_roads[h].offset;
+                }
+            }
+            append(split_divider_nodes(near, divider_far, camera, depths, route[far.sample].x_sep, route[near.sample].x_sep,merge_window));
+        }
         emission = &result;
         //00443cd0: both floors, both exterior sides, then the inner gap.
         //Within each stage the opposite half is painted before the own half.

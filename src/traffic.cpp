@@ -797,6 +797,7 @@ int TrafficSystem::place_signal(const std::vector<RouteSample>& route, int contr
     auto& g = signals_[size_t(si)];
     g = IntersectionSignal{};
     g.active = true;
+    g.serial=++signal_serial_;
     g.index = index;
     g.side = side;
     g.controller = controller;
@@ -806,6 +807,8 @@ int TrafficSystem::place_signal(const std::vector<RouteSample>& route, int contr
     g.accum = 0x30c;
     g.position_q8 = int32_t(s) * 256 + fraction;
     g.lateral_q8 = div256((next * 256 - here * 256) * fraction) + here * 256;
+    g.half=half;
+    if(signal_ground_) g.ground=signal_ground_(route,g.position_q8,g.lateral_q8,half);
     return si;
 }
 
