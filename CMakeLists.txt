@@ -318,6 +318,12 @@ else()
         # MEDLY side streets and building ends (0x0040ba10, 0x0040c450, 0x0040cbb0).
         add_test(NAME oracle-terrain-medly COMMAND oracle-scene-test --native-terrain "${RR_TEST_MEDLY_TERRAIN_FIXTURE}")
         set_tests_properties(oracle-terrain-medly PROPERTIES SKIP_RETURN_CODE 77)
+        add_test(NAME oracle-render-native-napa COMMAND oracle-sim-test --render-scene --driver=human
+            "${CMAKE_SOURCE_DIR}/analysis/oracle/napa-seeded-render-20261119.tsv" "${RR_TEST_ASSETS_DIR}")
+        set_tests_properties(oracle-render-native-napa PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture;sim")
+        add_test(NAME oracle-render-native-hiway COMMAND oracle-sim-test --render-scene --driver=human
+            "${CMAKE_SOURCE_DIR}/analysis/oracle/hiway-native-render-finish-20261119.tsv" "${RR_TEST_ASSETS_DIR}")
+        set_tests_properties(oracle-render-native-hiway PROPERTIES SKIP_RETURN_CODE 77 LABELS "disc;fixture;sim")
         set(RR_TEST_TERRAIN_WINDOWS_DIR "${CMAKE_SOURCE_DIR}/analysis/oracle" CACHE PATH "Local complete original terrain-window captures")
         foreach(render_course IN ITEMS hiway canyn city medly napa)
             if(render_course STREQUAL "hiway")

@@ -294,6 +294,9 @@ void Race::load_pedestrian_looks() {
     const size_t first = size_t(std::max<int32_t>((camera >> 8) - 1, 0));
     for (auto& p : pedestrians_->pool()) {
         if (!p.active) continue;
+        // 00438509 copies +70 to +8c before 00440680 lazily loads
+        // graphics. A newly loaded pedestrian has no drawn selection yet.
+        p.draw_animation=p.animation;
         p.pre_draw_resources = {p.loaded(), p.has(0), p.has(5)};
         if (p.loaded()) continue;
         if (p.body.sample < first || int64_t(p.body.sample) * 256 > int64_t(camera) + 0x1e00) continue;

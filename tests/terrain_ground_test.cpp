@@ -52,6 +52,32 @@ int main(int argc, char** argv) {
                 rr::terrain_height(tunnel, q, tunnel, q, 300 * 256, 0) != 20)
                 throw std::runtime_error("Tunnel sidewalk pair-B heights");
         }
+        {
+            rr::TerrainSlice previous, next;
+            next.type=0;
+            previous.type=4;
+            previous.selectors={7,8};
+            for(size_t n=0;n<previous.points.size();++n) previous.points[n]={int32_t(n*100)-200,int32_t(n+1)};
+            rr::PathSample before{}, after{};
+            after.marking_flags=16;
+            if(rr::join_terrain_boundary(previous,before,next,after,false,-250)!=0 || next.type!=0)
+                throw std::runtime_error("Terrain continuity only applies to the first section slice");
+            if(rr::join_terrain_boundary(previous,before,next,after,true,-250)!=2 || next.type!=4 ||
+                next.selectors!=previous.selectors || !next.ring_adjusted)
+                throw std::runtime_error("Marked building boundary carries the preceding hill");
+            for(size_t n=0;n<next.points.size();++n)
+                if(next.points[n]!=std::array<int32_t,2>{previous.points[n][0]-250,0})
+                    throw std::runtime_error("Boundary continuity preserves absolute X and flattens heights");
+            previous={};previous.type=0;next={};next.type=4;before.marking_flags=8;
+            next.points[0]={100,200};
+            if(rr::join_terrain_boundary(previous,before,next,after,true,0)!=3 ||
+                previous.selectors!=std::array<uint8_t,2>{255,255} || next.points[0][1]!=0)
+                throw std::runtime_error("Marked building exit disables selectors and flattens hill entry");
+            previous={};previous.type=0;next={};next.type=4;before={};
+            next.points[0]={100,200};
+            if(rr::join_terrain_boundary(previous,before,next,after,true,0)!=0 || next.points[0][1]!=200)
+                throw std::runtime_error("Unmarked terrain boundary keeps its terrain");
+        }
         const char* configured = std::getenv("RR_TEST_GROUND_FIXTURE");
         const std::string fixture = argc > 1                    ? argv[1]
                                     : configured && *configured ? configured

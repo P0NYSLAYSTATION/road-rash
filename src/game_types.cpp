@@ -146,10 +146,14 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
                     visible.push_back({car.position, i, true});
             }
         }
-    if (instance.pedestrians && road == near.own)
+    if (instance.pedestrians)
         for (size_t i = 0; i < instance.pedestrians->pool().size(); ++i) {
             const auto& p = instance.pedestrians->pool()[i];
+            if(!p.active) continue;
             const auto pos = uint32_t(p.body.bike.i32(0x1c));
+            const auto& source=race().route_of(p.body).at(near.sample);
+            const uint8_t half=p.body.slice_half.value_or(source.half);
+            if(near.count==2 && half!=road) continue;
             if (p.active && within_lateral(p.body.bike.i32(0x28)) && (pos >> 8) == near.sample && ((pos & 255) >= 128) == back)
                 visible.push_back({int32_t(pos), i, false, false, true});
         }
@@ -159,8 +163,10 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
     for (const auto& item : visible) {
         const size_t i = item.index;
         if (item.pedestrian) {
+            auto sample=render_route().at(near.sample);
+            if(near.count==2) sample=route_half(sample,uint8_t(road));
             if (auto node = pedestrian_node(instance.pedestrians->pool()[i], near, far, road,
-                                            render_route().at(near.sample), blend_camera(), depth, ceiling,
+                                            sample, blend_camera(), depth, ceiling,
                                             logical_width()))
                 output.push_back(*node);
             continue;

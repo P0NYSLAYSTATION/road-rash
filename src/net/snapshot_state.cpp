@@ -63,7 +63,7 @@ struct Archive {
     void value(TrafficCar& v){(*this)(v.road,v.kind,v.vehicle,v.lane,v.position,v.lateral,v.speed,v.phase,v.jitter_a,v.jitter_b,v.jitter_c,v.serial,v.free_rank,v.active,v.pending_remove,v.last_tick,v.next_tick,v.interval,v.dt,v.motion,v.heading,v.signal,v.zone_start,v.zone_end,v.zone_lanes,v.collides,v.steer_error,v.lane_changed);}
     void value(IntersectionSignal& v){(*this)(v.road,v.active,v.free_rank,v.index,v.side,v.phase,v.accum,v.lane,v.position_q8,v.lateral_q8,v.controller,v.quiet);}
     void value(IntersectionController& v){(*this)(v.road,v.free_rank,v.active,v.durations,v.start_q8,v.end_q8,v.variant,v.lanes,v.position_q8,v.last_tick,v.next_tick,v.signals,v.pending_remove);}
-    void value(Pedestrian& v){(*this)(v.active,v.pending_remove,v.free_order,v.body,v.animation,v.selector,v.type,v.state,v.side,v.heading,v.pace,v.trigger,v.order,v.lane,v.voice_tick,v.anchor,v.anchor_lateral,v.graphics_evicted,v.last_tick,v.next_tick,v.serial);}
+    void value(Pedestrian& v){(*this)(v.active,v.pending_remove,v.free_order,v.body,v.animation,v.draw_animation,v.selector,v.type,v.state,v.side,v.heading,v.pace,v.trigger,v.order,v.lane,v.voice_tick,v.anchor,v.anchor_lateral,v.graphics_evicted,v.last_tick,v.next_tick,v.serial);}
     template<class T>void vector(std::vector<T>& values,size_t maximum){uint32_t count=uint32_t(values.size());value(count);if(count>maximum)throw std::runtime_error("Snapshot object limit");if(reading)values.resize(count);for(auto& v:values)value(v);}
 };
 // Zero-run coding is independent per snapshot: losing a packet never invalidates
@@ -109,6 +109,10 @@ struct SnapshotStateCodec {
                 }else value={};
             }
             a(value.stepped,value.position,value.offset,value.borr.position,value.borr.record,value.borr.start,value.borr.end,value.borr.current,value.borr.alternate,value.borr.left,value.borr.selector,value.borr.random,value.borr.count,value.borr.units,value.borr.period,value.borr.spacing,value.dzhr.node,value.dzhr.position,value.dzhr.index,value.family_position,value.family_index);
+            a(value.sides.position,value.sides.record,value.sides.values);
+            if(a.reading && node && !ring.course_->sections.at(ring.course_->nodes.at(node).link).side_intervals.empty() &&
+                value.sides.record>=ring.course_->sections.at(ring.course_->nodes.at(node).link).side_intervals.size())
+                throw std::runtime_error("Invalid ring side interval");
             bool have=value.terrain.has_value();a(have);if(have!=value.terrain.has_value())throw std::runtime_error("Ring terrain configuration mismatch");if(have)terrain(a,*value.terrain);
             if(a.reading&&value.dzhr.node>=ring.events_.size())throw std::runtime_error("Invalid ring actor section");
         };
@@ -119,7 +123,7 @@ struct SnapshotStateCodec {
         auto window=[&](auto& v){a(v.active,v.dx_sep,v.x_sep,v.threshold);if(v.active>1)throw std::runtime_error("Invalid window half");for(auto& h:v.halves)half(h);};
         if(a.reading){for(uint32_t i=0;i<windows;++i){uint32_t key=0;a(key);if(!ring.course_->nodes.contains(key)||ring.windows_->contains(key))throw std::runtime_error("Invalid ring window key");window((*ring.windows_)[key]);}}
         else for(auto& [key,v]:*ring.windows_){auto k=key;a(k);window(v);}
-        for(auto& v:ring.shoulders_)a(v.position,v.count,v.closed,v.countdown,v.bands,v.statics,v.motion_valid,v.edges,v.lanes,v.location,v.motion,v.roadway_masks,v.offsets,v.samples);
+        for(auto& v:ring.shoulders_)a(v.position,v.count,v.closed,v.countdown,v.bands,v.statics,v.raw_ground,v.motion_valid,v.edges,v.lanes,v.location,v.motion,v.roadway_masks,v.offsets,v.samples);
         auto ref=[&](auto& v){a(v.slot,v.half);if(v.slot>=128||v.half>1)throw std::runtime_error("Invalid tracker slice");};
         for(auto& v:ring.trackers_){a(v.active,v.kind,v.position);ref(v.slice);if(v.kind>1)throw std::runtime_error("Invalid tracker kind");}
         for(auto& list:ring.tracker_lists_){a.vector(list,4);for(auto index:list)if(index>=4)throw std::runtime_error("Invalid tracker index");}
@@ -140,7 +144,7 @@ struct SnapshotStateCodec {
     }
     static void state(Archive& a,RaceState& copy){
         auto& r=*copy.race;
-        uint32_t schema=3;a(schema);if(schema!=3)throw std::runtime_error("Unknown snapshot schema");
+        uint32_t schema=4;a(schema);if(schema!=4)throw std::runtime_error("Unknown snapshot schema");
         a(r.countdown_started_,r.pace_band_tick_,r.actor_seat_,r.controls_,r.slot_ac_,r.box_draw_pending_,r.box_draw_camera_);
         a.vector(r.schedule_,32);
         uint32_t ground_count=uint32_t(r.ground_.size());a(ground_count);

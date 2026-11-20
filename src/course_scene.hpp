@@ -34,7 +34,7 @@ class CourseScene {
     CourseScene(const Assets&, const std::vector<uint8_t>& exe, const Course&, const std::string& course_name,
                 uint32_t terrain_seed = 1, int level = 0);
     const TerrainSlice& terrain(uint32_t section, uint32_t local) const;
-    void cache_static_ground(const RouteSample&, const RouteSample&, RingStatics&) const;
+    void cache_static_ground(const RouteSample&, const RouteSample&, RingStatics&, const TerrainSlice&, const TerrainSlice&) const;
     // Oracle fixtures: replace one sample's terrain values (e.g. those an
     // original scene dump holds, drawn from the live race random stream).
     void set_terrain(uint32_t section, uint32_t local, const TerrainSlice& slice) {
@@ -129,6 +129,7 @@ class CourseScene {
     };
     std::vector<FamilyTimeline> family_timelines_;
     std::map<uint32_t, Family> families_;
+    int level_ = 0;
     RoadMaterials roads_;
     std::array<int32_t, 32> road_separation_limits_{};
     Cel water_; // GLOBAL.RSC CEL 0x10, cliff-foot water (0x0040d030)

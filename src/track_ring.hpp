@@ -86,7 +86,7 @@ class TrackRing {
     using StaticSink =
         std::function<void(int32_t ring_sample, uint32_t section, uint32_t local, const RingStatics&)>;
     void set_static_sink(StaticSink sink) { static_sink_ = std::move(sink); }
-    using StaticGround = std::function<void(const RouteSample&, const RouteSample&, RingStatics&)>;
+    using StaticGround = std::function<void(const RouteSample&, const RouteSample&, RingStatics&, TerrainSlice&, TerrainSlice&)>;
     void set_static_ground(StaticGround source) { static_ground_ = std::move(source); }
     // Copyable for race snapshots (plan 34 Task 3): course data is shared,
     // the per-node DZHR record lists are copy-on-write.
@@ -224,6 +224,7 @@ class TrackRing {
         int32_t offset = 0;   // section +0x0c, road lateral centre
         std::optional<TerrainIterator> terrain;
         Borr borr;
+        SideCursor sides;
         Dzhr dzhr;
         int32_t family_position = 0, family_index = 0;
     };
@@ -256,7 +257,7 @@ class TrackRing {
     void step_families(SectionWalker&, int32_t delta);
     void request_family(uint16_t family, uint8_t slot, uint8_t type);
     void activate_family(uint16_t family, uint8_t slot);
-    const PathSample& path_of(const SectionWalker&) const;
+    PathSample path_of(const SectionWalker&) const;
     int step_section(SectionWalker&, int32_t delta);                    // 0x00452e10 section result (0/1/2/3)
     void collapse(Walker&);                                             // 0x00452fd0
     void step(Walker&, int32_t delta);                                  // 0x00453030 -> 0x00452e10
@@ -286,6 +287,7 @@ class TrackRing {
         int8_t countdown = 0;
         std::array<int8_t,2> bands{4,4}; // original row+1f/+20
         std::array<RingStatics,2> statics{}; //same live placements used by collision
+        std::array<TerrainSlice,2> raw_ground{}; // physical slot fields retained across terrain kinds
         uint8_t motion_valid = 0;
         std::array<std::array<int32_t, 2>, 2> edges{};
         std::array<std::array<int32_t, 2>, 2> lanes{};
@@ -295,7 +297,8 @@ class TrackRing {
         std::array<int32_t, 2> offsets{};
         std::array<RouteSample, 2> samples{};
     };
-    std::array<Shoulders, 128> shoulders_{};
+    // Keep physical slot state off the stack; ring copies still own their slots.
+    std::vector<Shoulders> shoulders_ = std::vector<Shoulders>(128);
     struct TrackerRef {
         uint8_t slot = 0, half = 0;
         bool operator==(const TrackerRef&) const = default;

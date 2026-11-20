@@ -1,4 +1,7 @@
 #include "test_assets.hpp"
+#include "scene_dump.hpp"
+#include "texture_library.hpp"
+#include "game_types.hpp"
 #include "assets.hpp"
 #include <cstdlib>
 #include "bike.hpp"
@@ -325,11 +328,15 @@ static int replay_main(int argc, char** argv) {
     std::string driver_cli;
     std::vector<std::string> args;
     int64_t ring_pre_cli = -1;
-    bool coverage = false;
+    bool coverage = false, render_ring = false, render_scene = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--reanchor")
             reanchor = true;
+        else if (a == "--render-scene")
+            render_scene=render_ring=true;
+        else if (a == "--render-ring")
+            render_ring = true;
         else if (a == "--coverage")
             coverage = true;
         else if (a.rfind("--ring-pre-draws=", 0) == 0)
@@ -618,7 +625,158 @@ static int replay_main(int argc, char** argv) {
     // Optional original walker-state diagnostics are required in every frame
     // once declared. Read the initialized walkers before any countdown replay;
     // comparing value snapshots neither advances them nor consumes randomness.
+    std::multimap<int32_t,rr::scene::Dump> render_windows;
+    size_t render_checked=0,render_props=0,render_nodes=0;
+    bool render_ready=solo;
+    if(render_ring) {
+        const auto prefix=std::filesystem::path(file).stem().string()+"-scene";
+        for(const auto& entry:std::filesystem::directory_iterator(std::filesystem::path(file).parent_path())) {
+            const auto name=entry.path().filename().string();
+            if(name.starts_with(prefix) && name.ends_with(".raw") && !name.ends_with("-native.raw")) {
+                auto dump=rr::scene::load(entry.path().string());
+                const int32_t tick=dump.memory.i32(0x004b7ecc);
+                render_windows.emplace(tick,std::move(dump));
+            }
+        }
+        if(render_windows.empty()) throw std::runtime_error("No original render-ring windows");
+    }
     auto compare_ring_terrain = [&](size_t frame) {
+        if(render_ring && render_ready) {
+            const int32_t tick=int32_t(g.frames.at(frame).at("tick"));
+            const auto [begin,end]=render_windows.equal_range(tick);
+            for(auto it=begin;it!=end;++it) {
+                const auto& dump=it->second;
+                const uint32_t base=0x004c0a5c-31*0x224;
+                for(uint32_t k=0;k<33;++k) {
+                    const uint32_t strip=base+k*0x224;
+                    if(!dump.memory.has(strip+0x18)) continue;
+                    const int count=dump.memory.i32(strip+4);
+                    for(int half=0;half<count && half<2;++half) {
+                        const auto sub=dump.memory.u32(dump.memory.u32(strip+0x14+half*4)+0xc);
+                        const auto owner=dump.memory.u32(sub+0x28);
+                        const int32_t sample=dump.memory.i32(owner+8)&~255;
+                        const auto native=setup.instance.ring->render_statics(sample,uint8_t(half));
+                        auto require=[&](const char* field,int64_t want,int64_t have) {
+                            if(want!=have) throw std::runtime_error("render-ring tick="+std::to_string(tick)+
+                                " frame="+std::to_string(dump.frame)+" sample="+std::to_string(sample>>8)+
+                                " half="+std::to_string(half)+" "+field+" original="+std::to_string(want)+
+                                " native="+std::to_string(have));
+                        };
+                        if(!native) throw std::runtime_error("Missing live render-ring slice");
+                        const auto I=[&](uint32_t at){return dump.memory.i32(sub+at);};
+                        const auto roadway=setup.instance.ring->render_sample(sample,uint8_t(half));
+                        if(!roadway) throw std::runtime_error("Missing live render roadway");
+                        require("left shoulder",I(0x138),roadway->path.shoulder_left);
+                        require("right shoulder",I(0x13c),roadway->path.shoulder_right);
+                        require("BORR count",dump.memory.u8(sub+0x60),native->borr_count);
+                        require("DZHR count",dump.memory.u8(sub+0x3d),native->billboards);
+                        if(native->borr_count || native->billboards) require("ground cache valid",1,native->grounds_ready);
+                        if(native->borr_count) {
+                            require("BORR selector",dump.memory.u8(sub+0x63),native->borr_selector);
+                            require("BORR size",dump.memory.u8(sub+0x62),native->borr_size);
+                            require("BORR mirror",dump.memory.u8(sub+0x64)&1,native->borr_mirror);
+                        }
+                        for(uint8_t n=0;n<native->borr_count;++n) {
+                            require("BORR lateral",I(0x6c+4*n)-I(0xcc),native->borr[n]);
+                            require("BORR ground",I(0x8c+4*n),native->borr_ground[n]);
+                            ++render_props;
+                        }
+                        for(uint8_t n=0;n<native->billboards;++n) {
+                            const uint32_t at=sub+0x40+16*n;
+                            require("DZHR selector",dump.memory.u8(at),native->billboard[n].selector);
+                            require("DZHR type",dump.memory.u8(at+2),native->billboard[n].type);
+                            require("DZHR mirror",dump.memory.u8(at+1)&1,native->billboard[n].mirror);
+                            require("DZHR lateral",dump.memory.i32(at+8)-I(0xcc),native->billboard[n].offset);
+                            require("DZHR ground",dump.memory.i32(at+12),native->billboard_ground[n]);
+                            ++render_props;
+                        }
+                    }
+                }
+                if(render_scene) {
+                    auto route=race.route();
+                    const uint32_t position=dump.memory.u32(0x004bc7e4);
+                    const size_t first=position>>8;
+                    const auto own=uint8_t(dump.memory.u8(0x00473498));
+                    for(size_t n=first>2?first-2:0;n<route.size() && n<first+35;++n)
+                        route[n]=setup.instance.ring->render_sample(int32_t(n*256),own).value_or(route[n]);
+                    const rr::Camera camera{dump.memory.i32(0x004bc7d8)-route.at(first).offset,
+                                            dump.memory.i32(0x004bc7dc)};
+                    const auto depth=rr::read_depth_table(exe);
+                    rr::Game game;
+                    game.config=config;game.depth=depth;
+                    game.assets=std::move(setup.assets);game.instance=std::move(setup.instance);
+                    struct RestoreRace {
+                        rr::Game& game;rr::RaceSetup& setup;
+                        ~RestoreRace(){setup.assets=std::move(game.assets);setup.instance=std::move(game.instance);}
+                    } restore{game,setup};
+                    game.view_ready=true;game.view_drawn.camera=camera;
+                    game.view_drawn.camera_position_q8=position;
+                    game.view_drawn.camera_origin=route.at(first).offset;
+                    const auto& live_route=game.render_route();
+                    const auto nodes=game.assets.scene->draw_nodes(live_route,
+                        rr::project_road(live_route,position,camera,depth),camera,depth,
+                        [&](const rr::RoadSlice& near,const rr::RoadSlice& far,int road,int32_t ceiling,bool back,int32_t low,int32_t high) {
+                            return game.rider_nodes(near,far,road,ceiling,back,low,high);
+                        },320,game.instance.ring.get());
+                    using Key=std::tuple<std::array<int32_t,8>,bool,bool>;
+                    std::multimap<Key,size_t> original;
+                    for(size_t n=0;n<dump.nodes.size();++n) {
+                        const auto& node=dump.nodes[n];
+                        std::array<int32_t,8> points{};
+                        for(size_t v=0;v<8;++v) points[v]=int32_t(node.u32(0x44+v*4));
+                        original.emplace(Key{points,!node.bytes[0x66] && node.bytes[0x64]!=0,
+                                                   !node.bytes[0x66] && node.bytes[0x65]!=0},n);
+                    }
+                    std::optional<size_t> previous;
+                    for(const auto& node:nodes) {
+                        std::array<int32_t,8> points{};
+                        for(size_t v=0;v<4;++v) {points[2*v]=node.view_points[v].x;points[2*v+1]=node.view_points[v].y;}
+                        const auto [begin,end]=original.equal_range(Key{points,node.texture && node.flip_u,node.texture && node.flip_v});
+                        auto match=begin;
+                        for(;match!=end;++match) {
+                            const auto& want=dump.nodes[match->second];
+                            if(want.u32(8)==0x00466684) {
+                                const int32_t colour=int32_t(want.u32(0x38));
+                                const size_t bank=colour==0xde?1:colour==0xdf?3:colour==0xe0?2:0;
+                                if(node.texture==game.assets.actors->texture(bank,want.u32(0x34),colour)) break;
+                                continue;
+                            }
+                            if(want.bytes[0x66] ? (!node.texture && node.flat_index && *node.flat_index==want.bytes[0x67]) :
+                                (node.texture && !node.texture->mips.empty() && node.texture->mips[0].pixels.size()>=want.size &&
+                                 rr::testlib::fnv(node.texture->mips[0].pixels.data(),want.size)==want.hash)) break;
+                        }
+                        if(match==end && node.texture) {
+                            for(const auto& want:dump.nodes) {
+                                const int32_t colour=int32_t(want.u32(0x38));
+                                const size_t bank=colour==0xde?1:colour==0xdf?3:colour==0xe0?2:0;
+                                const bool dynamic=want.u32(8)==0x00466684;
+                                if(dynamic ? node.texture==game.assets.actors->texture(bank,want.u32(0x34),colour) :
+                                    (want.size && !node.texture->mips.empty() && node.texture->mips[0].pixels.size()>=want.size && rr::testlib::fnv(node.texture->mips[0].pixels.data(),want.size)==want.hash)) {
+                                    std::cerr<<"same-texture original";for(size_t v=0;v<8;++v)std::cerr<<' '<<int32_t(want.u32(0x44+v*4));std::cerr<<"\n";
+                                }
+                            }
+                            std::cerr<<"native quad";for(auto value:points)std::cerr<<' '<<value;std::cerr<<"\n";
+                        }
+                        if(match==end) throw std::runtime_error("native scene tick="+std::to_string(tick)+" frame="+
+                            std::to_string(dump.frame)+" unmatched "+(node.texture?node.texture->name:"flat")+
+                            " x="+std::to_string(points[0])+" y="+std::to_string(points[1]));
+                        if(previous && match->second<=*previous) throw std::runtime_error("Native scene draw order differs");
+                        previous=match->second;original.erase(match);++render_nodes;
+                    }
+                    if(!original.empty()) {
+                        const auto lib=rr::testlib::load_texture_library(assets,course_name);
+                        for(const auto& [key,index]:original) {
+                            const auto& want=dump.nodes[index];const auto* texture=lib.find(want.hash,want.size);
+                            std::cerr<<"missing scene node "<<(texture?texture->name:"?")<<" hash="<<want.hash<<" resource="<<want.u32(8)<<" x="<<int32_t(want.u32(0x44))<<" y="<<int32_t(want.u32(0x48))<<"\n";
+                        }
+                        throw std::runtime_error("Native scene tick="+std::to_string(tick)+" frame="+std::to_string(dump.frame)+" missing "+std::to_string(original.size())+" original scene nodes");
+                    }
+                }
+                ++render_checked;
+            }
+            render_windows.erase(begin,end);
+        }
+
         if (!ring_terrain) return false;
         std::string difference;
         auto compare = [&](const std::string& key, int64_t native) {
@@ -787,7 +945,14 @@ static int replay_main(int argc, char** argv) {
         field.closure_factory_end = field_factory_end;
         field.closure_anchor = field_anchor;
         field.closure_post = field_ring_post;
-        return field.run();
+        render_ready=true;
+        if(render_ring) field.frame_check=compare_ring_terrain;
+        const int result=field.run();
+        if(!result && render_ring) {
+            if(!render_windows.empty()) throw std::runtime_error("Uncompared original render-ring windows remain");
+            std::cout<<render_checked<<" native render-ring windows, "<<render_props<<" original placements/heights identical, "<<render_nodes<<" generated scene nodes match\n";
+        }
+        return result;
     }
     // Default: free-run from the single green anchor, so any missing or
     // extra Race::random() call shows up as rng divergence. --reanchor
@@ -1543,6 +1708,11 @@ static int replay_main(int argc, char** argv) {
                       << " field-comparisons uncovered: " << uncovered_names << "; " << rpm_timing_notes
                       << " rpm-timing notes on the nondeterministic channel)\n";
     }
+    if(render_ring) {
+        if(!render_windows.empty()) throw std::runtime_error("Uncompared original render-ring windows remain");
+        std::cout<<render_checked<<" native render-ring windows, "<<render_props<<" original placements/heights identical, "<<render_nodes<<" generated scene nodes match\n";
+    }
+
     return 0;
 }
 

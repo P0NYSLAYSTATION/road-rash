@@ -89,6 +89,53 @@ void walk_intervals(const Reader& r, size_t chunk, const char* tag, size_t strid
 }
 } // namespace
 
+// 00452a00 / 00452b70 / 00452b00. Deliberately step once per call,
+// including a multi-sample jump: this matches the original cursor operation.
+void SideCursor::init(const std::vector<SideInterval>& intervals, bool forward) {
+    *this = {};
+    if (intervals.empty()) return;
+    record = forward ? 0 : uint32_t(intervals.size() - 1);
+    const auto& interval = intervals[record];
+    position = forward ? 0 : int32_t(interval.end * 256u);
+    const auto& source = forward ? interval.first : interval.last;
+    for (size_t i = 0; i < values.size(); ++i) values[i] = source[i] * 65536;
+}
+void SideCursor::step(const std::vector<SideInterval>& intervals, int32_t delta) {
+    const int32_t previous = position >> 8;
+    position = int32_t(uint32_t(position) + uint32_t(delta));
+    const int32_t sample = position >> 8;
+    if (intervals.empty() || sample == previous || !delta) return;
+    const auto& interval = intervals.at(record);
+    auto load = [&](const auto& source) {
+        for (size_t i = 0; i < values.size(); ++i) values[i] = source[i] * 65536;
+    };
+    auto advance = [&](bool forward) {
+        for (size_t i = 0; i < values.size(); ++i) {
+            const uint32_t slope = uint32_t(interval.slope[i]);
+            values[i] = int32_t(uint32_t(values[i]) + (forward ? slope : 0u - slope));
+        }
+    };
+    if (delta > 0) {
+        if (sample < int64_t(interval.end)) advance(true);
+        else if (sample == int64_t(interval.end)) load(interval.last);
+        else if (record + 1 < intervals.size() && intervals[record + 1].start == uint32_t(sample)) ++record;
+    } else if (sample < int64_t(interval.end)) {
+        if (sample > int64_t(interval.start)) advance(false);
+        else if (sample == int64_t(interval.start)) load(interval.first);
+        else if (record) --record;
+    }
+}
+void SideCursor::apply(const std::vector<SideInterval>& intervals, PathSample& path) const {
+    if (intervals.empty()) return;
+    path.shoulder_left = values[0] >> 16;
+    path.shoulder_right = values[1] >> 16;
+    path.height_left = values[2] >> 16;
+    path.height_right = values[3] >> 16;
+    const auto& flags = intervals.at(record).flags;
+    path.side_flags[0] = flags[0];
+    path.side_flags[1] = flags[1];
+}
+
 // Resolve a physical half without substituting the route's selected road
 // for an intersection or signal attached to the opposite sub-slice.
 RouteSample route_half(const RouteSample& sample, uint8_t half) {
@@ -168,6 +215,23 @@ Course read_course(const std::vector<uint8_t>& bytes) {
                                        int32_t(q8);
                                }
                            });
+        if (sides) {
+            segments.chunk(sides, "DLSR", 16, 36);
+            for (uint32_t n = 0; n < segments.u32(sides + 8); ++n) {
+                const size_t at = sides + 16 + size_t(n) * 36;
+                SideInterval interval;
+                interval.start = segments.u32(at);
+                interval.end = segments.u32(at + 4);
+                for (size_t field = 0; field < 4; ++field) {
+                    const size_t byte = field < 2 ? 8 + field : 10 + field;
+                    interval.first[field] = segments.byte(at + byte);
+                    interval.last[field] = segments.byte(at + byte + 2);
+                    interval.slope[field] = int32_t(segments.s32(at + 20 + field * 4));
+                }
+                interval.flags = {uint8_t(segments.byte(at + 16)), uint8_t(segments.byte(at + 17))};
+                section.side_intervals.push_back(interval);
+            }
+        }
         // RSLD sides in world units (0x00452a00 / 0x00452b70, read back >>16 by 0x00452b00).
         if (sides)
             walk_intervals(segments, sides, "DLSR", 36,

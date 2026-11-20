@@ -4,6 +4,7 @@
 #include "career.hpp"
 #include "exe_tables.hpp"
 #include "scenery.hpp"
+#include "terrain_ground.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <stdexcept>
@@ -413,8 +414,13 @@ RaceInstance build_race(const RaceAssets& assets, const std::vector<uint8_t>& ex
         if (assets.scene) {
             auto* scene = assets.scene.get();
             Race* r = race.get();
-            out.ring->set_static_ground([scene](const RouteSample& here,const RouteSample& next,RingStatics& statics) {
-                scene->cache_static_ground(here,next,statics);
+            out.ring->set_static_ground([scene,r](const RouteSample& here,const RouteSample& next,RingStatics& statics,TerrainSlice& a,TerrainSlice& b) {
+                // 00451c20 precedes 004547e0: ground sees the physical
+                // slot's retained union fields before boundary continuity.
+                scene->cache_static_ground(here,next,statics,a,b);
+                const auto changed=join_terrain_boundary(a,here.path,b,next.path,next.local==0,here.offset-next.offset);
+                if(changed&1) {scene->apply_ring_terrain(here.section,here.local,here.path,a);r->apply_ring_terrain(here.section,here.local,here.path,a);}
+                if(changed&2) {scene->apply_ring_terrain(next.section,next.local,next.path,b);r->apply_ring_terrain(next.section,next.local,next.path,b);}
             });
             out.ring->set_slice_sink([scene, r](uint32_t section, uint32_t local, const PathSample& path,
                                                 const TerrainSlice& slice) {

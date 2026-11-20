@@ -1,5 +1,28 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 20, 2026 - native composed finish recording
+
+- Original:analysis/oracle/hiway-native-render-finish-20261119.tsv;
+  20710contiguous human ticks, seed1 before setup, level1, finish true/outcome3.
+  Working E:/RR DLL restored; no capture process active.
+- PASS:build/release/oracle-sim-test.exe --render-scene --driver=human
+  analysis/oracle/hiway-native-render-finish-20261119.tsv E:/RR.
+  20710ticks identical;35windows;1434prop placements/heights;9896generated
+  complete-list nodes exact, no missing/extra/order mismatch.
+  Log:build/hiway-native-finish-surface.log. Only viewport imported; this does
+  not establish native-camera evolution, every race frame or pixel parity.
+- Independent model:build/hiway-reverse-shoulder-proof.json.10/10captured branch
+  shoulders match reverse Q16 stepping and exactly explain the prior vertex error.
+- Full Release build passes:build/native-composed-final-build.log.
+  Expanded regression gate:build/native-composed-final-gate.log PASS37/37, no skips.
+  Strict five-finish gate:build/native-composed-final-five-finishes.json PASS 5/5,
+  143,764 ticks including RNG, no skips, known divergences or unexpected failures.
+  Earlier32/32 and143764tick gates preceded the latest ring changes.
+- Synthetic regressions now cover reverse cursor rounding/reversal/copy and
+  sub-sample movement, marked terrain entry/exit/translation, indexed actor bounds,
+  snapshot presentation state, and finish-surface material priority.
+
+
 ## November 14, 2026 — terrain parity milestone
 
 The owner's continuing build/push/release authorization applies. The earlier

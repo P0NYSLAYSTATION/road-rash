@@ -252,6 +252,7 @@ void TrackRing::enter(SectionWalker& w, uint32_t offset, bool start) {
     w.stepped = false;
     w.position = start ? 0 : int32_t(node.length) * 0x100;
     w.borr.init(&section.roadside_profiles, int32_t(section.samples.size()), start);
+    w.sides.init(section.side_intervals, start);
     w.terrain.reset();
     if (section.terrain.kind != TerrainDefinition::Kind::none)
         w.terrain.emplace(section.terrain, w.position, forward_);
@@ -476,11 +477,13 @@ void TrackRing::step(Walker& w, int32_t delta) {
     w.position = next;
 }
 
-const PathSample& TrackRing::path_of(const SectionWalker& half) const {
+PathSample TrackRing::path_of(const SectionWalker& half) const {
     const auto& section = course_->sections.at(node_of(*course_, half.node).link);
     const size_t sample = size_t(half.position >> 8);
-    if (!sample && half.stepped && section.forward_start) return *section.forward_start;
-    return sample == section.samples.size() ? section.backward_endpoint : section.samples.at(sample);
+    auto path = !sample && half.stepped && section.forward_start ? *section.forward_start :
+        sample == section.samples.size() ? section.backward_endpoint : section.samples.at(sample);
+    half.sides.apply(section.side_intervals, path);
+    return path;
 }
 
 int TrackRing::step_section(SectionWalker& w, int32_t delta) {
@@ -513,6 +516,7 @@ int TrackRing::step_section(SectionWalker& w, int32_t delta) {
     w.position = next;
     w.stepped = true;
     w.borr.step(delta);                    // 0x00451e20
+    w.sides.step(course_->sections.at(node_of(*course_, w.node).link).side_intervals, delta);
     step_families(w, delta);               //00452580 ->00452310
     if (w.terrain) w.terrain->step(delta); // 0x004516e0
     // 0x00452230: skip records before the walker's sample.
@@ -601,10 +605,13 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         if(from.count && to.count && (from.position&~255)==(target&~255) &&
            (to.position&~255)==((target+256)&~255)) {
             for(uint8_t h=0;h<from.count;++h) {
+                // The discarded branch has no newly built forward neighbour;
+                // its last slice retains the previous contents of its cache.
+                if(from.closed&(1u<<h)) continue;
                 const uint8_t next_half=to.count==1 ? 0 : from.count==1 ? w.active : h;
                 auto here=retained_sample(target,h);
-                auto next=(from.closed&(1u<<h)) ? here : retained_sample(target+256,next_half);
-                if(here && next) static_ground_(*here,*next,from.statics[h]);
+                auto next=retained_sample(target+256,next_half);
+                if(here && next) static_ground_(*here,*next,from.statics[h],from.raw_ground[h],to.raw_ground[next_half]);
             }
         }
     }
@@ -616,17 +623,20 @@ void TrackRing::build_slice(Walker& w, int32_t ring_q8, const ActorSink& sink) {
         for (int h = 0; h < 2; ++h) {
             const auto& half = w.halves[h];
             const auto& path = paths[h];
-            if (half.terrain)
-                terrain[h] = half.terrain->slice(-path.left - path.shoulder_left,
-                                                 path.right + path.shoulder_right);
+            terrain[h]=stored.raw_ground[h];
             if (terrain[h].type == 4 && (path.marking_flags || path.zone_end) &&
                 !(path.marking_flags & 0x40))
                 for (auto& point : terrain[h].points) point[1] = 0;
             if (path.marking_flags & 0x40) terrain[h].type = 3;
         }
         const auto raw = terrain;
+        // Physical road centres include their section offsets as well as
+        // the integrated branch separation (00443d70 / 00454890).
+        const int32_t separation=w.countdown>0 ? w.x_sep :
+            wrap32(int64_t(w.x_sep)+w.halves[1].offset-w.halves[0].offset);
         stored.bands = adjust_split_terrain(terrain[0], paths[0], terrain[1], paths[1],
-                             w.x_sep, w.countdown, windows_->at(w.window).threshold);
+                             separation, w.countdown, windows_->at(w.window).threshold);
+        stored.raw_ground=terrain;
         stored.edges[0][1] = w.halves[0].offset + paths[0].right + paths[0].shoulder_right;
         stored.edges[1][0] = w.halves[1].offset - paths[1].left - paths[1].shoulder_left;
         if (slice_sink_)
@@ -652,11 +662,30 @@ void TrackRing::build_half(SectionWalker& w, int32_t ring_q8, const ActorSink& s
     }
     const auto& path = path_of(w);
     RingStatics statics;
+    const auto& retained=shoulders_[size_t((uint32_t(ring_q8)>>8)&127)].statics[physical_half];
+    statics.borr_ground=retained.borr_ground;
+    statics.billboard_ground=retained.billboard_ground;
+    statics.grounds_ready=bool(static_ground_);
     statics.physical_half = physical_half;
     statics.dual = dual;
     statics.road_offset = w.offset;
     statics.road_left = path.left;
     statics.road_right = path.right;
+    auto& physical=shoulders_[size_t((uint32_t(ring_q8)>>8)&127)];
+    TerrainSlice written=w.terrain ? w.terrain->slice(-path.left-path.shoulder_left,path.right+path.shoulder_right) : TerrainSlice{};
+    auto raw=written;
+    if(raw.type!=4) {
+        raw.points=physical.raw_ground[physical_half].points;
+        raw.shades=physical.raw_ground[physical_half].shades;
+        const int32_t offset=retained.road_offset-w.offset;
+        for(auto& point:raw.points) point[0]=wrap32(int64_t(point[0])+offset);
+    }
+    raw.side_heights=std::array{path.height_left,path.height_right};
+    if(raw.type==1 || raw.type==4) raw.side_heights=std::array<int32_t,2>{0,0};
+    if(raw.type==4 && (path.marking_flags || path.zone_end) && !(path.marking_flags&0x40))
+        for(auto& point:raw.points) point[1]=0;
+    if(path.marking_flags&0x40) {raw.type=3;if(!path.height_left)raw.side_heights=std::array<int32_t,2>{16,16};}
+    physical.raw_ground[physical_half]=raw;
     w.borr.slots(path, *random_, statics); // first walk: stale edges, positions overwritten
     if (slice_sink_)          // 0x00451910 (draw-free); also clear old split-height overrides
         slice_sink_(node.link, local, path, w.terrain

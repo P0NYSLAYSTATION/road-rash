@@ -42,8 +42,9 @@ void PedestrianSystem::apply_template(Bike& b) const {
 std::optional<DrawNode> pedestrian_node(const Pedestrian& p, const RoadSlice& near, const RoadSlice& far,
                                         int road, const RouteSample& sample, const Camera& camera,
                                         const DepthTable& depths, int32_t ceiling, int32_t logical_width) {
-    if (!p.active || !p.look || !p.animation.selected) return std::nullopt;
-    const auto selected = *p.animation.selected;
+    const auto& animation=p.draw_animation ? *p.draw_animation : p.animation;
+    if (!p.active || !p.loaded() || !animation.selected) return std::nullopt;
+    const auto selected = *animation.selected;
     if (selected[0] < 0 || size_t(selected[0]) >= p.look->bank.size() || !p.look->bank[size_t(selected[0])])
         return std::nullopt;
     const auto& sequence = *p.look->bank[size_t(selected[0])];

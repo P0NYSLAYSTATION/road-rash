@@ -23,6 +23,22 @@ int main(int argc, char** argv) {
             std::istringstream row(line);
             if (row >> key >> value) values[key] = value;
         }
+        // Indexed RRAN bounds replace the nominal dimensions (0044ba62).
+        {
+            rr::AnimationFrame indexed;indexed.width=25;indexed.height=65;
+            auto pixels=std::make_shared<rr::CelTexture>();pixels->bounds={0,0,24,64};
+            indexed.texture=pixels;
+            rr::DepthTable constant;constant.scale.assign(4352,32768);
+            rr::ActorProjection input;input.depth=512;
+            const auto node=rr::actor_node(indexed,pixels.get(),input,{0,150},constant);
+            if(!node || node->view_points[1].x-node->view_points[0].x!=24*65536 ||
+               node->view_points[2].y-node->view_points[1].y!=64*65536)
+                throw std::runtime_error("Indexed actor uses nominal size instead of original bounds");
+            indexed.texture.reset(); // Bob sheets retain their nominal RRAN dimensions.
+            const auto bob=rr::actor_node(indexed,pixels.get(),input,{0,150},constant);
+            if(!bob || bob->view_points[1].x-bob->view_points[0].x!=25*65536)
+                throw std::runtime_error("Bob actor dimensions changed");
+        }
         rr::CelTexture texture;
         texture.bounds = {0, 0, 24, 64};
         rr::AnimationFrame frame;

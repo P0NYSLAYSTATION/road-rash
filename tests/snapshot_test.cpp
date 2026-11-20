@@ -155,6 +155,12 @@ int main(int argc, char** argv) {
         for(int t=0;t<360;++t)live.race->countdown_step();
         const std::array<uint32_t,2> controls{rr::control_accelerate,rr::control_accelerate|rr::control_left};
         for(int t=0;t<180;++t)live.race->step(controls);
+        // This point may have no selected pedestrian in view. Seed an
+        // inactive slot explicitly to exercise nonempty presentation state.
+        for(auto& p:live.pedestrians->pool()) if(!p.active) {
+            p.draw_animation.emplace();p.draw_animation->selected=std::array<int8_t,2>{1,0};
+            p.draw_animation->deadline=123456;break;
+        }
         auto packet=rr::encode_snapshot_state(live);
         check(rr::apply_snapshot_state(copy,packet),"real course snapshot decodes");
         if(rr::state_hash(live)!=rr::state_hash(copy)) {
@@ -183,6 +189,17 @@ int main(int argc, char** argv) {
             }
         }
         check(retained_props>0,"snapshot exercises populated construction-time scenery caches");
+        size_t drawn_pedestrians=0;
+        const auto& live_peds=live.pedestrians->pool();const auto& copy_peds=copy.pedestrians->pool();
+        for(size_t i=0;i<live_peds.size();++i) {
+            const auto& a=live_peds[i].draw_animation;const auto& b=copy_peds[i].draw_animation;
+            check(bool(a)==bool(b),"snapshot preserves pedestrian draw-cache validity");
+            if(a && b) {
+                check(a->selected==b->selected && a->deadline==b->deadline,"snapshot preserves frame-copied pedestrian animation");
+                drawn_pedestrians+=a->selected.has_value();
+            }
+        }
+        check(drawn_pedestrians>0,"snapshot exercises selected pedestrian draw animations");
         for(int t=0;t<120;++t){
             live.race->step(controls);copy.race->step(controls);
             check(rr::state_hash(live)==rr::state_hash(copy),"real restored race continues identically without reanchoring RNG");

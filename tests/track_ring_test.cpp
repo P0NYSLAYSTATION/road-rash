@@ -75,7 +75,7 @@ void scenery_cache() {
     rr::TrackRing ring(course,0);
     uint32_t draws=0,calls=0;
     const rr::TrackRing::Random random=[&]{++draws;return 0u;};
-    ring.set_static_ground([&](const rr::RouteSample& here,const rr::RouteSample& next,rr::RingStatics& value){
+    ring.set_static_ground([&](const rr::RouteSample& here,const rr::RouteSample& next,rr::RingStatics& value,rr::TerrainSlice&,rr::TerrainSlice&){
         check(next.local==here.local+1,"prop ground cache receives adjacent physical slices");
         ++calls;value.grounds_ready=true;value.borr_ground[0]=-int32_t(here.local);
     });

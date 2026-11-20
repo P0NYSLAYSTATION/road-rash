@@ -1,5 +1,37 @@
 # Binary evidence and next work
 
+## November 20, 2026 - native composed race-rendering corrections
+
+Original evidence is the seeded human Highway finish capture from E:/RR.
+Native setup/simulation generate all world/actor/scenery inputs. The comparator
+imports only the viewport, so the results isolate scene construction/projection.
+
+- 00438509 copies pedestrian animation+70 to drawn+8c before00440680 loads graphics;
+  first-draw initialization does not select that copied pose retroactively.
+  0044ba62..0044ba8e replaces RRAN dimensions with indexed texture bounds.
+- Nonpositive-countdown00454890 joins include section offset difference alongside
+  integrated branch separation. Positive0045495d shoulder clamping uses separation
+  alone. Pedestrians retain physical-half membership/projection through splits.
+- 004546d0 copies preceding hill X/type/selectors into a marked first building
+  slice and zeros heights. This follows00451c20 ground caching; the query sees
+  the physical slot's retained hill union fields. Discarded ends keep old cache.
+- 0043b94e..0043b960 uses the shared street marker to choose8/16ground strips,
+  restoring six measured SIDLANE0 nodes omitted by the type-only rule.
+- 00452a00/00452b70/00452b00 retain DLSR Q16 fractions through backward branch
+  initialization and later reversals. A forward sample table loses this history:
+  Highway sample1452/local112 is140 wide, versus139 forward, producing2087Q16
+  error at scale2087. Reverse modelling matches all10captured branch shoulders.
+  Native SectionWalker now retains a SideCursor; copied windows and schema4
+  snapshots retain position, interval and all four fractional values.
+- 0045443e..00454459 sets sub+36 bit0x20 for level-tagged finish event7;
+  0043c0b0 prioritizes it for lane materials. Missing native propagation drew
+  PLAIN on two polygons whose captured resource header explicitly says FINISH.
+
+Corrected C++ replay:20710ticks;35sampled windows;9896complete nodes and1434
+prop placements/heights exact. Does not establish unsampled frames, native camera,
+raster pixels, all levels or all courses. Logs/gates are in VERIFICATION.md.
+
+
 ## November 14, 2026 — measured dual-road painter and split metadata
 
 Working-original00443cd0 draws opposite and own road surfaces first, then both

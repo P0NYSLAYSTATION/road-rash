@@ -54,7 +54,7 @@ std::string horizon_name(const std::vector<uint8_t>& exe, const std::string& cou
 } // namespace
 CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, const Course& course,
                          const std::string& name, uint32_t seed, int level)
-    : roads_(read_road_materials(exe, assets.read("DATA/GLOBAL.RSC"))),
+    : level_(level), roads_(read_road_materials(exe, assets.read("DATA/GLOBAL.RSC"))),
       logarithms_(read_exe_data(exe, 0x00476af8, 256)),
       horizon_(assets.read("IMAGES/HORIZONS/" + horizon_name(exe, name) + ".BOB")) {
     if (horizon_.size() != 720 * 320) throw std::runtime_error("Invalid course horizon");
@@ -194,20 +194,21 @@ const TerrainSlice& CourseScene::terrain(uint32_t section, uint32_t local) const
 // 00451c20 runs when the forward neighbour has been built, before that
 // neighbour's split-height adjustment. These cached heights survive later joins.
 void CourseScene::cache_static_ground(const RouteSample& here, const RouteSample& next,
-                                     RingStatics& statics) const {
+                                     RingStatics& statics,const TerrainSlice& a,const TerrainSlice& b) const {
     const auto height=[&](int32_t lateral) {
-        const auto value=terrain_height(terrain(here.section,here.local),here.path,
-            terrain(next.section,next.local),next.path,lateral*256,128,
+        const auto value=terrain_height(a,here.path,b,next.path,lateral*256,128,
             next.offset-here.offset,here.offset);
         return value>=999 ? 0 : value;
     };
     for(uint8_t i=0;i<statics.borr_count;++i) statics.borr_ground[i]=height(statics.borr[i]);
     for(uint8_t i=0;i<statics.billboards;++i) statics.billboard_ground[i]=height(statics.billboard[i].offset);
     statics.grounds_ready=true;
+
 }
 void CourseScene::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample& path,
                                      const TerrainSlice& slice) {
-    if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
+    if (slice.type != 1 && slice.type != 4 && !slice.side_heights && !slice.ring_adjusted) {
+        if(const auto base=base_saved_.find({section,local});base!=base_saved_.end()) terrain_.at(section).at(local).type=base->second.type;
         terrain_.at(section).at(local).side_heights.reset();
         return;
     }
@@ -235,7 +236,8 @@ void ring_terrain_onto(TerrainSlice& t, const PathSample& path, const TerrainSli
     if (!slice.ring_adjusted && slice.type == 4 && (path.marking_flags || path.zone_end) &&
         !(path.marking_flags & 0x40))
         for (auto& point : t.points) point[1] = 0;
-    t.type = type;
+    t.type = slice.ring_adjusted ? slice.type : type;
+    if(slice.ring_adjusted) t.selectors=slice.selectors;
 }
 bool CourseScene::tunnel(uint32_t section, uint32_t local) const {
     return tunnels_.at(section).at(local);
@@ -1127,6 +1129,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             panels.right_lanes_q8 = right_q8;
             panels.left_lane_count = uint8_t(left_count);
             panels.right_lane_count = uint8_t(right_count);
+            // 0045443e..00454459 marks the level's finish event in sub+36.
+            // 0043c0b0 gives this bit priority over ordinary lane materials.
+            panels.surface_flags = path.event_type == 7 && int(path.event_parameters[0]) == level_ + 1 ? 0x20 : 0;
             panels.marking_flags = path.marking_flags;
             panels.terrain_type = road.terrain->type;
             panels.next_terrain_type = old.terrain->type;
@@ -1148,7 +1153,9 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                     ground.logical_width = logical_width;
                     ground.side = uint8_t(side);
                     ground.marking_flags = path.marking_flags;
-                    ground.strips = road.terrain->type == 0 ? 8 : 16;
+                    // 0043b94e..0043b960 shares the side-street marker with
+                    // facades: marked building ground before it gets16 strips.
+                    ground.strips = road.terrain->type == 0 && int64_t(near.sample)>side_street_mark ? 8 : 16;
                     ground.near_depth_q8 = near.depth;
                     ground.far_depth_q8 = far.depth;
                     append(marked_ground_nodes(ground, [&](uint8_t index) {

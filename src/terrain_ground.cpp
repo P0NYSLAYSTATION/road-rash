@@ -88,6 +88,21 @@ int32_t terrain_height(const TerrainSlice& t, const PathSample& path, const Terr
     if (!span) throw std::runtime_error("Degenerate terrain ground segment");
     return add(mul(sub(outer_height, inner_height), sub(x, inner)) / span, inner_height);
 }
+uint8_t join_terrain_boundary(TerrainSlice& previous,const PathSample& pp,TerrainSlice& next,
+                              const PathSample& np,bool first,int32_t offset) {
+    if(!first || previous.type==next.type) return 0;
+    if(next.type==0 && (np.marking_flags || np.zone_end)) {
+        next.type=previous.type;next.selectors=previous.selectors;
+        for(size_t n=0;n<next.points.size();++n) next.points[n]={add(previous.points[n][0],offset),0};
+        next.ring_adjusted=true;return 2;
+    }
+    if(next.type==4 && previous.type==0 && (pp.marking_flags || pp.zone_end)) {
+        previous.selectors={255,255};previous.ring_adjusted=true;
+        for(auto& point:next.points) point[1]=0;
+        next.ring_adjusted=true;return 3;
+    }
+    return 0;
+}
 std::array<int8_t,2> adjust_split_terrain(TerrainSlice& left, PathSample& lp, TerrainSlice& right, PathSample& rp,
                           int32_t separation, int32_t countdown, int32_t threshold) {
     if (countdown > 0) {

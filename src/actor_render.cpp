@@ -15,6 +15,13 @@ int32_t sub(int32_t a, int32_t b) {
 int32_t mul(int32_t a, int32_t b) {
     return bits(uint32_t(a) * uint32_t(b));
 }
+// 0044ba62..0044ba8e replaces RRAN dimensions with indexed texture
+// bounds. Dynamic Bob sheets have no frame.texture and retain RRAN sizes.
+std::array<int32_t,2> actor_dimensions(const AnimationFrame& frame,const CelTexture* texture) {
+    if(frame.texture && frame.texture.get()==texture && !(texture->flags&1))
+        return {texture->bounds[2]-texture->bounds[0],texture->bounds[3]-texture->bounds[1]};
+    return {frame.width,frame.height};
+}
 } // namespace
 ActorAngles actor_angles(const ActorOrientation& actor, int32_t camera_x) {
     int32_t depth = add(actor.depth, int32_t(uint32_t(actor.position) & 255));
@@ -32,7 +39,8 @@ std::optional<DrawNode> actor_node(const AnimationFrame& frame, const CelTexture
     const uint32_t index = (uint32_t(actor.depth) + actor.fraction) & ~1u;
     if (index / 2 >= depths.scale.size()) throw std::runtime_error("Actor projection depth outside table");
     const int32_t projection = depths.scale[index / 2];
-    const int32_t width = frame.width, height = frame.height;
+    const auto dimensions=actor_dimensions(frame,texture);
+    const int32_t width=dimensions[0], height=dimensions[1];
     if (width <= 0 || height <= 0) return std::nullopt;
     int32_t size = actor.size;
     if (actor.flags & 0x10000) size = mul(size, 2);
@@ -110,7 +118,8 @@ std::optional<DrawNode> actor_node_rotated(const AnimationFrame& frame, const Ce
     const uint32_t index = (uint32_t(actor.depth) + actor.fraction) & ~1u;
     if (index / 2 >= depths.scale.size()) throw std::runtime_error("Actor projection depth outside table");
     const int32_t projection = depths.scale[index / 2];
-    const int32_t width = frame.width, height = frame.height;
+    const auto dimensions=actor_dimensions(frame,texture);
+    const int32_t width=dimensions[0], height=dimensions[1];
     if (width <= 0 || height <= 0) return std::nullopt;
     int32_t size = actor.size;
     if (actor.flags & 0x10000) size = mul(size, 2);

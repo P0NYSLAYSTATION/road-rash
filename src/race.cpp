@@ -1206,8 +1206,12 @@ void Race::apply_ring_terrain(uint32_t section, uint32_t local, const PathSample
     const size_t i = (*ground_base_)[section] + local;
     if (i >= ground_.size()) return;
     RingGround& g = ground_.mut(i);
-    if (slice.type != 1 && slice.type != 4 && !slice.side_heights) {
-        if (g.set) g.slice.side_heights.reset();
+    if (slice.type != 1 && slice.type != 4 && !slice.side_heights && !slice.ring_adjusted) {
+        if (g.set) {
+            g.slice.side_heights.reset();
+            RouteSample s{};s.section=section;s.local=local;
+            if(terrain_source_) g.slice.type=terrain_source_(s).type;
+        }
         return;
     }
     if (!g.set) {

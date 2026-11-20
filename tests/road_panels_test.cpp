@@ -17,6 +17,10 @@ int main() {
     if (panels.size() != 2 || panels[0].points[0].x != 6 * 65536 || panels[1].points[1].x != 54 * 65536 ||
         !panels[0].flip_v)
         return 1;
+    in.surface_flags=0x20;
+    for(const auto& panel:rr::road_panels(in))
+        if(panel.material!=rr::RoadPanelMaterial::plain) return 1;
+    in.surface_flags=0;
     in.visible = false;
     if (!rr::road_panels(in).empty()) return 1;
     const auto path = rr::golden::raster_fixture();

@@ -23,6 +23,7 @@ struct Pedestrian {
     bool graphics_evicted = false;            // +0x1e0 can clear while old animation-table pointers remain
     std::array<bool, 3> pre_draw_resources{}; // checkpoint before the frame's lazy resource load
     ActorAnimationState animation;            // block +0x70
+    std::optional<ActorAnimationState> draw_animation; // frame copy +0x8c, before lazy graphics load
     uint8_t selector = 0;                     // +0x1dc family selector
     int type = 0;           // +0x1e4: 4..7 cross (4 faces back, no pace), 10 performs, others stand
     int state = 0;          // +0x1e8: 0 wait, 1 cross, 2 knocked down, 3 hit/hesitate, 4/5 recover, 7 perform

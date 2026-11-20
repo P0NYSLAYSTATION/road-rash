@@ -19,6 +19,38 @@ int main() {
             std::cerr << message << '\n';
         }
     };
+    {
+        // A synthetic DLSR rise has a non-integral Q16 slope. Approaching
+        // the same sample from opposite ends must retain opposite rounding.
+        std::vector<rr::SideInterval> intervals(3);
+        intervals[0] = {0, 1, {100,100,0,0}, {100,100,0,0}, {0,0,0,0}, {1,2}};
+        intervals[1] = {100, 115, {100,100,0,0}, {150,150,0,0}, {218453,218453,0,0}, {3,4}};
+        intervals[2] = {190, 190, {150,150,0,0}, {150,150,0,0}, {0,0,0,0}, {5,6}};
+        rr::SideCursor forward, backward;
+        forward.init(intervals, true);
+        backward.init(intervals, false);
+        for (int sample=1; sample<=112; ++sample) forward.step(intervals, 256);
+        for (int sample=189; sample>=112; --sample) backward.step(intervals, -256);
+        rr::PathSample a{}, b{};
+        forward.apply(intervals, a);
+        backward.apply(intervals, b);
+        check(a.shoulder_left==139 && b.shoulder_left==140,
+              "side iterators preserve direction-dependent fractional widths");
+        check(a.side_flags[0]==3 && b.side_flags[1]==4,
+              "side flags come from the live interval");
+        const auto retained=backward;
+        backward.step(intervals, 256);
+        backward.apply(intervals, b);
+        check(b.shoulder_left==143 && backward.values[0]==retained.values[0]+218453,
+              "reversing the cursor retains its fractional accumulator");
+        const auto fractional=backward.values;
+        backward.step(intervals, 1);
+        check(backward.values==fractional, "fractional movement within one sample does not step sides");
+        backward=retained;
+        backward.step(intervals, -256);
+        backward.apply(intervals, b);
+        check(b.shoulder_left==136, "a copied side cursor resumes with the retained fraction");
+    }
     //00444553: independent branches of the original secondary-road draw gate.
     check(rr::secondary_road_visible(5, -1, false, -1, false, 1001, 1000),
           "a common camera road retains both approaching split roads");

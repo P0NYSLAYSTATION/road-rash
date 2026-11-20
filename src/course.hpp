@@ -44,8 +44,24 @@ struct FamilyEvent {
     uint8_t type = 0, slot = 0;
     uint16_t family = 0;
 };
+// DLSR iterators retain Q16 fractions when a branch is entered backwards.
+// A forward-only sample table cannot reproduce a later direction reversal.
+struct SideInterval {
+    uint32_t start = 0, end = 0;
+    std::array<int32_t, 4> first{}, last{}, slope{};
+    std::array<uint8_t, 2> flags{};
+};
+struct SideCursor {
+    int32_t position = 0;
+    uint32_t record = 0;
+    std::array<int32_t, 4> values{};
+    void init(const std::vector<SideInterval>&, bool forward);
+    void step(const std::vector<SideInterval>&, int32_t delta);
+    void apply(const std::vector<SideInterval>&, PathSample&) const;
+};
 struct CourseSection {
     std::vector<PathSample> samples;
+    std::vector<SideInterval> side_intervals;
     TerrainDefinition terrain;
     std::vector<CourseEvent> events; // raw CESR records in original order (0x004525c0 scans these)
     std::vector<FamilyEvent> family_events;

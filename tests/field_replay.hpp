@@ -8,6 +8,7 @@
 #include "track_ring.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -38,6 +39,7 @@ struct FieldReplay {
     size_t green = 1;
     bool demo = true;
     bool coverage = false;
+    std::function<bool(size_t)> frame_check; // optional original render-state comparison
     // Deferred green closure (field captures): the factory end state and the
     // green pre-step anchor when the original consumed measured draws in the
     // pre-green countdown window, which the countdown replay below reproduces.
@@ -865,6 +867,7 @@ struct FieldReplay {
         for (size_t i = 0; i < green; ++i) {
             if (i != 0) race().countdown_step();
             if (frame(i)) return 1;
+            if (frame_check && frame_check(i)) return 1;
         }
         if (closure_factory_end && closure_anchor) {
             // Deferred closure: the countdown replay must land exactly on the
@@ -929,6 +932,7 @@ struct FieldReplay {
                 return 1;
             }
             if (frame(i)) return 1;
+            if (frame_check && frame_check(i)) return 1;
             if (cars_from_golden && !load_cars(f)) return 1;
             // Per-frame hook 0x00434980: the player's rpm (see the solo replay).
             // Frame end, or crashed on the ground (direct 0x004349c0).

@@ -1,5 +1,25 @@
 # Port progress
 
+## November 20, 2026 - native composed Highway rendering
+
+The seeded human Highway recording now matches20710simulation ticks and all35
+sampled complete display lists:9896generated nodes (geometry/material/order),
+1434prop placements/cached heights. Only the viewport is imported; terrain,
+actors and placements come from the native live simulation.
+
+Fixed pedestrian first-draw pose/bounds and split-road membership, split join
+coordinate offsets, discarded-branch cache retention, marked section terrain
+continuity and ground-query order, street tile counts, reverse DLSR fractions,
+and the level-specific finish-surface flag. Snapshot schema4 retains pedestrian
+drawn animation, physical raw terrain slots and live side cursors.
+
+Current full Release build passes (build/native-composed-final-build.log).
+Expanded focused regressions pass 37/37 without skips. All five strict finished
+races pass 143,764 ticks including RNG after the final slot-storage change.
+Native-camera parity, unsampled frames and remaining course/level rendering
+coverage remain open. No commercial assets/oracle dumps are committed.
+
+
 ## November 14, 2026 — original terrain construction and draw order
 
 Standing owner authorization for builds, commits, pushes and releases throughout
