@@ -1,5 +1,27 @@
 # Verification log (all sessions September 28, 2026)
 
+## November 20, 2026 - no imported viewport in composed replay
+
+PASS:oracle-sim-test --render-camera --driver=human
+analysis/oracle/hiway-native-render-finish-20261119.tsv E:/RR.
+All35 native camera positions, absolute X offsets, heights and physical halves
+match the captured original (build/hiway-native-camera-audit.log).
+The mode exits nonzero if any viewport differs and reports numeric details.
+
+--render-scene now uses race.camera_position(),race.camera_half(),race.camera(),
+and the native ring road offset. Original viewport fields are expectations only.
+PASS:ctest --test-dir build/release --output-on-failure -R
+'^oracle-render-native-(napa|hiway)$':2/2, no skips,16.32seconds.
+Log:build/native-view-composed-gate.log; build:native-view-composed-build.log.
+Same9896 Highway and1869 short Napa composed nodes as before; no imported world,
+actor,placement,terrain or camera inputs. This is sampled simulation-tick rendering,
+not verification of every frame, raster pixel or higher-refresh interpolation.
+
+Published runtime milestone:3do-1.1.33 at936dff892a1ec8884bc66b2bb54ec1619875e92e.
+Installer SHA256:ed42a64b949fd729935af1dbc45004e7c01ca41ac61fda32d9fbd35e112a01c5.
+Receipt:build/windows-v1133-published.json. Installer was not executed.
+
+
 ## November 20, 2026 - native composed finish recording
 
 - Original:analysis/oracle/hiway-native-render-finish-20261119.tsv;

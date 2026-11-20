@@ -1,5 +1,19 @@
 # Port progress
 
+## November 20, 2026 - native viewport validation
+
+The composed-render checks now use the native race camera, position and physical
+half instead of importing the original viewport. All 35 Highway windows and all
+seven short Napa windows still match. The Highway camera audit independently
+matches all four viewport fields in every retained window. This supersedes the
+borrowed-viewport limitation for these specific samples; unsampled frames,
+higher-refresh interpolation and other course/level coverage remain open.
+
+Runtime fixes are committed as936dff8 on port/plan33b-windows and published in
+installer1.1.33. The native-viewport change is test infrastructure only.
+A longer level1 Napa original capture is running with sparse scene dumps.
+
+
 ## November 20, 2026 - native composed Highway rendering
 
 The seeded human Highway recording now matches20710simulation ticks and all35

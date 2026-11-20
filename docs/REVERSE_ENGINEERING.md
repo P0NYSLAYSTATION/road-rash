@@ -1,5 +1,17 @@
 # Binary evidence and next work
 
+## November 20, 2026 - native viewport evidence
+
+The 35 retained Highway scene windows have exact native/original viewport
+position004bc7e4,absolute X004bc7d8,height004bc7dc and half00473498.
+Native Race::camera() is relative to the live ring road's offset; add that
+physical road offset before comparing original absolute X. The composed replay
+now projects with native camera state and treats original viewport values only
+as assertions. Both retained Napa/Highway composed checks pass without borrowing
+viewport inputs. This supersedes that specific limitation in earlier notes,
+without extending evidence to unsampled frames or presentation interpolation.
+
+
 ## November 20, 2026 - native composed race-rendering corrections
 
 Original evidence is the seeded human Highway finish capture from E:/RR.

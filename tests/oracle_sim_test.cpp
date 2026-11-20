@@ -328,13 +328,15 @@ static int replay_main(int argc, char** argv) {
     std::string driver_cli;
     std::vector<std::string> args;
     int64_t ring_pre_cli = -1;
-    bool coverage = false, render_ring = false, render_scene = false;
+    bool coverage = false, render_ring = false, render_scene = false, render_camera = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--reanchor")
             reanchor = true;
         else if (a == "--render-scene")
             render_scene=render_ring=true;
+        else if (a == "--render-camera")
+            render_camera=render_ring=true;
         else if (a == "--render-ring")
             render_ring = true;
         else if (a == "--coverage")
@@ -626,7 +628,7 @@ static int replay_main(int argc, char** argv) {
     // once declared. Read the initialized walkers before any countdown replay;
     // comparing value snapshots neither advances them nor consumes randomness.
     std::multimap<int32_t,rr::scene::Dump> render_windows;
-    size_t render_checked=0,render_props=0,render_nodes=0;
+    size_t render_checked=0,render_props=0,render_nodes=0,camera_mismatches=0;
     bool render_ready=solo;
     if(render_ring) {
         const auto prefix=std::filesystem::path(file).stem().string()+"-scene";
@@ -692,15 +694,37 @@ static int replay_main(int argc, char** argv) {
                         }
                     }
                 }
+                if(render_camera) {
+                    const uint32_t position=race.camera_position();
+                    const uint8_t half=race.camera_half();
+                    const auto sample=setup.instance.ring->render_sample(int32_t(position&~255u),half);
+                    const int32_t origin=sample ? sample->offset : race.route().at(position>>8).offset;
+                    const auto camera=race.camera();
+                    const uint32_t original_position=dump.memory.u32(0x004bc7e4);
+                    const int32_t original_x=dump.memory.i32(0x004bc7d8);
+                    const int32_t original_height=dump.memory.i32(0x004bc7dc);
+                    const uint8_t original_half=dump.memory.u8(0x00473498);
+                    const bool same=position==original_position && camera.x+origin==original_x &&
+                        camera.height==original_height && half==original_half;
+                    if(!same) ++camera_mismatches;
+                    std::cout<<"camera tick="<<tick<<" frame="<<dump.frame
+                        <<" original="<<original_position<<','<<original_x<<','<<original_height<<','<<int(original_half)
+                        <<" native="<<position<<','<<camera.x+origin<<','<<camera.height<<','<<int(half)
+                        <<" match="<<same<<'\n';
+                }
                 if(render_scene) {
                     auto route=race.route();
-                    const uint32_t position=dump.memory.u32(0x004bc7e4);
+                    const uint32_t position=race.camera_position();
                     const size_t first=position>>8;
-                    const auto own=uint8_t(dump.memory.u8(0x00473498));
+                    const auto own=race.camera_half();
                     for(size_t n=first>2?first-2:0;n<route.size() && n<first+35;++n)
                         route[n]=setup.instance.ring->render_sample(int32_t(n*256),own).value_or(route[n]);
-                    const rr::Camera camera{dump.memory.i32(0x004bc7d8)-route.at(first).offset,
-                                            dump.memory.i32(0x004bc7dc)};
+                    const rr::Camera camera=race.camera();
+                    if(position!=dump.memory.u32(0x004bc7e4) || own!=dump.memory.u8(0x00473498) ||
+                        camera.x+route.at(first).offset!=dump.memory.i32(0x004bc7d8) ||
+                        camera.height!=dump.memory.i32(0x004bc7dc))
+                        throw std::runtime_error("Native viewport differs at tick="+std::to_string(tick)+
+                            " frame="+std::to_string(dump.frame)+"; use --render-camera for numeric details");
                     const auto depth=rr::read_depth_table(exe);
                     rr::Game game;
                     game.config=config;game.depth=depth;
@@ -952,6 +976,7 @@ static int replay_main(int argc, char** argv) {
             if(!render_windows.empty()) throw std::runtime_error("Uncompared original render-ring windows remain");
             std::cout<<render_checked<<" native render-ring windows, "<<render_props<<" original placements/heights identical, "<<render_nodes<<" generated scene nodes match\n";
         }
+        if(render_camera && camera_mismatches) return 1;
         return result;
     }
     // Default: free-run from the single green anchor, so any missing or
@@ -1713,6 +1738,7 @@ static int replay_main(int argc, char** argv) {
         std::cout<<render_checked<<" native render-ring windows, "<<render_props<<" original placements/heights identical, "<<render_nodes<<" generated scene nodes match\n";
     }
 
+    if(render_camera && camera_mismatches) return 1;
     return 0;
 }
 
