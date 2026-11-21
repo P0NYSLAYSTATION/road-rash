@@ -206,7 +206,8 @@ struct CourseCanvas {
             [&](const rr::RoadSlice& near, const rr::RoadSlice& far, int road, int32_t ceiling, bool back, int32_t lateral_min, int32_t lateral_max) {
                 return game.rider_nodes(near, far, road, ceiling, back, lateral_min, lateral_max);
             },
-            wide, game.instance.ring.get());
+            wide, game.instance.ring.get(),nullptr,nullptr,nullptr,{},game.race().horizon_angle());
+        game.assets.actors->prepare_pages(nodes, view_mode_wide(s, wide), 16);
         nodes_scope.reset();
         if (use_rgb) {
             // Reuse the indexed canvas as horizon scratch; the RGB path

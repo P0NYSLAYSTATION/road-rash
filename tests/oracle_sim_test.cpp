@@ -660,7 +660,7 @@ static int replay_main(int argc, char** argv) {
             rr::project_road(route,race.camera_position(),camera,game.depth),camera,game.depth,
             [&](const rr::RoadSlice& near,const rr::RoadSlice& far,int road,int32_t ceiling,bool back,int32_t low,int32_t high) {
                 return game.rider_nodes(near,far,road,ceiling,back,low,high);
-            },320,game.instance.ring.get());
+            },320,game.instance.ring.get(),nullptr,nullptr,nullptr,{},race.horizon_angle());
     };
     auto compare_ring_terrain = [&](size_t frame) {
         if(render_ring && render_ready) {

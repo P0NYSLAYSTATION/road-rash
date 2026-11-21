@@ -1,5 +1,38 @@
 # Port progress
 
+## November 21, 2026 - visible cliff-fall correction
+
+The CANYN level-5 edge-crossing regression reproduces the disappearance without
+an original-game capture: a fatal cliff step changes physical ground from road
+height to hundreds of units below it and resets relative height. Using that pose
+directly projects the bike/body below the viewport immediately. The original
+0043a50b..0043a532 reset exists too; it was not removed from simulation.
+
+Presentation now retains a continuous vertical fall across that reset, using
+the actor's vertical velocity and gravity at 60 Hz. Bike and detached-body poses
+are tracked separately; shadows retain physical ground. Game::rider_nodes now
+uses the vertical component of the captured pose. Physics, contacts, wreck timing
+and gameplay RNG remain untouched. This is a presentation correction, not a claim
+of measured original post-cliff rendering parity.
+
+The real CANYN level-5 outer edge is crossed with actual accelerate/turn inputs
+in both biker-art modes. Disabling the correction (--cliff-raw) fails the entry
+continuity assertion; enabling it keeps the player visible for the first 12 fall
+frames and verifies continued downward motion over 90 ticks. All six level-5
+CTest gates pass, including the retained 712-tick native scene comparison and
+65 original-list raster frames with zero pixel differences. Logs:
+build/level5-cliff-raw-failure-20261121.log,
+build/level5-cliff-continuity-20261121.log,
+build/level5-cliff-final-gates-20261121.log.
+
+The Release rr-game executable also builds successfully; focused bob and
+view-state component tests pass (2/2). Logs: build/cliff-game-build-20261121.log
+and build/cliff-components-20261121.log.
+
+No game window, original capture or installer execution was used. The separate
+reported upright-pedestrian failure remains unresolved; its controlled native
+checks passing do not contradict the report.
+
 ## November 20, 2026 - native viewport validation
 
 The composed-render checks now use the native race camera, position and physical
@@ -3698,3 +3731,36 @@ its working DLL was restored. [Evidence, corrections and remaining capture needs
 
 Strict five-course finished human replay acceptance also passes:143,764 ticks
 including RNG,5passes,0skips or divergences;`build/render-five-finishes.json`.
+
+## November 20: CANYN level-5 continuation, captures stopped
+
+Continued offline under the owner's renewed no-capture instruction. Traced the
+four retained raster mismatches to valid empty rider-shadow frames sampling the
+original shared TEMPLATE.MIP page. Implemented template import and ordered page
+snapshots before threaded rasterization, including targeted RGB cache invalidation.
+Added regression coverage for retained page pixels. The four original samples are
+explained by offline integer analysis; updated C++ code is not yet built or
+validated. Pedestrian impacts and the complete post-wreck cliff trajectory remain
+unverified against the original. No build, remote action or installer execution
+in this continuation. [Current source/evidence and next actions](agent-handoffs/canyn-level5-gameplay-20261120.md).
+
+## November 21: independent pedestrian impact callbacks
+
+Corrected a source-level omission confirmed against original 004369f6 through
+00436a15: crashed bikes and detached rider halves were suppressing pedestrian hit
+callbacks. Both handlers now dispatch independently in original order, preserving
+the walking-half exception. Added isolated CANYN level-5 regression scenarios.
+Changes are unbuilt and tests unexecuted; `git diff --check` passes. No captures
+or remote actions. The owner's reports are accepted; original captures are not a
+prerequisite for further fixes. [Exact addresses, implementation and next trace](agent-handoffs/canyn-level5-gameplay-20261120.md).
+
+## November 21: upright pedestrian investigation
+
+The reported upright impact remains unresolved; crashed-bike/half fixes are not
+claimed as its solution. Focused console targets now build under the owner's
+standing build authorization. Controlled upright CANYN level-5 checks cover 13
+representative pedestrian families and four approach speeds through actual scene
+emission, in both biker-art modes. Both new upright CTest cases pass. The three
+existing level-5 gates also pass; shared-template rendering now has zero differing
+pixels in all 65 retained CANYN frames. No new game windows, captures, remote
+actions or installer execution. [Results, failed probes and remaining investigation](agent-handoffs/canyn-level5-gameplay-20261120.md).

@@ -792,18 +792,61 @@ void Race::contact_rider_pedestrian(Rider& r, Pedestrian& p, bool rider_outer) {
     // 0x00436a40 in walk orientation (mass +0x194: pedestrian 100), then the
     // outer node's handler first: the rider's 0x004049c0 path, the
     // pedestrian's 0x00440760.
-    const int32_t hitter_speed = r.bike.i32(0xec);
     if (rider_outer)
         separate(r, 4, p.body, 0x20);
     else
         separate(p.body, 0x20, r, 4);
+    const auto bike_response = [&] {
+        // 00404a57 branches on this bike's crash state, not on whether
+        // the pair may dispatch the other object's handler. The generic
+        // handler already implements its crashed nudge/velocity/tail path.
+        if (r.bike.i32(0x2f4) != 0) contact(r, p.body);
+        else contact_pedestrian(r, p);
+    };
+    const auto pedestrian_response = [&] {
+        // 004407a4 reads the hitter's current speed at callback time.
+        hit_pedestrian(p, r.bike.i32(0xec), ai_attack_anim(r) != 0, false);
+    };
     if (rider_outer) {
-        contact_pedestrian(r, p);
-        hit_pedestrian(p, hitter_speed, ai_attack_anim(r) != 0, false);
+        bike_response();
+        pedestrian_response();
     } else {
-        hit_pedestrian(p, hitter_speed, ai_attack_anim(r) != 0, false);
-        contact_pedestrian(r, p);
+        pedestrian_response();
+        bike_response();
     }
+}
+
+void Race::contact_half_pedestrian(Rider& owner, Pedestrian& p, bool half_outer) {
+    // The detached half is an independent type-8 node in 004368f0.
+    // Dispatch 004046b0 and 00440760 against that node, not its bike.
+    Rider half;
+    half.bike = owner.crash_actor.motion;
+    half.route = owner.crash_actor.route;
+    half.sample = owner.crash_actor.sample;
+    half.slice_half = owner.crash_actor.slice_half;
+    half.previous_sample = owner.crash_actor.previous_sample;
+    half.previous_slice_half = owner.crash_actor.previous_slice_half;
+    if (half_outer) separate(half, 8, p.body, 0x20);
+    else separate(p.body, 0x20, half, 8);
+    const auto half_response = [&] { contact_half_static(half, owner, p.body); };
+    const auto pedestrian_response = [&] {
+        // 004407c5..004407d4 excludes the walking half (owner crash 2)
+        // from speed-only knockdowns, but not a fast tumbling crash body.
+        hit_pedestrian(p, half.bike.i32(0xec), false, owner.bike.i32(0x2f4) == 2);
+    };
+    if (half_outer) { half_response(); pedestrian_response(); }
+    else { pedestrian_response(); half_response(); }
+    owner.crash_actor.motion = half.bike;
+    owner.crash_actor.route = half.route;
+    owner.crash_actor.sample = half.sample;
+    owner.crash_actor.slice_half = half.slice_half;
+    owner.crash_actor.previous_sample = half.previous_sample;
+    owner.crash_actor.previous_slice_half = half.previous_slice_half;
+    for (int offset = 0x180; offset <= 0x1a0; offset += 4)
+        owner.half_object.i32(offset) = half.bike.i32(offset);
+    owner.ride_animation = owner.crash_actor.animation;
+    sync_half_mirror(owner);
+    if (finish_q8_) owner.finish_distance = remaining_finish_distance(owner, half.bike.i32(0x1c));
 }
 
 void Race::collide_pedestrians() {

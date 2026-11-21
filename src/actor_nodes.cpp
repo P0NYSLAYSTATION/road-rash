@@ -5,7 +5,7 @@
 #include <cstdlib>
 namespace rr {
 ActorNodes::ActorNodes(const Assets& assets, const std::vector<uint8_t>& exe, bool high)
-    : library_(exe, assets.read("DATA/GLOBAL.RSC")), sprites_(load_rider_sprites(assets, exe, high)) {
+    : library_(exe, assets.read("DATA/GLOBAL.RSC")), sprites_(load_rider_sprites(assets, exe, high)), page_state_(sprites_) {
     // Quarter-sin table for the 0x00450ad0 body rotation (0x00475768, 1024
     // int32 words, 32768 * sin(i * 90 / 1024); imported, never embedded).
     const auto bytes = read_exe_data(exe, 0x475768, 1024 * 4);

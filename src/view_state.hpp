@@ -12,6 +12,13 @@ struct ActorPose {
     int32_t lateral_q8 = 0, height_q8 = 0, heading = 0, roll = 0;
     int route = 0;
     bool visible = false;
+    int32_t vertical_q8 = 0; // body height above physical ground; shadow ground remains separate
+};
+struct CliffFallPose {
+    uint32_t tick = 0;
+    int32_t ground = 0;
+    int64_t world_q8 = 0, velocity_q8 = 0;
+    bool initialized = false, active = false;
 };
 struct ViewState {
     uint32_t camera_position_q8 = 0; // Race::camera_position()
@@ -20,9 +27,12 @@ struct ViewState {
     int camera_route = 0;
     std::vector<ActorPose> actors; // riders, crash riders, cars, cops, stable id order
     uint32_t tick = 0;
+    std::vector<CliffFallPose> cliff_falls; // presentation history, two entries per rider
 };
 class TrafficSystem;
-void capture_view(ViewState&, const Race&, const TrafficSystem*);
+// Presentation motion fills distant AI scheduler gaps and bridges fatal cliff resets.
+// False retains the raw original pose for oracle/component comparisons.
+void capture_view(ViewState&, const Race&, const TrafficSystem*, bool presentation_motion = false);
 void blend_view(ViewState& out, const ViewState& a, const ViewState& b, uint32_t alpha_q16,
                 uint32_t teleport_q8 = 8 << 8);
 // Correction-only smoothing: affects remote human poses, never the local

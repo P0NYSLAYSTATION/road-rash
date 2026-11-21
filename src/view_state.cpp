@@ -1,5 +1,6 @@
 #include "view_state.hpp"
 #include "traffic.hpp"
+#include <algorithm>
 
 namespace rr {
 namespace {
@@ -29,9 +30,38 @@ int32_t blend_heading(int32_t a, int32_t b, uint32_t alpha_q16) {
         r += period;
     return int32_t(r);
 }
+// The fatal cliff branch resets ground and relative height together. Bridge
+// that discontinuity in the visible pose using the actor's vertical velocity
+// and gravity at 60 Hz. Shadows stay on physical ground; this never feeds
+// physics, contacts, wreck timing or RNG.
+void cliff_pose(ActorPose& pose, CliffFallPose& state, const CliffFallPose& bike_before,
+                const Bike& actor, uint32_t tick, bool fatal) {
+    const int32_t ground = pose.height_q8;
+    const int64_t native_world = int64_t(ground) * 256 + pose.vertical_q8;
+    const auto previous = state.initialized ? state : bike_before;
+    const bool consecutive = previous.initialized && tick == previous.tick + 1;
+    if (!fatal || !pose.visible || tick < state.tick) state.active = false;
+    if (!state.active && fatal && pose.visible && consecutive && ground < 0 &&
+        int64_t(previous.ground) - ground >= 70) {
+        state.active = true;
+        state.world_q8 = native_world + (int64_t(previous.ground) - ground) * 256;
+        state.velocity_q8 = actor.i32(0xf4);
+    } else if (state.active && tick > state.tick) {
+        const int64_t dt = tick - state.tick;
+        const int64_t gravity = -std::max<int32_t>(1, actor.i32(0x1b4));
+        state.world_q8 += state.velocity_q8 * dt + gravity * dt * (dt - 1) / 2;
+        state.velocity_q8 += gravity * dt;
+        if (state.world_q8 <= int64_t(ground) * 256 && state.velocity_q8 <= 0)
+            state.active = false;
+    }
+    if (state.active) pose.vertical_q8 = int32_t(state.world_q8 - int64_t(ground) * 256);
+    state.ground = ground;
+    state.tick = tick;
+    state.initialized = true;
+}
 } // namespace
 
-void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) {
+void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic, bool presentation_motion) {
     v.camera_position_q8 = race.camera_position();
     v.camera = race.camera();
     v.camera_origin = race.camera_x() - v.camera.x;
@@ -39,6 +69,7 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
     v.tick = uint32_t(race.ticks());
     v.actors.clear();
     const auto& riders = race.riders();
+    if (presentation_motion) v.cliff_falls.resize(riders.size() * 2);
     for (size_t i = 0; i < riders.size(); ++i) {
         const auto& rd = riders[i];
         ActorPose p;
@@ -46,10 +77,28 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
         p.position_q8 = uint32_t(rd.crash_active ? rd.bike.i32(0x1c) : rd.half_mirror.position);
         p.lateral_q8 = rd.crash_active ? rd.bike.i32(0x28) : rd.half_mirror.lateral;
         p.height_q8 = rd.bike.i32(0x24);
+        p.vertical_q8 = rd.crash_active ? rd.bike.i32(0x20) : rd.half_mirror.height;
         p.heading = rd.bike.i32(0x5c);
         p.roll = rd.crash_active ? rd.bike.i32(0x60) : rd.half_mirror.yaw;
         p.route = rd.crash_active ? rd.route : rd.half_mirror.route;
         p.visible = rd.live && !rd.parked && (rd.crash_active ? rd.bike_slice_present : rd.half_slice_present);
+        if(presentation_motion && rd.ai && p.visible && !rd.frozen && !rd.half_frozen && !rd.crash_active && race.live_schedule()) {
+            // A distant bike integrates several ticks at once. Adjacent-tick
+            // interpolation alone holds its pose, then displays that whole step.
+            // Predict only the unsimulated presentation interval; simulation,
+            // collision membership and the RNG stream remain untouched.
+            const int32_t elapsed=std::clamp(race.ticks()-rd.sched_last,0,7);
+            const int64_t position=int64_t(p.position_q8)+int64_t(rd.half_mirror.lat108)*elapsed/256;
+            const auto& road=race.route_for(p.route);
+            if(position>=0 && size_t(position>>8)<road.size() && size_t(p.position_q8>>8)<road.size() &&
+                road[size_t(position>>8)].node==road[size_t(p.position_q8>>8)].node) {
+                p.position_q8=uint32_t(position);
+                p.lateral_q8=int32_t(int64_t(p.lateral_q8)+int64_t(rd.half_mirror.lat_vel)*elapsed);
+            }
+        }
+        const auto bike_before = presentation_motion ? v.cliff_falls[2 * i] : CliffFallPose{};
+        const bool fatal = rd.crash_active && rd.bike.i32(0x2f0) == 0;
+        if (presentation_motion) cliff_pose(p, v.cliff_falls[2 * i], bike_before, rd.bike, v.tick, fatal);
         v.actors.push_back(p);
         if (rd.crash_active) {
             ActorPose c;
@@ -57,12 +106,15 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic) 
             c.position_q8 = uint32_t(rd.crash_actor.motion.i32(0x1c));
             c.lateral_q8 = rd.crash_actor.motion.i32(0x28);
             c.height_q8 = rd.crash_actor.motion.i32(0x24);
+            c.vertical_q8 = rd.crash_actor.motion.i32(0x20);
             c.heading = rd.crash_actor.motion.i32(0x5c); // walk-back facing (0x0040a600)
             c.roll = rd.crash_actor.motion.i32(0x60);
             c.route = rd.crash_actor.route;
             c.visible = rd.live && !rd.parked && rd.half_slice_present;
+            if (presentation_motion)
+                cliff_pose(c, v.cliff_falls[2 * i + 1], bike_before, rd.crash_actor.motion, v.tick, fatal);
             v.actors.push_back(c);
-        }
+        } else if (presentation_motion) v.cliff_falls[2 * i + 1] = {};
     }
     if (traffic) {
         const auto& cars = traffic->cars();
@@ -119,6 +171,7 @@ void blend_view(ViewState& out, const ViewState& a, const ViewState& b, uint32_t
         m.position_q8 = blend_u32_wrap(pa->position_q8, pb.position_q8, alpha_q16);
         m.lateral_q8 = blend_i32(pa->lateral_q8, pb.lateral_q8, alpha_q16);
         m.height_q8 = blend_i32(pa->height_q8, pb.height_q8, alpha_q16);
+        m.vertical_q8 = blend_i32(pa->vertical_q8, pb.vertical_q8, alpha_q16);
         m.heading = blend_heading(pa->heading, pb.heading, alpha_q16);
         m.roll = blend_i32(pa->roll, pb.roll, alpha_q16);
         out.actors.push_back(m);

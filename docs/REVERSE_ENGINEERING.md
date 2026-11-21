@@ -1,5 +1,20 @@
 # Binary evidence and next work
 
+## November 21, 2026 - fatal cliff pose discontinuity
+
+Original 00439b10 writes physical ground at 0043a1b4. The fatal drop path
+calls 00403d60 at 0043a50b and stores zero relative height at 0043a532.
+00403e65 copies bike position/height/ground into the detached half, adding
+0x4b00 to its height. This rules out treating the reset as a port-only physics
+mistake. Original bike and half body sprites both use clip flag 1; changing
+that flag to bypass clipping was rejected. 00438513 copies current position
+through ground into draw state without a special cliff clamp.
+
+The new native presentation bridge is deliberately separate from these physical
+fields. Controlled CANYN level-5 edge crossing verifies visibility and continued
+fall; the retained original recording has no rendered post-wreck frames, so it
+does not establish exact original fall appearance or timing.
+
 ## November 20, 2026 - native viewport evidence
 
 The 35 retained Highway scene windows have exact native/original viewport
@@ -3191,3 +3206,28 @@ forward row (+28), without the six-unit split edge padding. It does not use the
 unused far strip's retained second projection record in this case.
 
 Evidence, measured scope and outstanding checks: [handoff](agent-handoffs/native-camera-parity-20261120.md).
+
+## November 20: empty dynamic rider shadows retain template pixels
+
+Working E:/RR/ROADRASH.EXE disassembly shows 00432f90 loads standalone MIP
+body bytes after the leading size into resource +28, with body-relative mip
+pointers. 00410197 sets dynamic flags 0x2002 and 004101a3 limits it to one mip.
+00443820 copies only the current frame rectangle, without clearing this shared
+page. A zero-size shadow therefore retains previous copies and untouched template
+pixels, rather than producing no drawable texture as previously assumed.
+
+CANYN level-5 scenes 180, 200, 270 and 280 contain 0x0 shadow frame 22 whose
+wrapped unsigned UVs sample byte 65281, palette index 113 in supplied TEMPLATE.MIP.
+The following rider body is transparent at each differing pixel. Offline integer
+analysis explains all four original-list raster discrepancies; updated C++ behavior
+awaits compilation and rerun. [Addresses, corrections and evidence](agent-handoffs/canyn-level5-gameplay-20261120.md).
+
+## November 21: independent pedestrian impact callbacks
+
+Corrected a source-level omission confirmed against original 004369f6 through
+00436a15: crashed bikes and detached rider halves were suppressing pedestrian hit
+callbacks. Both handlers now dispatch independently in original order, preserving
+the walking-half exception. Added isolated CANYN level-5 regression scenarios.
+Changes are unbuilt and tests unexecuted; `git diff --check` passes. No captures
+or remote actions. The owner's reports are accepted; original captures are not a
+prerequisite for further fixes. [Exact addresses, implementation and next trace](agent-handoffs/canyn-level5-gameplay-20261120.md).

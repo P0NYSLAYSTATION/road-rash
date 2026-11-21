@@ -579,7 +579,7 @@ int native_terrain(const std::string& tsv, const rr::Assets& assets, bool check_
         std::multimap<Key, IndexedNode> native;
         size_t native_order = 0;
         for (const auto& n :
-             scene.draw_nodes(route, rr::project_road(route, position, camera, depths), camera, depths,{},320,nullptr,window_mode?&countdowns:nullptr,window_mode?&live_families:nullptr,window_mode?&bands:nullptr,scenery_source)) {
+             scene.draw_nodes(route, rr::project_road(route, position, camera, depths), camera, depths,{},320,nullptr,window_mode?&countdowns:nullptr,window_mode?&live_families:nullptr,window_mode?&bands:nullptr,scenery_source,dump.memory.i32(0x004bc7e8))) {
             std::array<int32_t, 8> v{};
             for (size_t k = 0; k < 4; ++k) {
                 v[2 * k] = n.view_points[k].x;
@@ -795,9 +795,11 @@ int run(int argc, char** argv) {
         for(const auto& frame:golden.frames)
             if(frame.count("scene.file") && frame.count("pixels.file")) scene_frames.push_back(frame);
     }
+    rr::RiderPageState rider_page(sprites);
     int failures = 0, frames = 0;
     for (const auto& f : scene_frames) {
         if (!f.count("scene.file") || !f.count("pixels.file")) continue;
+        if(const char* frame=std::getenv("RR_SCENE_FRAME");frame && f.at("scene.file")!=std::atoi(frame))continue;
         const auto dump = rr::scene::load(stem + "-scene" + std::to_string(f.at("scene.file")) + ".raw");
         const auto pixels = read_file(stem + "-f" + std::to_string(f.at("pixels.file")) + ".raw");
         const int width = int(f.at("pixels.width")), height = int(f.at("pixels.height"));
@@ -835,11 +837,20 @@ int run(int argc, char** argv) {
             }
             nodes.push_back(n);
         }
+        rider_page.prepare(nodes, rr::view_mode(f.at("view.high") != 0),
+                           uint32_t(f.count("view.quality_mask") ? f.at("view.quality_mask") : 16));
         try {
             for (size_t i = 0; i < nodes.size(); ++i) {
                 try {
+                    const char* trace_x=std::getenv("RR_SCENE_PIXEL_X");
+                    const char* trace_y=std::getenv("RR_SCENE_PIXEL_Y");
+                    const int x=trace_x?std::atoi(trace_x):-1,y=trace_y?std::atoi(trace_y):-1;
+                    const bool trace=x>=0 && x<width && y>=0 && y<height;
+                    const int before=trace?fb.row(y)[x]:-1;
                     rr::render_nodes(fb, {nodes[i]}, rr::view_mode(f.at("view.high") != 0),
                                      uint32_t(f.count("view.quality_mask") ? f.at("view.quality_mask") : 16));
+                    if(trace && before!=fb.row(y)[x])std::cerr<<"pixel node="<<i<<" texture="
+                        <<(nodes[i].texture?nodes[i].texture->name:"flat")<<" from="<<before<<" to="<<int(fb.row(y)[x])<<'\n';
                 } catch (const std::exception& e) {
                     const auto* t = nodes[i].texture;
                     if (t)

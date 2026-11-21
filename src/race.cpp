@@ -2016,6 +2016,9 @@ void Race::crash_entry(Rider& r, int32_t reason, std::optional<std::array<int32_
         // the motion set (split-left 2056: body +0x16c/+0x140 spec words
         // were stale zeros, skewing the body vertical vs the original).
         r.crash_actor.motion = r.half_object;
+        // 00403d60 reuses the half's +70 animation block. Setting the crash
+        // code leaves +7c (the selected frame) intact until its next think.
+        r.crash_actor.animation = r.ride_animation;
         begin_crash(r.bike, r.crash_actor, crash_config_, crash_bank(r), crash_library_->fallback,
                     uint32_t(ticks_), reason, rider_impulse, bike_impulse);
         // 0x00403d60 copies the bike words into the half (iVar2 =
@@ -2659,6 +2662,9 @@ void Race::crash(Rider& r) {
         r.bike.i32(0x2f4) = 0;
         // Crash body runs on the half object: pre-fill behavior words (see crash_entry).
         r.crash_actor.motion = r.half_object;
+        // 00403d60 reuses the half's +70 animation block. Setting the crash
+        // code leaves +7c (the selected frame) intact until its next think.
+        r.crash_actor.animation = r.ride_animation;
         begin_crash(r.bike, r.crash_actor, crash_config_, crash_bank(r), crash_library_->fallback,
                     uint32_t(ticks_), 0);
         // 0x00403d60 half copies (see crash_entry).
@@ -5364,8 +5370,14 @@ void Race::collide_riders() {
             } else if (a.rider >= 0 || b.rider >= 0) {
                 Rider& r = riders_[size_t(a.rider >= 0 ? a.rider : b.rider)];
                 Pedestrian& p = pedestrians_->pool()[size_t(a.rider >= 0 ? b.pedestrian : a.pedestrian)];
-                if (r.bike.i32(0x2f4) == 0)
-                    contact_rider_pedestrian(r, p, a.rider >= 0); // 0x004049c0 rejects crashed riders
+                const auto& rider_node = a.rider >= 0 ? a : b;
+                // 004369f6..00436a15 separates the pair, then calls BOTH
+                // handlers. A crashed bike takes its own shortened response;
+                // it must not suppress the pedestrian's knockdown callback.
+                if (rider_node.type == 4)
+                    contact_rider_pedestrian(r, p, a.rider >= 0);
+                else if (rider_node.type == 8)
+                    contact_half_pedestrian(r, p, a.rider >= 0);
             } else {
                 auto& first = pedestrians_->pool()[size_t(a.pedestrian)];
                 auto& second = pedestrians_->pool()[size_t(b.pedestrian)];
@@ -5632,15 +5644,21 @@ void Race::step(std::span<const uint32_t> words) {
     update_camera();
     const auto& player = riders_[0];
     const auto& road = route_of(player);
+    // 0044b4dc/0044b507 reads the rider HALF's +140/+13c physical
+    // slices. Once detached, its road history differs from the bike's.
+    const auto& camera_road=*routes_[player.half_mirror.route];
+    const size_t camera_before=player.crash_active ? player.crash_actor.previous_sample : player.previous_sample;
+    const size_t camera_now=player.half_mirror.sample;
     camera_heading_ = advance_heading(camera_heading_, previous_camera_position_, camera_position(),
-                                      road[player.previous_sample].path.bend, road[player.sample].path.bend,
+                                      camera_road.at(camera_before).path.bend, camera_road.at(camera_now).path.bend,
                                       (player.bike.u8(0xc0) & 16) != 0);
     for (int seat = 1; seat < humans(); ++seat) {
         const auto& rider = riders_[size_t(human_rider(seat))];
-        const auto& route = route_of(rider);
+        const auto& route = *routes_[rider.half_mirror.route];
+        const size_t before=rider.crash_active ? rider.crash_actor.previous_sample : rider.previous_sample;
         seat_heading_[size_t(seat)] =
             advance_heading(seat_heading_[size_t(seat)], previous_view[size_t(seat)], seat_camera(seat),
-                            route[rider.previous_sample].path.bend, route[rider.sample].path.bend,
+                            route.at(before).path.bend, route.at(rider.half_mirror.sample).path.bend,
                             (rider.bike.u8(0xc0) & 16) != 0);
     }
     // 0x00454120 ring advance (terrain/BORR/DZHR draws) before 0x0044dd90.

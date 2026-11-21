@@ -29,6 +29,7 @@ const std::vector<RgbaMip>& rgba_mips(const CelTexture&, const Palette&, uint32_
                                       int level);
 uint32_t palette_generation(const Palette&); // FNV-1a over rgbx; equal palettes -> equal value
 void clear_rgba_mip_cache(); // only between frames (course load / teardown); invalidates references returned by rgba_mips
+void invalidate_rgba_mip_cache(const CelTexture&); // between frames, before mutating a dynamic page
 size_t rgba_mip_cache_size(); // test hook
 // Test hook: convert one mip without caching.
 std::vector<RgbaMip> rgba_mips_for_test(const CelMip&, const Palette&);

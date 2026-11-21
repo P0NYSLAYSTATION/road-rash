@@ -236,12 +236,14 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         // Projection and interpolation must read that retained half pose.
         int32_t pos_q8 = riding ? rd.half_mirror.position : bike.i32(0x1c),
                 lat_q8 = riding ? rd.half_mirror.lateral : bike.i32(0x28), gnd_q8 = bike.i32(0x24),
-                head = bike.i32(0x5c), roll = riding ? rd.half_mirror.yaw : bike.i32(0x60);
+                head = bike.i32(0x5c), roll = riding ? rd.half_mirror.yaw : bike.i32(0x60),
+                vertical_q8 = riding ? rd.half_mirror.height : bike.i32(0x20);
         if (view_ready) {
             if (const auto* pose = rider_pose(i, item.body)) {
                 pos_q8 = int32_t(pose->position_q8);
                 lat_q8 = pose->lateral_q8;
                 gnd_q8 = pose->height_q8;
+                vertical_q8 = pose->vertical_q8;
                 head = pose->heading;
                 roll = pose->roll;
             }
@@ -272,7 +274,7 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
         const auto& descriptor =
             assets.actors->library().playback[bank].at(size_t(selected[0]))->at(size_t(selected[1]));
         const auto nodes = assets.actors->rider(descriptor, bank, rd.colour, orientation, projection, camera,
-                                                depth, riding ? rd.half_mirror.height : bike.i32(0x20), nullptr, logical_width());
+                                                depth, vertical_q8, nullptr, logical_width());
         output.insert(output.end(), nodes.begin(), nodes.end());
     }
     return output;

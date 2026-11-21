@@ -74,7 +74,7 @@ class CourseScene {
     using ScenerySource=std::function<std::vector<SceneryObject>(uint32_t,uint8_t)>;
     std::vector<DrawNode> draw_nodes(const std::vector<RouteSample>& route,
                                      const std::vector<RoadSlice>& slices, const Camera&, const DepthTable&,
-                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr, const std::vector<int32_t>* view_countdowns = nullptr, const std::array<uint16_t,4>* view_families = nullptr, const std::vector<std::array<int8_t,2>>* view_bands = nullptr, ScenerySource scenery_source = {}) const;
+                                     ActorEmitter actors = {}, int32_t logical_width = 320, const TrackRing* ring = nullptr, const std::vector<int32_t>* view_countdowns = nullptr, const std::array<uint16_t,4>* view_families = nullptr, const std::vector<std::array<int8_t,2>>* view_bands = nullptr, ScenerySource scenery_source = {}, int32_t horizon_angle = 0) const;
     void draw_horizon(Framebuffer&, int32_t scroll, int32_t logical_width = 320) const;
     const std::vector<SceneryObject>& objects(uint32_t section, uint32_t local) const;
     const AnimationFrame* object_frame(uint32_t section, uint32_t local, const SceneryObject&) const;
@@ -138,6 +138,7 @@ class CourseScene {
     int level_ = 0;
     RoadMaterials roads_;
     std::array<int32_t, 32> road_separation_limits_{};
+    Cel sea_; // GLOBAL CEL17, distant sea bands (0040cec0)
     Cel water_; // GLOBAL.RSC CEL 0x10, cliff-foot water (0x0040d030)
     std::vector<uint8_t> logarithms_, horizon_;
     std::array<RasterPoint, 16> joins_{};

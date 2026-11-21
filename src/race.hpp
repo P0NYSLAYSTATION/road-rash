@@ -617,6 +617,7 @@ class Race {
     int32_t ticks() const { return ticks_; }
     uint32_t player_controls() const { return controls_[0]; }
     uint32_t camera_position() const;
+    int32_t horizon_angle() const { const int32_t q=camera_heading_/4; return q+q/4; }
     int32_t horizon_scroll() const { return rr::horizon_scroll(camera_heading_); }
     int32_t camera_x() const { return camera_x_; } // 0x004b7ee8: camera lateral, world units
     uint8_t camera_half() const;
@@ -718,6 +719,7 @@ class Race {
     void update_halves();  // rider-half mirror and standings (0x004060b0 tail)
     void collide_riders(); // 0x004368f0 list walk: bikes, pedestrians, hazard gate
     void contact_rider_pedestrian(Rider&, Pedestrian&, bool rider_outer);
+    void contact_half_pedestrian(Rider&, Pedestrian&, bool half_outer);
     void separate(Rider& outer, uint32_t outer_type, Rider& partner, uint32_t partner_type); // 0x00436a40
     // Position-ordered scheduler list (0x00438aa0 insert sort, ties in
     // creation order) for the AI ring scans: rider bikes (type 4) and halves

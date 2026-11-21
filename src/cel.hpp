@@ -25,6 +25,8 @@ struct CelTexture {
     std::string name;
     std::vector<CelMip> mips;
     std::vector<CelMip> upscaled;
+    bool rider_page = false; // frame rectangle copied into the shared dynamic rider page
+
 };
 struct Cel {
     uint32_t flags = 0;

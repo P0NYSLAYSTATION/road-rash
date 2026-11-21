@@ -21,7 +21,15 @@ int main() {
     check(frames[1].width == 0 && frames[1].pixels.empty(), "empty frame");
     rr::RiderSprites sprites;
     sprites.shadow = frames;
-    check(!rr::rider_texture(sprites, 0xe0, 1), "empty shadow does not produce invalid texture bounds");
+    sprites.template_pixels.assign(65536, 37);
+    const auto empty = rr::rider_texture(sprites, 0xe0, 1);
+    check(empty && empty->bounds == std::array<int32_t, 4>{0, 0, 0, 0} &&
+              empty->mips[0].pixels == sprites.template_pixels,
+          "empty shadow preserves the original template page and zero bounds");
+    const auto populated = rr::rider_texture(sprites, 0xe0, 0);
+    check(populated && populated->mips[0].pixels[0] == 7 &&
+              populated->mips[0].pixels[1] == 9 && populated->mips[0].pixels[65281] == 37,
+          "frame copy leaves template pixels outside its rectangle untouched");
     for (size_t n = 0; n < file.size() - 2; ++n) {
         try {
             rr::read_bobs(std::vector<uint8_t>(file.begin(), file.begin() + long(n)), 2);

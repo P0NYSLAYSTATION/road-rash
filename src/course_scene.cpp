@@ -65,9 +65,10 @@ CourseScene::CourseScene(const Assets& assets, const std::vector<uint8_t>& exe, 
         road_separation_limits_ = read_road_separation_limits(exe);
         const auto global = assets.read("DATA/GLOBAL.RSC");
         for (const auto& entry : read_resources(global))
-            if (entry.tag == "CEL " && entry.id == 0x10)
-                water_ = read_cel(std::vector<uint8_t>(global.begin() + entry.offset,
-                                                       global.begin() + entry.offset + entry.size));
+            if (entry.tag == "CEL " && (entry.id == 0x10 || entry.id == 0x11)) {
+                auto cel=read_cel(std::vector<uint8_t>(global.begin()+entry.offset,global.begin()+entry.offset+entry.size));
+                (entry.id==0x10 ? water_ : sea_)=std::move(cel);
+            }
     }
     {
         auto word = [](const std::vector<uint8_t>& b, size_t p) {
@@ -376,6 +377,7 @@ void CourseScene::attach_upscaled(const UpscaleCache& cache) {
     for (auto& signal : roads_.signals)
         if (signal.texture) one(*signal.texture);
     if (water_.texture) one(*water_.texture);
+    if (sea_.texture) one(*sea_.texture);
 }
 void CourseScene::clear_upscaled() {
     for (auto& [id, family] : families_)
@@ -386,6 +388,7 @@ void CourseScene::clear_upscaled() {
     for (auto& terrain : roads_.terrain)
         if (terrain.texture) terrain.texture->upscaled.clear();
     if (water_.texture) water_.texture->upscaled.clear();
+    if (sea_.texture) sea_.texture->upscaled.clear();
 }
 const std::vector<SceneryObject>& CourseScene::objects(uint32_t section, uint32_t local) const {
     return objects_.at(section).at(local);
@@ -642,7 +645,7 @@ void CourseScene::draw_horizon(Framebuffer& fb, int32_t scroll, int32_t logical_
 std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& route,
                                               const std::vector<RoadSlice>& slices, const Camera& camera,
                                               const DepthTable& depths, ActorEmitter actors,
-                                              int32_t logical_width, const TrackRing* ring, const std::vector<int32_t>* view_countdowns, const std::array<uint16_t,4>* view_families, const std::vector<std::array<int8_t,2>>* view_bands, ScenerySource scenery_source) const {
+                                              int32_t logical_width, const TrackRing* ring, const std::vector<int32_t>* view_countdowns, const std::array<uint16_t,4>* view_families, const std::vector<std::array<int8_t,2>>* view_bands, ScenerySource scenery_source, int32_t horizon_angle) const {
     struct RestoreFamilies {
         std::optional<std::array<uint16_t,4>>& target;
         std::optional<std::array<uint16_t,4>> previous;
@@ -797,7 +800,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             std::array<int32_t, 2> outer_edge = {s.shoulder_left, s.shoulder_right};
             road.mountain = 0;
             road.curb_height = {0, 0};
-            if (road.kind == 1 || road.kind == 3) {
+            if (road.kind >= 1 && road.kind <= 3) {
                 profile = wall_profile(*road.terrain, *road.path, road.kind == 3);
                 road.mountain = profile.mountain;
             }
@@ -822,7 +825,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                 const int32_t shoulder = outer_edge[size_t(side)];
                 // 0x00454240 clears the pair B heights of type-1 sides; 0x00444630
                 // keeps +0x64/+0x6c at the road row for types 1-3.
-                const int32_t side_height = road.kind == 1 || road.kind == 3
+                const int32_t side_height = road.kind >= 1 && road.kind <= 3
                                                 ? 0
                                                 : (side ? road.path->height_right : road.path->height_left);
                 const int32_t shoulder_y =
@@ -859,7 +862,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                                              hills.points[band * 2 + side][1]};
                 }
                 road.wall_height[side] = 0;
-                if (road.kind == 1 || road.kind == 3) {
+                if (road.kind >= 1 && road.kind <= 3) {
                     // 0x00444630 projects the base at the road row and the top
                     // height*scale above it (+0x70/+0x80).
                     const int32_t base = profile.base[size_t(side)], top = profile.top[size_t(side)],
@@ -872,7 +875,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
                                                        wrap(s.screen_y - int64_t(height) * slice.scale)};
                 }
             }
-            if (road.kind == 1 || road.kind == 3) {
+            if (road.kind >= 1 && road.kind <= 3) {
                 // 0x00444630 types 1-3 occlusion row (param_3[7]): with a right
                 // side below the road, the lower of the two wall tops; else the
                 // road row, or the left top when only the left drops.
@@ -971,6 +974,33 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
         return raw != INT32_MIN && route[slices[n].sample].event == RoadEvent::merge_window ? raw+1 : raw;
     };
     std::vector<DrawNode> result;
+    // 00443a80/0040cec0: three tiled sea bands precede the world list.
+    // Their foot comes from the last projected road, not a fixed screen row.
+    if(!slices.empty() && sea_.texture) {
+        const auto& last=roads.back()[0];
+        int side=-1;
+        if(last.kind==1 || last.kind==3)
+            side=last.wall_height[0]<=0 ? 0 : last.wall_height[1]<=0 ? 1 : -1;
+        if(side>=0) {
+            const auto foot=last.hill[side].projected[2];
+            constexpr int32_t horizon=94*65536,tile=256*65536;
+            if(ceiling<foot.y || foot.y>horizon) {
+                int32_t x=foot.x;
+                while(x>0)x-=tile;
+                const int32_t y1=wrap(int64_t(foot.y)+horizon)/2;
+                const int32_t y2=wrap(int64_t(y1)+470*65536)/6;
+                const int32_t scroll=-int32_t(uint32_t(horizon_angle)&0xffffffu);
+                const auto band=[&](int32_t left,int32_t top,int32_t bottom) {
+                    if(top>=ceiling)return;
+                    for(int64_t q=left;q<int64_t(logical_width)*65536;q+=tile) {
+                        const int32_t l=wrap(q),r=wrap(q+tile);
+                        result.push_back({{{{l,top},{r,top},{r,bottom},{l,bottom}}},&*sea_.texture});
+                    }
+                };
+                band(x,y1,foot.y);band(scroll,y2,y1);band(scroll,horizon,y2);
+            }
+        }
+    }
     std::vector<DrawNode>* emission = &result;
     auto append = [&](const std::vector<DrawNode>& nodes) {
         emission->insert(emission->end(), nodes.begin(), nodes.end());
@@ -1198,7 +1228,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             // 0x0043bef0 draws marked ground (0x0043b970) only for types 0 and 4.
             //0043c035..0043c03d gates type4's marked ground on the
             //road pair's visibility; type0's dispatcher deliberately does not.
-            if ((road.kind != 4 || visible) && (path.marking_flags & 32) && road.kind != 1 && road.kind != 3)
+            if ((road.kind != 4 || visible) && (path.marking_flags & 32) && (road.kind < 1 || road.kind > 3))
                 for (int side = 0; side < 2; ++side) {
                     if (near.count==2 && far.count==2 && side==1-r && road.kind==4) continue;
                     side_emission(r,side);
@@ -1318,7 +1348,7 @@ std::vector<DrawNode> CourseScene::draw_nodes(const std::vector<RouteSample>& ro
             // between two tunnel samples), then the mountain side; on the
             // tunnel's mountain side also the arch (0x0040dac0) and, at the
             // mouth, the portal (0x0040d420).
-            if (road.kind == 1 || road.kind == 3)
+            if (road.kind >= 1 && road.kind <= 3)
                 for (int side = 0; side < 2; ++side) {
                     const auto& old=far_roads[opening_split?side:(opening_merge?entering_half:r)];
                     const auto& a=far.road[opening_split?side:r];

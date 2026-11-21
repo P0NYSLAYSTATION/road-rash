@@ -375,7 +375,7 @@ void RaceScreen::step_online(uint64_t now, uint32_t controls) {
     const auto before = g_.view_drawn;
     g_.present_online(*client.race(), seat);
     g_.countdown = std::max(0, int(client.start()->countdown) - client.current_tick());
-    capture_view(g_.view_cur, g_.race(), g_.traffic());
+    capture_view(g_.view_cur, g_.race(), g_.traffic(), true);
     g_.view_drawn = g_.view_cur;
     g_.view_prev = g_.view_cur;
     const bool smooth = opt_.settings ? opt_.settings->smooth_remote : opt_.smooth_remote;
@@ -489,7 +489,7 @@ bool RaceScreen::iterate(uint64_t now_ns) {
         g_.tick(controls);
         // Capture every simulation tick (even during catch-up), keeping both
         // endpoints adjacent; first tick after a reset initializes both.
-        capture_view(g_.view_cur, g_.race(), g_.traffic());
+        capture_view(g_.view_cur, g_.race(), g_.traffic(), true);
         if (!g_.view_ready) g_.view_prev = g_.view_cur;
         g_.view_ready = true;
         if (!g_.career) continue;

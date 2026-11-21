@@ -1,5 +1,38 @@
 # Current status and evidence
 
+## November 21, 2026 - visible cliff-fall correction
+
+The CANYN level-5 edge-crossing regression reproduces the disappearance without
+an original-game capture: a fatal cliff step changes physical ground from road
+height to hundreds of units below it and resets relative height. Using that pose
+directly projects the bike/body below the viewport immediately. The original
+0043a50b..0043a532 reset exists too; it was not removed from simulation.
+
+Presentation now retains a continuous vertical fall across that reset, using
+the actor's vertical velocity and gravity at 60 Hz. Bike and detached-body poses
+are tracked separately; shadows retain physical ground. Game::rider_nodes now
+uses the vertical component of the captured pose. Physics, contacts, wreck timing
+and gameplay RNG remain untouched. This is a presentation correction, not a claim
+of measured original post-cliff rendering parity.
+
+The real CANYN level-5 outer edge is crossed with actual accelerate/turn inputs
+in both biker-art modes. Disabling the correction (--cliff-raw) fails the entry
+continuity assertion; enabling it keeps the player visible for the first 12 fall
+frames and verifies continued downward motion over 90 ticks. All six level-5
+CTest gates pass, including the retained 712-tick native scene comparison and
+65 original-list raster frames with zero pixel differences. Logs:
+build/level5-cliff-raw-failure-20261121.log,
+build/level5-cliff-continuity-20261121.log,
+build/level5-cliff-final-gates-20261121.log.
+
+The Release rr-game executable also builds successfully; focused bob and
+view-state component tests pass (2/2). Logs: build/cliff-game-build-20261121.log
+and build/cliff-components-20261121.log.
+
+No game window, original capture or installer execution was used. The separate
+reported upright-pedestrian failure remains unresolved; its controlled native
+checks passing do not contradict the report.
+
 **Windows race rendering, November 20:**42 focused regressions pass without skips.
 Native camera/world construction matches52 Napa and35 Highway sampled composed
 scene lists through finished recordings;87 original-list raster checks have zero
@@ -28,3 +61,23 @@ Generated from `agent-status.json`. Historical entries describe their own checkp
 - **oracle**: failed; source `c326c2b97d5a`; commit `b76ffc899e20`; receipt `/Users/archit/Dev/rr/native-port/analysis/agent-gates/p0-p1-strict-final/receipt.json`.
 - **package**: passed; source `0f31a63359bf`; commit `b76ffc899e20`; receipt `/Users/archit/Dev/rr/native-port/analysis/agent-gates/p0-p1-package-final/receipt.json`.
 - **sanitizers**: passed; source `8718e6d4f13b`; commit `992106d9ee74`; receipt `/Users/archit/Dev/rr/native-port/analysis/agent-gates/field-parity-20261018-sanitizers/receipt.json`.
+
+## November 20: CANYN level-5 work (superseded by November 21 above)
+
+Rendering/gameplay changes are pending and uncommitted in the Windows checkout.
+The latest source adds original shared rider-template page behavior after tracing
+four raster differences to empty shadows. It is unbuilt; do not treat earlier
+passing scene/replay logs as validation of the latest tree. Original pedestrian
+impact and full visible cliff-fall behavior remain open. Captures are stopped at
+the owner's request. [Resumable status](agent-handoffs/canyn-level5-gameplay-20261120.md).
+
+## November 21: upright pedestrian investigation
+
+The reported upright impact remains unresolved; crashed-bike/half fixes are not
+claimed as its solution. Focused console targets now build under the owner's
+standing build authorization. Controlled upright CANYN level-5 checks cover 13
+representative pedestrian families and four approach speeds through actual scene
+emission, in both biker-art modes. Both new upright CTest cases pass. The three
+existing level-5 gates also pass; shared-template rendering now has zero differing
+pixels in all 65 retained CANYN frames. No new game windows, captures, remote
+actions or installer execution. [Results, failed probes and remaining investigation](agent-handoffs/canyn-level5-gameplay-20261120.md).

@@ -284,6 +284,12 @@ void clear_rgba_mip_cache() {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_cache.clear();
 }
+void invalidate_rgba_mip_cache(const CelTexture& texture) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (auto it = g_cache.begin(); it != g_cache.end();)
+        if (std::get<0>(it->first) == &texture) it = g_cache.erase(it);
+        else ++it;
+}
 size_t rgba_mip_cache_size() {
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_cache.size();
