@@ -988,6 +988,6 @@ class Race {
     void sound(SoundEvent, const Bike&);
     uint32_t previous_camera_position_ = 0;
     int32_t camera_heading_ = 0;
-    int32_t camera_x_ = 0, camera_height_ = 150, camera_lift_ = 0, camera_back_ = 0;
+    int32_t camera_x_ = 0, camera_height_ = 150, camera_lift_ = 150, camera_back_ = 0;
 };
 } // namespace rr

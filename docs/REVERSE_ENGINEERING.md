@@ -1,5 +1,26 @@
 # Binary evidence and next work
 
+## November 21, 2026 - measured natural cliff sequence
+
+Working E:/RR original, CANYN level5, seed1: unguarded mounted crossing at23044,
+natural player-half retained. 23218 ticks and22 complete native scene windows
+(6478 nodes) match. See the current verification log for receipts and exact scope.
+00437b34 initializes camera lift DAT004c3e00 to150;00437d44..00437d7e increments
+it only for results, with no ordinary-race decay.00437d8e reads the rider HALF's
+ground+24, not its bike. A terminal drop resets physical height in the original;
+synthetic continuity is not a recovered behavior and has been removed.
+
+Repeated fatal damage legitimately wraps stamina above its cap. The natural
+capture exposes it at23122: original current1073744324 versus native1250.
+00407ce7/00407d1c compares maximum against current and skips regeneration when
+current>=maximum. Damage arithmetic already matched; the missing regeneration
+guard was the divergence. Both native regeneration loops now retain it.
+
+The apparent sample2022 split mismatch was actually a single-road type3 tunnel:
+source DLSR shoulders224, original sub-slice projected shoulders112. Normalize
+those widths at road projection while retaining source widths for wall geometry.
+The complete native scene match verifies the resulting coordinates and ordering.
+
 ## November 21, 2026 - fatal cliff pose discontinuity
 
 Original 00439b10 writes physical ground at 0043a1b4. The fatal drop path

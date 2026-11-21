@@ -127,8 +127,11 @@ std::vector<DrawNode> Game::rider_nodes(const RoadSlice& near, const RoadSlice& 
                 visible.push_back({int32_t(pos), i, false, body});
         };
         if (rd.crash_active) {
-            include(rd.bike, rd.route, rd.crash_bike_animation, false);
+            // The original half precedes its bike at equal position (00446250).
+            // First crash frames share that position; preserve the list tie so
+            // the bike can cover the detached rider in the same painter order.
             include(rd.crash_actor.motion, rd.crash_actor.route, rd.crash_actor.animation, true);
+            include(rd.bike, rd.route, rd.crash_bike_animation, false);
         } else
             include(rd.bike, rd.route, rd.ride_animation, false);
     }

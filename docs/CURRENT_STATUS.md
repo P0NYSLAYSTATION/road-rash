@@ -1,5 +1,50 @@
 # Current status and evidence
 
+## November 21, 2026 - natural unguarded cliff rendering verified
+
+The CANYN level-5 mounted-bike case now matches the working E:/RR original.
+The bike drives through the guardrail-free right opening at sample2003; it is
+still mounted at tick23043 and falls at23044. This is not the earlier wall impact.
+The final capture preserves the actual player-half pointer after detachment,
+so its tail includes natural motion rather than the old isolation freeze.
+
+Strict single-anchor replay: 23218 ticks including RNG identical, zero ignored
+golden state fields. All 22 complete native scene windows match camera,
+geometry, materials and order: 178 prop placements/heights, 6478 generated
+nodes. Original-list raster comparisons for all 22 frames have zero differing
+pixels. Evidence: build/natural-cliff-render-receipt.log and
+build/natural-cliff-other-receipt.log; capture/receipt:
+analysis/oracle/canyn-l5-mounted-cliff-natural-20261121.tsv[.receipt.json].
+The capture ends174 ticks after the fatal drop, before the frontend transition.
+This verifies the measured level-5 cliff sequence, not every course/frame.
+
+Removed the synthetic fall bridge from1.1.35: the original briefly loses the bike
+from view at the fatal drop and then draws the detached rider. Forcing continuous
+on-screen motion produced extra nodes absent from the original. Fixed the actual
+camera lift baseline150, rider-half ground source and result ramp; preserved
+original body/bike tie order. Corrected tunnel shoulder projection. Natural-tail
+verification also exposed missing stamina-regeneration guards: damage wrapping
+was already correct, but regeneration clamped an above-cap wrapped value. Original
+00407ce7/00407d1c skips that operation; both native AI regeneration paths now do too.
+
+The oracle's isolated human replay now uses live scheduling, correct null-callback
+cadence/contacts/removal, police decisions and frozen controller behavior. Frozen
+background state is a declared one-time fixture input; player state is never
+imported or reanchored. The old isolation behavior remains reproducible for older
+recordings without probe.preserve_player_half. The human-function invocation
+counter stops after the fatal transition changes dispatch; the player half remains
+active, with two rider slots and natural motion through the final frame.
+
+Final validation on the same source: level5-cliff-render1/1 PASS
+(build/natural-cliff-render-final.log), remaining level5/bob/view-state9/9 PASS
+(build/natural-cliff-other-final-gates.log). Combined10/10, no skips. The earlier
+9/10 log remains as failure history and is superseded. There are278 explicitly
+nondeterministic audio-RPM notes, zero far-edge slice-load notes. Release game
+build succeeds. All capture processes ended; E:/RR/AWEMAN32.DLL restored to
+ca7f2f65bf6d1550857556a27d65d4f44d7a6ca14c2be89b7c0f9affb6a47022.
+No installer was executed. The separately reported upright pedestrian bug remains
+open; controlled upright checks passing do not dismiss it.
+
 ## November 21, 2026 - visible cliff-fall correction
 
 The CANYN level-5 edge-crossing regression reproduces the disappearance without

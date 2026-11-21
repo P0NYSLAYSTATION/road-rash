@@ -394,7 +394,13 @@ else()
         add_executable(level5-gameplay-test tests/level5_gameplay_test.cpp src/road_draw.cpp)
         target_link_libraries(level5-gameplay-test PRIVATE rr-resource SDL3::SDL3)
         add_test(NAME level5-gameplay COMMAND level5-gameplay-test)
-        add_test(NAME level5-cliff-visibility COMMAND level5-gameplay-test --cliff-only)
+        add_test(NAME level5-cliff-entry COMMAND level5-gameplay-test --cliff-only)
+        add_test(NAME level5-cliff-render COMMAND oracle-sim-test --render-presentation --driver=human
+            "${CMAKE_SOURCE_DIR}/analysis/oracle/canyn-l5-mounted-cliff-natural-20261121.tsv" "${RR_TEST_ASSETS_DIR}")
+        set_tests_properties(level5-cliff-render PROPERTIES LABELS "disc;fixture;level5")
+        add_test(NAME level5-cliff-pixels COMMAND oracle-scene-test --discover-scenes --assets "${RR_TEST_ASSETS_DIR}"
+            "${CMAKE_SOURCE_DIR}/analysis/oracle/canyn-l5-mounted-cliff-natural-20261121.tsv")
+        set_tests_properties(level5-cliff-pixels PROPERTIES LABELS "disc;fixture;level5")
         add_test(NAME level5-upright-pedestrians COMMAND level5-gameplay-test --upright-only)
         add_test(NAME level5-upright-speeds COMMAND level5-gameplay-test --upright-speed)
         add_test(NAME level5-canyn-original-scene COMMAND oracle-sim-test --render-scene --driver=human
@@ -402,7 +408,7 @@ else()
         add_test(NAME level5-canyn-original-pixels COMMAND oracle-scene-test --discover-scenes
             --assets "${RR_TEST_ASSETS_DIR}" "${CMAKE_SOURCE_DIR}/analysis/oracle/canyn-l5-cliff-right-20261120.tsv")
         set_tests_properties(level5-canyn-original-scene level5-canyn-original-pixels PROPERTIES LABELS "disc;fixture;level5")
-        set_tests_properties(level5-gameplay level5-cliff-visibility level5-upright-pedestrians level5-upright-speeds PROPERTIES LABELS "disc;level5")
+        set_tests_properties(level5-gameplay level5-cliff-entry level5-upright-pedestrians level5-upright-speeds PROPERTIES LABELS "disc;level5")
         add_executable(race_screen-test tests/race_screen_test.cpp src/road_draw.cpp)
         target_link_libraries(race_screen-test PRIVATE rr-resource SDL3::SDL3)
         add_test(NAME race-screen COMMAND race_screen-test)

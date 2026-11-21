@@ -328,13 +328,17 @@ static int replay_main(int argc, char** argv) {
     std::string driver_cli;
     std::vector<std::string> args;
     int64_t ring_pre_cli = -1;
-    bool coverage = false, render_ring = false, render_scene = false, render_camera = false;
+    bool coverage = false, render_ring = false, render_scene = false, render_camera = false, render_presentation = false, render_player = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--reanchor")
             reanchor = true;
         else if (a == "--render-scene")
             render_scene=render_ring=true;
+        else if (a == "--render-presentation")
+            render_presentation=render_scene=render_ring=true;
+        else if (a == "--render-player")
+            render_player=render_presentation=render_scene=render_ring=true;
         else if (a == "--render-camera")
             render_camera=render_ring=true;
         else if (a == "--render-ring")
@@ -607,6 +611,15 @@ static int replay_main(int argc, char** argv) {
     }
     rr::RaceSetup setup = rr::make_race_setup(assets, exe, config);
     rr::Race& race = *setup.instance.race;
+    // Oracle solo freezes other nodes; it still dispatches the human's bike
+    // and half through the original live scheduler. The legacy every-tick
+    // fixture path has a different launch ramp and is not a human replay.
+    if (solo && !demo) {
+        race.set_live_schedule(true);
+        // Isolation freezes spawned nodes on the next tick; it does not
+        // remove the human's periodic police decision/RNG call.
+        race.set_police(setup.assets.police,setup.assets.specs,&setup.assets.actors->library());
+    }
     // Solo captures null the car pool, but 0x0044dd90 still draws a lane
     // at gated timer expiries. Keep the timers attached and skip placement.
     if (solo && setup.instance.traffic) setup.instance.traffic->set_spawn_enabled(false);
@@ -642,6 +655,7 @@ static int replay_main(int argc, char** argv) {
         }
         if(render_windows.empty()) throw std::runtime_error("No original render-ring windows");
     }
+    rr::ViewState presentation_view;
     auto build_native_scene = [&]() {
         rr::Game game;
         game.config=config;game.depth=rr::read_depth_table(exe);
@@ -654,6 +668,10 @@ static int replay_main(int argc, char** argv) {
         game.view_drawn.camera=race.camera();
         game.view_drawn.camera_position_q8=race.camera_position();
         game.view_drawn.camera_origin=race.camera_x()-race.camera().x;
+        if(render_presentation) {
+            rr::capture_view(presentation_view,race,game.traffic(),true);
+            game.view_drawn=presentation_view;
+        }
         const auto& route=game.render_route();
         const auto camera=game.blend_camera();
         return game.assets.scene->draw_nodes(route,
@@ -692,8 +710,12 @@ static int replay_main(int argc, char** argv) {
                         const auto I=[&](uint32_t at){return dump.memory.i32(sub+at);};
                         const auto roadway=setup.instance.ring->render_sample(sample,uint8_t(half));
                         if(!roadway) throw std::runtime_error("Missing live render roadway");
-                        require("left shoulder",I(0x138),roadway->path.shoulder_left);
-                        require("right shoulder",I(0x13c),roadway->path.shoulder_right);
+                        // Native paths retain source DLSR widths. 00454240
+                        // stores half-width shoulders for tunnels; projection
+                        // performs that normalization without altering physics.
+                        const int32_t shoulder_divisor=(roadway->path.marking_flags&0x40)?2:1;
+                        require("left shoulder",I(0x138),roadway->path.shoulder_left/shoulder_divisor);
+                        require("right shoulder",I(0x13c),roadway->path.shoulder_right/shoulder_divisor);
                         require("BORR count",dump.memory.u8(sub+0x60),native->borr_count);
                         require("DZHR count",dump.memory.u8(sub+0x3d),native->billboards);
                         if(native->borr_count || native->billboards) require("ground cache valid",1,native->grounds_ready);
@@ -745,6 +767,35 @@ static int replay_main(int argc, char** argv) {
                             " frame="+std::to_string(dump.frame)+"; use --render-camera for numeric details");
                     const auto nodes=build_native_scene();
                     const auto& game_actors=*setup.assets.actors;
+                    if(render_player) {
+                        // Compare the player's actual presented body nodes, including
+                        // the bike and detached body during a fall. Other riders'
+                        // optional scheduler smoothing is outside this check.
+                        const int32_t colour=race.riders().front().colour;
+                        std::map<const rr::CelTexture*,uint32_t> player_frames;
+                        for(uint32_t f=0;f<game_actors.library().graphics[0].frames.size();++f)
+                            player_frames.emplace(game_actors.texture(0,f,colour),f);
+                        std::vector<const rr::DrawNode*> actual;
+                        for(const auto& node:nodes) if(node.texture && player_frames.contains(node.texture)) actual.push_back(&node);
+                        size_t checked=0;
+                        for(const auto& want:dump.nodes) {
+                            if(want.u32(8)!=0x00466684 || int32_t(want.u32(0x38))!=colour)continue;
+                            if(checked>=actual.size()) throw std::runtime_error("Player body missing at tick="+std::to_string(tick));
+                            const auto& node=*actual[checked++];
+                            if(player_frames.at(node.texture)!=want.u32(0x34))
+                                throw std::runtime_error("Player animation frame differs at tick="+std::to_string(tick));
+                            for(size_t v=0;v<4;++v) if(node.view_points[v].x!=int32_t(want.u32(0x44+v*8)) ||
+                                                          node.view_points[v].y!=int32_t(want.u32(0x48+v*8)))
+                                throw std::runtime_error("Player body quad differs at tick="+std::to_string(tick)+
+                                    " vertex="+std::to_string(v)+" original="+std::to_string(int32_t(want.u32(0x48+v*8)))+
+                                    " native="+std::to_string(node.view_points[v].y));
+                            if(node.flip_u!=(!want.bytes[0x66] && want.bytes[0x64]!=0) ||
+                               node.flip_v!=(!want.bytes[0x66] && want.bytes[0x65]!=0))
+                                throw std::runtime_error("Player body orientation differs at tick="+std::to_string(tick));
+                        }
+                        if(checked!=actual.size())throw std::runtime_error("Unexpected player body node at tick="+std::to_string(tick));
+                        render_nodes+=checked;++render_checked;continue;
+                    }
                     using Key=std::tuple<std::array<int32_t,8>,bool,bool>;
                     std::multimap<Key,size_t> original;
                     for(size_t n=0;n<dump.nodes.size();++n) {
@@ -802,10 +853,17 @@ static int replay_main(int argc, char** argv) {
                         if(match==end) throw std::runtime_error("native scene tick="+std::to_string(tick)+" frame="+
                             std::to_string(dump.frame)+" unmatched "+(node.texture?node.texture->name:"flat")+
                             " x="+std::to_string(points[0])+" y="+std::to_string(points[1]));
-                        if(previous && match->second<=*previous) throw std::runtime_error("Native scene tick="+
+                        if(previous && match->second<=*previous) {
+                            for(const auto index:{*previous,match->second}) {
+                                const auto& n=dump.nodes.at(index);
+                                std::cerr<<"order node="<<index<<" resource="<<n.u32(8)<<" frame="<<n.u32(0x34)
+                                    <<" colour="<<n.u32(0x38)<<" x="<<int32_t(n.u32(0x44))<<" y="<<int32_t(n.u32(0x48))<<'\n';
+                            }
+                            throw std::runtime_error("Native scene tick="+
                             std::to_string(tick)+" frame="+std::to_string(dump.frame)+" draw order original="+
                             std::to_string(match->second)+" after="+std::to_string(*previous)+" texture="+
                             (node.texture?node.texture->name:"flat"));
+                        }
                         previous=match->second;original.erase(match);++render_nodes;
                     }
                     if(!original.empty()) {
@@ -983,9 +1041,17 @@ static int replay_main(int argc, char** argv) {
                   << " rider.0.think=" << r0_think << " rider.1.think=" << r1_think
                   << " (0x00434660=4408928)\n";
     }
-    // Field captures: live scheduler replay with list-order slot identity
-    // (tests/field_replay.hpp). Solo captures continue below.
-    if (!solo) {
+    // Human isolation nulls other dispatch callbacks, not the player's live
+    // scheduler. Use the same strict startup/field replay for human solo.
+    // Older demo component captures retain their legacy path below.
+    if (!solo || !demo) {
+        if(solo) {
+            // Frozen node images are declared component-fixture inputs. Keep
+            // this one-time background hydration; never hydrate the player.
+            rr::golden::apply_frozen_state(h,race.riders(),false);
+            for(auto& rider:race.riders())
+                if(rider.frozen && !rider.bike_slice_present && !rider.half_slice_present) rider.parked=true;
+        }
         rr::golden::FieldReplay field{g, setup, tick0, green, demo, coverage};
         field.closure_factory_end = field_factory_end;
         field.closure_anchor = field_anchor;

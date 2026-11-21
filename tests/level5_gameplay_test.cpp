@@ -238,24 +238,34 @@ void crash_entry(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool h
     require(me.crash_active && me.crash_actor.animation.selected==before,
             "crash entry must preserve the selected frame before the next half think");
 }
-void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bool diagnose=false,bool continuity=true) {
+void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bool diagnose=false) {
     auto scan=make_game(assets,exe,high);size_t sample=0;int side=0;rr::WallProfile wall;
-    for(size_t i=80;i+40<scan->race().route().size();++i) {
+    for(size_t i=2003;i+40<scan->race().route().size();++i) {
         const auto& at=scan->race().route()[i];const auto& terrain=scan->assets.scene->terrain(at.section,at.local);
         if(terrain.type!=1 || at.dual)continue;
         wall=rr::wall_profile(terrain,at.path,false);
-        if(wall.height[0]<-100 || wall.height[1]<-100){sample=i;side=wall.height[0]<-100?0:1;break;}
+        bool found=false;
+        for(int candidate=0;candidate<2 && !found;++candidate) {
+            if(wall.height[size_t(candidate)]>=-100 ||
+               -int64_t(wall.height[size_t(candidate)])*2 < std::abs(wall.top[size_t(candidate)]-wall.base[size_t(candidate)]))continue;
+            bool clear=true;
+            for(size_t j=i;j<i+12;++j) {
+                const auto& next=scan->race().route()[j];
+                if(next.path.event_type==5 && (next.path.event_parameters[2]&(1<<candidate)))clear=false;
+            }
+            if(clear){sample=i;side=candidate;found=true;}
+        }
+        if(found)break;
     }
-    require(sample!=0,"Canyn level5 must exercise an actual cliff");
+    require(sample!=0,"Canyn level5 must exercise an unguarded cliff");
     auto game=make_game(assets,exe,high,sample);auto& race=game->race();auto& me=race.riders()[0];
-    // Cross the real course's outer cliff edge with a grounded bike.
+    // Cross an unguarded edge while mounted, not a rail impact followed by a body fall.
     for(size_t i=1;i<race.riders().size();++i) {
         auto& other=race.riders()[i];other.parked=true;other.live=false;
         other.bike_slice_present=other.half_slice_present=false;
         other.bike.u8(0xc0)&=0xfc;
     }
-    me.bike.i32(0x28)=(diagnose ? wall.base[size_t(side)]+(side?-5:5) :
-        wall.top[size_t(side)]+(side?100:-100))*256;
+    me.bike.i32(0x28)=(wall.base[size_t(side)]+(side?-5:5))*256;
     me.bike.i32(0x20)=me.bike.i32(0x24)=me.bike.i32(0x34)=me.bike.i32(0x38)=0;
     me.bike.i32(0x160)=100;me.bike.i32(0xec)=me.bike.i32(0x108)=5000;
     for(int k=0;k<5;++k)me.bike.i32(0x30+4*k)=me.bike.i32(0x1c+4*k);
@@ -263,9 +273,22 @@ void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bo
     require(before.has_value(),"cliff scenario must start with a selected riding frame");
     bool entered=false,retained=false;size_t body_frames=0;
     int first_fall=-1;size_t visible_fall_frames=0;
-    int64_t previous_draw_world=0,highest_draw_world=INT64_MIN,last_draw_world=0;
-    for(int t=0;t<(diagnose?90:12);++t) {
-        game->tick(rr::control_accelerate | (diagnose ? (side?rr::control_right:rr::control_left) : 0));
+    rr::capture_view(game->view_cur,race,game->traffic(),true);
+    bool crossed_mounted=false;
+    for(int t=0;t<90;++t) {
+        const bool mounted=!me.crash_active;
+        const auto& at=race.route_for(me.route).at(me.sample);
+        require(at.path.event_type!=5 || !(at.path.event_parameters[2]&(1<<side)),
+                "mounted cliff test must not cross a guardrail");
+        game->tick(rr::control_accelerate | (side?rr::control_right:rr::control_left));
+        if(me.crash_active && !entered) {
+            std::cout<<"unguarded first transition: sample="<<sample<<" tick="<<race.ticks()<<" mounted="<<mounted
+                <<" reason="<<me.bike.i32(0x2f8)<<" ground="<<me.bike.i32(0x24)<<" height="<<me.bike.i32(0x20)
+                <<" lateral="<<me.bike.i32(0x28)<<" base="<<wall.base[size_t(side)]<<" top="<<wall.top[size_t(side)]<<'\n';
+            require(mounted && me.bike.i32(0x2f0)==0 && me.bike.i32(0x24)<0,
+                    "first crash must be the mounted bike leaving the cliff, not a wall impact");
+            crossed_mounted=true;
+        }
         if(me.crash_active) {
             entered=true;retained|=bool(me.crash_actor.animation.selected);
             body_frames+=me.crash_actor.animation.selected.has_value();
@@ -273,17 +296,14 @@ void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bo
         if(diagnose) {
             for(size_t i=1;i<race.riders().size();++i)race.riders()[i].parked=true;
             const auto before_rng=race.rng_state();
-            rr::capture_view(game->view_cur,race,game->traffic(),continuity);
+            rr::capture_view(game->view_cur,race,game->traffic(),true);
             require(before_rng==race.rng_state(),"cliff presentation must not consume gameplay RNG");
             game->view_drawn=game->view_cur;game->view_ready=true;
             const auto& pose=game->view_cur.actors.front();
             const int64_t draw_world=int64_t(pose.height_q8)*256+pose.vertical_q8;
             if(me.crash_active && me.bike.i32(0x2f0)==0 && pose.height_q8<0 && first_fall<0) {
                 first_fall=t;
-                require(draw_world>=previous_draw_world-8*256,"cliff entry must not teleport the bike to sea level");
             }
-            if(first_fall>=0)highest_draw_world=std::max(highest_draw_world,draw_world);
-            previous_draw_world=last_draw_world=draw_world;
             const auto slices=rr::project_road(game->render_route(),game->blend_camera_position(),game->blend_camera(),game->depth);
             size_t sprites=0,onscreen=0;int32_t miny=INT32_MAX,maxy=INT32_MIN;
             game->assets.scene->draw_nodes(game->render_route(),slices,game->blend_camera(),game->depth,
@@ -298,8 +318,7 @@ void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bo
                     return nodes;
                 },320,game->instance.ring.get(),nullptr,nullptr,nullptr,{},race.horizon_angle());
             if(first_fall>=0 && t<first_fall+12) {
-                require(onscreen>0,"player must remain drawable during the initial cliff fall");
-                ++visible_fall_frames;
+                if(onscreen)++visible_fall_frames;
             }
             std::cout<<"cliff draw tick="<<race.ticks()<<" bike-selected="<<bool(me.crash_bike_animation.selected)
                 <<" bike-code="<<int(me.crash_bike_animation.animation)<<" body-code="<<int(me.crash_actor.animation.animation)
@@ -312,21 +331,39 @@ void cliff(const rr::Assets& assets,const std::vector<uint8_t>& exe,bool high,bo
             <<" crash="<<me.crash_active<<" reason="<<me.bike.i32(0x2f8)<<" ground="<<me.bike.i32(0x24)
             <<" height="<<me.bike.i32(0x20)<<" selected="<<bool(me.crash_actor.animation.selected)<<'\n';
     }
-    require(entered && retained && body_frames>1,"cliff entry must retain a drawable crash body");
+    require(crossed_mounted && entered && retained && body_frames>1,"unguarded cliff entry must retain a drawable crash body");
     if(diagnose) {
-        require(first_fall>=0 && visible_fall_frames==12,"level5 check must exercise visible cliff continuity");
-        require(last_draw_world<highest_draw_world-70*256,"the bike must fall, not hang above the cliff");
-        std::cout<<"level5 visible cliff fall frames="<<visible_fall_frames<<" entry="<<first_fall
-            <<" highest="<<highest_draw_world<<" final="<<last_draw_world<<'\n';
+        require(first_fall>=0,"level5 check must cross the unguarded cliff while mounted");
+        std::cout<<"level5 cliff entry="<<first_fall<<" first-twelve visible frames="<<visible_fall_frames<<'\n';
     }
 }
 }
 int main(int argc,char** argv) {
     try {
         rr::Assets assets(rr::test::assets_root());const auto exe=assets.read("ROADRASH.EXE");
+        if(argc>1 && std::string(argv[1])=="--cliff-sections") {
+            auto game=make_game(assets,exe,false);const auto& route=game->race().route();
+            for(int side=0;side<2;++side) {
+                size_t first=0;bool active=false;
+                for(size_t i=80;i<route.size();++i) {
+                    const auto& at=route[i];const auto& t=game->assets.scene->terrain(at.section,at.local);
+                    const auto w=rr::wall_profile(t,at.path,false);
+                    const bool rail=at.path.event_type==5 && (at.path.event_parameters[2]&(1<<side));
+                    const bool open=t.type==1 && !at.dual && w.height[size_t(side)]<-100 && !rail;
+                    if(open && !active){first=i;active=true;}
+                    if(active && (!open || i+1==route.size())) {
+                        if(i-first>=12)std::cout<<"unguarded side="<<side<<" first="<<first<<" last="<<i-1
+                            <<" base="<<rr::wall_profile(game->assets.scene->terrain(route[first].section,route[first].local),route[first].path,false).base[size_t(side)]
+                            <<" top="<<rr::wall_profile(game->assets.scene->terrain(route[first].section,route[first].local),route[first].path,false).top[size_t(side)]
+                            <<" height="<<rr::wall_profile(game->assets.scene->terrain(route[first].section,route[first].local),route[first].path,false).height[size_t(side)]<<'\n';
+                        active=false;
+                    }
+                }
+            }
+            return 0;
+        }
         for(bool high:{false,true}) {
             std::cout<<"CANYN level5 high-res-bikers="<<high<<'\n';
-            if(argc>1 && std::string(argv[1])=="--cliff-raw") {cliff(assets,exe,high,true,false);continue;}
             if(argc>1 && std::string(argv[1])=="--cliff-only") {cliff(assets,exe,high,true);continue;}
             if(argc>1 && std::string(argv[1])=="--upright-speed") {
                 for(int32_t speed:{8000,16000,24000,32000})

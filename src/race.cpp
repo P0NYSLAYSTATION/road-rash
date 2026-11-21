@@ -2914,7 +2914,7 @@ void Race::step_crash(Rider& r, bool player, uint32_t controls) {
         if (ride_library_) {
             const int crash_state = r.bike.i32(0x2f4);
             const int passes = crash_state == 1 ? 0 : crash_state == 0 ? 1 : 2;
-            for (int i = 0; i < passes; ++i)
+            for (int i = 0; i < passes && r.stamina.current < r.stamina.max; ++i)
                 r.stamina.current = std::min(r.stamina.max, r.stamina.current + r.bike.i32(0x18));
         }
     }
@@ -3841,7 +3841,9 @@ void Race::ai_think(Rider& r) {
     if (ride_library_) {
         const int crash = r.bike.i32(0x2f4);
         const int passes = crash == 1 ? 0 : crash == 0 ? 1 : 2;
-        for (int i = 0; i < passes; ++i)
+        // 00407ce7/00407d1c skip regeneration when current >= maximum.
+        // Fatal damage can wrap current above the cap; preserve that value.
+        for (int i = 0; i < passes && r.stamina.current < r.stamina.max; ++i)
             r.stamina.current = std::min(r.stamina.max, r.stamina.current + r.bike.i32(0x18));
     }
 }
@@ -3983,12 +3985,8 @@ void Race::step_frozen_schedule(Rider& r) {
     // 0x00406940 backs up +0xdc/+0xe0 to +0x31c/+0x320 and nulls draw, think,
     // the +0x2c slices and +0xc0 & 0xfc on both the bike and its half.
     if (r.frozen && !r.parked && ring_) {
-        if (outside_windows(r.bike.i32(0x1c), 0x1e00, 0x800)) {
-            r.parked = true;
-            r.bike_slice_present = r.half_slice_present = false;
-            r.bike.u8(0xc0) &= 0xfc;
-            r.half_object.u8(0xc0) &= 0xfc;
-        }
+        if (outside_windows(r.bike.i32(0x1c), 0x1e00, 0x800))
+            park(r); // invoke the actual callback, including the cop's deferred unlink
     }
 }
 void Race::step_rider(Rider& r, uint32_t controls, bool player) {
@@ -4983,12 +4981,12 @@ void Race::update_camera() {
     if ((p.bike.u8(0xc0) & 0x10) != 0 || busted_ || p.result_code != 1) { //00416010 starts the result delay for wrecks, too
         if (camera_lift_ < 300) ++camera_lift_;
         if (camera_back_ < 900) camera_back_ += 3;
-    } else {
-        camera_lift_ = camera_lift_ > 0 ? camera_lift_ - 1 : 0;
-        camera_back_ = camera_back_ > 2 ? camera_back_ - 3 : 0;
     }
+    // 00437b34 starts the lift at 150. 00437d44..00437d7e only
+    // increments it for results; there is no ordinary-race decay branch.
     camera_x_ = centre + off;
-    camera_height_ = p.bike.i32(0x24) + camera_lift_;
+    const int32_t ground = p.crash_active ? p.crash_actor.motion.i32(0x24) : p.bike.i32(0x24);
+    camera_height_ = ground + camera_lift_;
     if (camera_height_ < 0x97) camera_height_ = 0x96;
     // Plan 34 C1: seats >= 1 keep their own ring-camera pull-back (the same
     // ramp), which places their ring windows.
@@ -5320,11 +5318,12 @@ void Race::collide_riders() {
         if (!rider_or_ped(a)) continue;
         if (a.rider >= 0 && a.type != 8) {
             const Rider& r = riders_[size_t(a.rider)];
-            if (r.frozen) continue;
-            // 0x004368f0 outer: +0x10 == tick with flags & 6 == 6. Live
-            // checks the scheduler image; solo keeps the frozen skip but
-            // must still enforce the flags (e.g. split-left 845: the player
-            // is 7, the overlapping frozen is 4 and must not contact).
+            if (r.frozen && !live_schedule_) continue;
+            // 0x004368f0 outer: +0x10 == tick with flags & 6 == 6.
+            // Null think/move does not suppress this global contact pass:
+            // frozen live nodes can qualify on their metadata-only cadence.
+            // Legacy unscheduled fixtures retain their frozen skip. A node
+            // with flags4 cannot contact even when the player has flags7.
             if ((r.bike.u8(0xc0) & 6) != 6) continue;
             if (live_schedule_ && r.sched_last != ticks_) continue;
         } else if (a.car >= 0) {

@@ -84,6 +84,8 @@ static int32_t g_initial_traffic_tick = -1;
 static int32_t g_initial_pedestrian_tick = -1;
 static int g_quit_after = -1;
 static int g_until_finish;
+static int g_cliff_sample = -1;
+static uint32_t g_cliff_entry_tick;
 static int32_t g_first_tick = -1;
 static int g_solo;
 static int g_human;
@@ -122,7 +124,7 @@ static uint32_t g_frame;
  * first step) stays live. */
 static void sim_freeze_others(void) {
     const uintptr_t player = (uint32_t)RD32(0x004642d8);
-    const int32_t ppos = readable(player + 0x20, 4) ? (int32_t)*(uint32_t*)(player + 0x1c) : 0;
+    const uintptr_t player_half = readable(player + 0x2fc,4) ? (uint32_t)RD32(player+0x2fc) : 0;
     if (!readable(0x0046dcc8, 4)) return;
     const uintptr_t S = (uint32_t)RD32(0x0046dcc8);
     if (!readable(S, 4)) return;
@@ -134,20 +136,12 @@ static void sim_freeze_others(void) {
     }
     for (int guard = 0; node && node != end && guard < 512; ++guard) {
         if (!readable(node, 0xe8)) break;
-        if (node != player) {
-            const uint32_t think = (uint32_t)*(uint32_t*)(node + 0xe0);
-            int spare = 0;
-            if (think == 0x00434660 && readable(node + 0x20, 4)) {
-                const int32_t npos = (int32_t)*(uint32_t*)(node + 0x1c);
-                if (npos > ppos - 256 && npos < ppos + 256) spare = 1;
-            }
-            if (!spare) {
-                DWORD old;
-                if (VirtualProtect((void*)node, 0xe8, PAGE_EXECUTE_READWRITE, &old)) {
-                    *(uint32_t*)(node + 0xe0) = 0;
-                    *(uint32_t*)(node + 0xe4) = 0;
-                    VirtualProtect((void*)node, 0xe8, old, &old);
-                }
+        if (node != player && node != player_half) {
+            DWORD old;
+            if (VirtualProtect((void*)node, 0xe8, PAGE_EXECUTE_READWRITE, &old)) {
+                *(uint32_t*)(node + 0xe0) = 0;
+                *(uint32_t*)(node + 0xe4) = 0;
+                VirtualProtect((void*)node, 0xe8, old, &old);
             }
         }
         node = (uint32_t)*(uint32_t*)(node + 4);
@@ -263,6 +257,23 @@ static uint32_t __cdecl hook_controls(void) {
         const int32_t position = (int32_t)RD32(rider + 0x1c);
         const int can_drive = g_race_started && RD32(0x004753c0) == 0 &&
                               RD32(rider + 0x2f4) == 0 && RD32(0x004c5d7c) <= 1;
+        if (g_cliff_sample >= 0) {
+            const int32_t sample = position >> 8;
+            if (!g_cliff_entry_tick && sample >= g_cliff_sample) {
+                const int rail = RD8(slice + 0x38) == 5 && (RD8(slice + 0x3b) & 2);
+                // The controller must reach the gap upright, not coast into it
+                // as an already detached crash body. Read guardrail flags from
+                // the original active sub-slice, not the native course table.
+                if (!can_drive || rail || sample > g_cliff_sample + 3) {
+                    if (g_out) fprintf(g_out,"# cliff approach rejected: tick=%u sample=%d mounted=%d rail=%d\n",tick,sample,can_drive,rail);
+                    ExitProcess(4);
+                }
+                g_cliff_entry_tick = tick;
+                g_quit_after = (int)g_sim_frames + 210;
+                if (g_out) fprintf(g_out,"# mounted cliff approach: tick=%u sample=%d lateral=%d speed=%d\n",tick,sample,(int32_t)RD32(rider+0x28),speed);
+            }
+            if (g_cliff_entry_tick) return 1 | 0x200;
+        }
         if (!can_drive) g_recovering = 0;
         if (rr_drive_stalled(&g_drive_progress, tick, position, can_drive)) {
             const int32_t lateral = (int32_t)RD32(rider + 0x28);
@@ -483,6 +494,11 @@ static void dump_terrain_walker(const char* name, uintptr_t outer) {
 static void dump_sim_tick(void) {
     char key[96];
     const int32_t tick = RD32(0x004b7ecc);
+    if (g_first_tick >= 0 && tick != g_first_tick + (int32_t)g_sim_frames) {
+        fprintf(g_out,"# invalid RR_ORACLE simulation tick: race restarted at %d after %u frames\n",tick,g_sim_frames);
+        fflush(g_out);
+        ExitProcess(5);
+    }
     if (g_first_tick < 0) {
         g_first_tick = tick;
         fprintf(g_out, "frame\t0\n");
@@ -492,6 +508,7 @@ static void dump_sim_tick(void) {
         rr_log("character", -1);
         rr_log("seed", g_seed);
         rr_log("solo", g_solo);
+        if(g_solo) rr_log("probe.preserve_player_half",1);
         if (g_knock_initial_tick) rr_log("input.knock_tick", g_knock_initial_tick);
         rr_log("ring.car_schema", 2); // byte offsets corrected from decompiler element indices
         rr_log("rng.counter_enabled", g_rand_counter_installed);
@@ -1577,6 +1594,7 @@ void rr_log(const char* key, long long value) {
 typedef void(__cdecl* rr_frame_fn)(void);
 static rr_frame_fn const orig_frame = (rr_frame_fn)0x004439f0;
 static int g_pixels, g_pixel_every = 30, g_pixel_written;
+static uint32_t g_shot_start_tick, g_shot_end_tick;
 static int g_pixel_width, g_pixel_height, g_pixel_pitch;
 static char g_output[MAX_PATH];
 static int g_raster, g_save;
@@ -3504,7 +3522,10 @@ static void dump_rider_objects(FILE* out) {
     }
 }
 static int capture_frame(void) {
-    return g_out && g_pixels && !(g_frame % (uint32_t)g_pixel_every);
+    return g_out && g_pixels && !(g_frame % (uint32_t)g_pixel_every) &&
+        (g_cliff_sample < 0 || g_cliff_entry_tick) &&
+        (!g_shot_start_tick || g_sim_frames >= g_shot_start_tick) &&
+        (!g_shot_end_tick || g_sim_frames <= g_shot_end_tick);
 }
 // Posed components advance without real 60Hz waits. Settle the original
 // asynchronous MSRR worker so traversal cannot overrun its eight-entry queue.
@@ -3803,7 +3824,7 @@ static void __cdecl hook_draw(void) {
     if (width < 1 || width > 1280 || height < 1 || height > 960 || pitch < width || pitch > 16384) return;
     if (!readable(base, (size_t)(height - 1) * pitch + width)) return;
     if (g_raster && g_frame == 0) capture_raster(base, width, height, pitch);
-    if (!g_pixels || g_frame % (uint32_t)g_pixel_every) return;
+    if (!capture_frame()) return;
     char path[MAX_PATH];
     const char* slash = strrchr(g_output, '\\');
     const size_t prefix = slash ? (size_t)(slash - g_output) + 1 : 0;
@@ -5173,6 +5194,10 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_FRONTEND_TRACE", buf, sizeof buf)) g_frontend_trace = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_FRAMES", buf, sizeof buf)) g_quit_after = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_UNTIL_FINISH", buf, sizeof buf)) g_until_finish = atoi(buf) != 0;
+    if (GetEnvironmentVariableA("RR_ORACLE_CLIFF_SAMPLE", buf, sizeof buf)) {
+        g_cliff_sample = atoi(buf);
+        if (g_cliff_sample < 50) return 0;
+    }
     if (GetEnvironmentVariableA("RR_ORACLE_PIXELS", buf, sizeof buf)) g_pixels = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_GROUPS", buf, sizeof buf)) g_groups = atoi(buf) != 0;
     if (GetEnvironmentVariableA("RR_ORACLE_FULL_SCENE", buf, sizeof buf)) g_full_scene = atoi(buf) != 0;
@@ -5239,6 +5264,9 @@ static int rr_install_hooks(void) {
     if (GetEnvironmentVariableA("RR_ORACLE_MENU", buf, sizeof buf)) g_menu_screen = atoi(buf);
     if (GetEnvironmentVariableA("RR_ORACLE_SHOT_EVERY", buf, sizeof buf) && atoi(buf) > 0)
         g_pixel_every = atoi(buf);
+    if (GetEnvironmentVariableA("RR_ORACLE_SHOT_START_TICK", buf, sizeof buf)) g_shot_start_tick = (uint32_t)strtoul(buf, NULL, 10);
+    if (GetEnvironmentVariableA("RR_ORACLE_SHOT_END_TICK", buf, sizeof buf)) g_shot_end_tick = (uint32_t)strtoul(buf, NULL, 10);
+    if (g_shot_end_tick && g_shot_end_tick < g_shot_start_tick) return 0;
     if (GetEnvironmentVariableA("RR_ORACLE_LEVEL", buf, sizeof buf)) {
         g_capture_level = atoi(buf);
         if (g_capture_level < 1 || g_capture_level > 5) {

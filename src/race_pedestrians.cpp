@@ -350,12 +350,9 @@ void Race::run_ped_node(Pedestrian& p) {
     p.next_tick = ticks_ + b.i32(0x14);
     if (b.i32(0x28) < -0xc8000 || b.i32(0x28) > 0xc8000 || front - b.i32(0x1c) < 0 ||
         b.i32(0x1c) - back < 0) {
-        // Nulled-callback solo replays keep their measured same-step removal
-        // contract; only the live move-slot path defers unlink.
-        if (freeze_actors_) {
-            pedestrians_->recycle(p);
-            return;
-        }
+        // Null-callback nodes retain this marked frame too: the original
+        // isolated level-5 capture keeps the walker at tick781 with next/last
+        // tick881, then unlinks it in the following prepass.
         // 0x00437c10 -> 0x00437be0: disabled now, still in the list through
         // this frame; next tick's prepass returns the pool slot.
         p.pending_remove = true;

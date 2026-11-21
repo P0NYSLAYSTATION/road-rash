@@ -30,35 +30,6 @@ int32_t blend_heading(int32_t a, int32_t b, uint32_t alpha_q16) {
         r += period;
     return int32_t(r);
 }
-// The fatal cliff branch resets ground and relative height together. Bridge
-// that discontinuity in the visible pose using the actor's vertical velocity
-// and gravity at 60 Hz. Shadows stay on physical ground; this never feeds
-// physics, contacts, wreck timing or RNG.
-void cliff_pose(ActorPose& pose, CliffFallPose& state, const CliffFallPose& bike_before,
-                const Bike& actor, uint32_t tick, bool fatal) {
-    const int32_t ground = pose.height_q8;
-    const int64_t native_world = int64_t(ground) * 256 + pose.vertical_q8;
-    const auto previous = state.initialized ? state : bike_before;
-    const bool consecutive = previous.initialized && tick == previous.tick + 1;
-    if (!fatal || !pose.visible || tick < state.tick) state.active = false;
-    if (!state.active && fatal && pose.visible && consecutive && ground < 0 &&
-        int64_t(previous.ground) - ground >= 70) {
-        state.active = true;
-        state.world_q8 = native_world + (int64_t(previous.ground) - ground) * 256;
-        state.velocity_q8 = actor.i32(0xf4);
-    } else if (state.active && tick > state.tick) {
-        const int64_t dt = tick - state.tick;
-        const int64_t gravity = -std::max<int32_t>(1, actor.i32(0x1b4));
-        state.world_q8 += state.velocity_q8 * dt + gravity * dt * (dt - 1) / 2;
-        state.velocity_q8 += gravity * dt;
-        if (state.world_q8 <= int64_t(ground) * 256 && state.velocity_q8 <= 0)
-            state.active = false;
-    }
-    if (state.active) pose.vertical_q8 = int32_t(state.world_q8 - int64_t(ground) * 256);
-    state.ground = ground;
-    state.tick = tick;
-    state.initialized = true;
-}
 } // namespace
 
 void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic, bool presentation_motion) {
@@ -69,7 +40,6 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic, 
     v.tick = uint32_t(race.ticks());
     v.actors.clear();
     const auto& riders = race.riders();
-    if (presentation_motion) v.cliff_falls.resize(riders.size() * 2);
     for (size_t i = 0; i < riders.size(); ++i) {
         const auto& rd = riders[i];
         ActorPose p;
@@ -96,9 +66,6 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic, 
                 p.lateral_q8=int32_t(int64_t(p.lateral_q8)+int64_t(rd.half_mirror.lat_vel)*elapsed);
             }
         }
-        const auto bike_before = presentation_motion ? v.cliff_falls[2 * i] : CliffFallPose{};
-        const bool fatal = rd.crash_active && rd.bike.i32(0x2f0) == 0;
-        if (presentation_motion) cliff_pose(p, v.cliff_falls[2 * i], bike_before, rd.bike, v.tick, fatal);
         v.actors.push_back(p);
         if (rd.crash_active) {
             ActorPose c;
@@ -111,10 +78,8 @@ void capture_view(ViewState& v, const Race& race, const TrafficSystem* traffic, 
             c.roll = rd.crash_actor.motion.i32(0x60);
             c.route = rd.crash_actor.route;
             c.visible = rd.live && !rd.parked && rd.half_slice_present;
-            if (presentation_motion)
-                cliff_pose(c, v.cliff_falls[2 * i + 1], bike_before, rd.crash_actor.motion, v.tick, fatal);
             v.actors.push_back(c);
-        } else if (presentation_motion) v.cliff_falls[2 * i + 1] = {};
+        }
     }
     if (traffic) {
         const auto& cars = traffic->cars();

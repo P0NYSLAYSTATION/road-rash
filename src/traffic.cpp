@@ -916,13 +916,13 @@ void TrafficSystem::think_intersections(int32_t back_q8, int32_t front_q8, uint3
 
 void TrafficSystem::run_controller(size_t ci, int32_t back_q8, int32_t front_q8, uint32_t tick,
                                    const std::vector<RouteSample>& route,
-                                   const std::function<uint32_t()>& random) {
+                                   const std::function<uint32_t()>& random, bool frozen) {
     auto& c = controllers_[ci];
     if (!c.active || c.next_tick > int32_t(tick)) return;
     const int32_t dt = int32_t(tick) - c.last_tick; // +0x18
     c.last_tick = int32_t(tick);
     c.next_tick = int32_t(tick) + 0x1e;
-    for (int slot = 0; slot < 4; ++slot) {
+    if (!frozen) for (int slot = 0; slot < 4; ++slot) {
         const int si = c.signals[slot];
         if (si < 0) continue;
         auto& s = signals_[size_t(si)];

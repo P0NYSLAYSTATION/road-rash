@@ -56,8 +56,8 @@ struct FieldReplay {
         std::vector<std::pair<int, uint32_t>> out{{0, 4}};
         for (const auto& n : race().schedule_order()) {
             const Rider& r = race().riders()[size_t(n.rider)];
-            if (n.type == 4 && n.rider != 0 && !r.parked) out.push_back({n.rider, 4});
-            if (n.type == 8 && n.rider == 0) out.push_back({0, 8});
+            if (n.type == 4 && n.rider != 0 && !r.parked && !r.frozen) out.push_back({n.rider, 4});
+            if (n.type == 8 && n.rider == 0 && !r.half_frozen) out.push_back({0, 8});
         }
         return out;
     }
@@ -628,11 +628,14 @@ struct FieldReplay {
             used.insert(base + "position");
         }
         const auto& riders = race().riders();
+        if(!riders.empty() && riders[0].half_frozen)
+            have.push_back({0x004463e0,riders[0].half_mirror.position});
         for (const auto& n : race().roadside_nodes())
             if (n.active) have.push_back({0, n.position});
         for (size_t i = 1; i < riders.size(); ++i) {
             const Rider& r = riders[i];
             if (r.parked) have.push_back({0, r.bike.i32(0x1c)});
+            else if (r.frozen) have.push_back({0x00446250, r.bike.i32(0x1c)});
             have.push_back({r.parked ? 0 : 0x004463e0, r.half_mirror.position});
         }
         if (setup.instance.pedestrians)
@@ -676,7 +679,7 @@ struct FieldReplay {
                 }
                 const Rider& r = race().riders()[size_t(who->second)];
                 const std::string field = key.substr(dot + 1);
-                if (!r.parked) {
+                if (!r.parked && !r.frozen) {
                     diff = key + ": native rider " + std::to_string(who->second) + " is live";
                     return;
                 }
@@ -908,6 +911,13 @@ struct FieldReplay {
             const auto knock = g.frames.front().find("input.knock_tick");
             if (knock != g.frames.front().end() && knock->second == race().ticks() + 1)
                 race().crash_now(race().riders()[0]);
+            if(h.contains("solo") && h.at("solo")) {
+                for(size_t rider=1;rider<race().riders().size();++rider) race().riders()[rider].frozen=true;
+                auto& player=race().riders()[0];
+                if(!h.contains("probe.preserve_player_half") && player.crash_active &&
+                   std::abs(int64_t(player.crash_actor.motion.i32(0x1c))-player.bike.i32(0x1c))>=256)
+                    player.half_frozen=true; // same persistent null callback as sim_freeze_others
+            }
             race().step(demo ? 0 : uint32_t(fc->second));
             const auto ft = f.find("tick");
             if (ft == f.end() || ft->second != tick0 + int64_t(i)) {
@@ -963,6 +973,7 @@ struct FieldReplay {
                                                     "probe.end",
                                                     "probe.player",
                                                     "probe.frozen_words",
+                                                    "probe.preserve_player_half",
                                                     "player.demo_hold",
                                                     "player.think",
                                                     "player.think_count",

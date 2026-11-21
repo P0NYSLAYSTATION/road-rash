@@ -210,7 +210,7 @@ class TrafficSystem {
                         const std::function<uint32_t()>& random, uint32_t tick,
                         bool defer_controllers = false);
     void run_controller(size_t index, int32_t back_q8, int32_t front_q8, uint32_t tick,
-                        const std::vector<RouteSample>& route, const std::function<uint32_t()>& random);
+                        const std::vector<RouteSample>& route, const std::function<uint32_t()>& random, bool frozen = false);
     void run_car(size_t index, const std::vector<RouteSample>& route, int32_t camera_q8, int32_t front_q8,
                  int32_t player_q8, int32_t player_lateral, const std::function<uint32_t()>& random,
                  uint32_t tick, int32_t player_velocity);

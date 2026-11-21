@@ -262,7 +262,7 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
                 run_ped_node(pedestrians_->pool()[n.index]);
             } else if (n.type == 0x400) {
                 traffic_->run_controller(n.index, camera - 0x3000, camera + 0x5000, uint32_t(ticks_),
-                                         route_of(riders_[0]), [this] { return random(); });
+                                         route_of(riders_[0]), [this] { return random(); }, freeze_actors_);
                 // 00438aa0 inserts newly spawned cars in the live list. Only
                 // those behind this cursor are visited during the same pass.
                 const auto& pool = traffic_->cars();
@@ -287,6 +287,13 @@ void Race::schedule_pass(uint32_t controls, bool countdown) {
         const ScheduleNode n = order[at];
         run_actors(n.position);
         Rider& r = riders_[size_t(n.rider)];
+        // Null callbacks still advance last/next/dt, but do not recalculate
+        // the LOD interval or run think/move (00437e60..00438159).
+        if (r.frozen) {
+            if (n.type == 4) step_frozen_schedule(r);
+            continue;
+        }
+        if (n.type == 8 && r.half_frozen) continue;
         if (n.type == 8) {
             if (r.half_sched_next <= ticks_) run_half_node(r, word(r), countdown);
         } else if (r.sched_next <= ticks_)

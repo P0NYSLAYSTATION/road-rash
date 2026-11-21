@@ -314,3 +314,146 @@ checks passing do not contradict the report.
 Release rr-game build: PASS (build/cliff-game-build-20261121.log).
 Focused bob/view-state components: 2/2 PASS (build/cliff-components-20261121.log).
 No original or installed game was launched.
+
+## November 21 - original mounted-cliff verification in progress
+
+The owner corrected the scenario: the prior controls hit a wall and threw the
+rider off. Those recordings do not verify riding a mounted bike off an unguarded
+cliff. Release 1.1.35's presentation bridge has not been accepted as exact parity.
+
+The level-5 course scan identifies guardrail-free right-side intervals from CESR
+event 5 side flags. The first opening (1922..1936) is a shallow descent; the new
+mounted-drop target is the steeper opening at 2003..2021. The native regression
+now starts at that real section, checks absence of a guardrail, proves the rider
+was mounted before the initial fatal ground transition, and checks the visible
+fall in both biker-art modes. It passes; this alone is not original parity.
+
+Original capture attempts rejected:
+- canyn-l5-cliff-postfall-20261121: complete 820 ticks, but wall/body-fall case.
+  Numerical scene comparison exposed reversed bike/body painter order at equal
+  positions on tick673; original draws the body first. Fixed that order.
+  Replay then stops on a pedestrian resource-availability difference at tick699;
+  no skip or golden modification was used to get beyond it.
+- First guardrail-free approach targeted the shallow opening; stopped its owned
+  process. Runner restored the working E:/RR DLL.
+- Full-field approach to the steep opening restarted the race before reaching
+  the target. Stopped and rejected. Added immediate noncontiguous-tick rejection
+  in the oracle to prevent another silent restart wasting the run.
+
+Current owned run: build/capture-unguarded-cliff.py, process log
+build/unguarded-cliff-isolated-capture.log. Uses E:/RR/ROADRASH.EXE with the
+working AWEMAN instrumented reversibly, seed1, level5, human branch, existing
+solo isolation (moving opponents/traffic disabled), drive5 normal inputs until
+sample2003 then right/accelerate. It checks mounted/rail-free entry, records
+controls, dumps scenes only after reaching the opening and exits 150 ticks later.
+No acceptance until the capture is complete, contiguous and restored, its entry
+is audited, and the comparison passes. Session id11975 at handoff time.
+
+Added --render-presentation to exercise the real captured presentation pose and
+--render-player for exact player body animation/quad/orientation checks while
+excluding unrelated opponent presentation smoothing. Both retain strict native
+simulation checks; the wall/body-fall recording still stops at tick699's resource
+difference. Source changes are uncommitted; no new release for this work yet.
+
+## November 21 - exact legacy-isolation cliff comparison passed
+
+The correct unguarded entry is now recorded in
+analysis/oracle/canyn-l5-mounted-cliff-isolated-20261121.tsv: 23158 contiguous
+human ticks, seed1, level5, exact E:/RR executable; runner exit0 and working DLL
+restored. Driver enters the rail-free interval at tick23008/sample2003. The player
+is mounted at23043 and the first cliff crash is23044, outcome5. 32 scene windows.
+
+Measured PASS: build/mounted-cliff-player-comparison.log: all23158 ticks/RNG and
+32 actual-presentation player windows (40 body nodes) match; zero ignored golden
+state fields. build/mounted-cliff-full-scene-comparison.log: same strict replay,
+32 complete native scenes,259 prop placements/heights,9455 generated nodes match.
+build/mounted-cliff-original-pixels.log: all32 original-list rasters have zero
+differing pixels. 204 audio-RPM timing notes are explicitly nondeterministic.
+Only three selected original frames were viewed, not a frame-by-frame visual audit.
+
+Those measurements DISPROVED the synthetic cliff bridge shipped in1.1.35:
+original body nodes are absent immediately after the fatal drop; the synthetic
+bridge emitted extra bodies at23046. Removed CliffFallPose/history/helper entirely.
+Retained the actual height component in ActorPose. Removed the invented assertion
+that the body must stay visible for12 frames; the entry component test instead
+proves an unguarded mounted crossing and retained crash animation. Exact rendering
+acceptance is now the recorded original fixture, not that visibility assumption.
+
+Actual presentation fixes: camera lift starts150 (working EXE raw0x36f34 /
+VA00437b34), no ordinary-race decrement (00437d44..00437d7e), height follows the
+rider half's ground (00437d8e). Crash tie draws body before bike. The reported
+shoulder mismatch at sample2022 was a single-road tunnel, NOT a split: original
+sub-slice shoulders112 vs source DLSR224. Road projection now halves tunnel
+shoulders; the comparator applies that explicit source/runtime representation
+mapping. Physical wall sampling retains source widths. Full9455-node check passes.
+
+Needed isolated-replay fixes: human solo now uses the modern live field replay,
+including both native zero-input startup ticks, periodic police RNG, and declared
+one-time FROZEN BACKGROUND inputs; player state is never imported. Frozen nodes
+run the original metadata-only cadence and global contacts; their park callback
+handles cop deferred removal. Pedestrians retain their marked removal frame even
+with null callbacks. Frozen intersection controllers retain metadata/window tests
+but skip thinking/RNG. A110-tick prefix probe measured original RNG callers
+00404bf3/00404c18 for the frozen contact at101; no rejection was fabricated and
+no field was skipped to pass. The complete replay now checks all fields.
+
+Final natural-tail capture is still ACTIVE, exec session49729:
+build/capture-natural-cliff.py -> build/mounted-cliff-natural-capture.log.
+The previous isolation helper wrongly froze the detached player half once it
+separated by a sample (tick23095). It is fixed to preserve the actual bike+2fc
+pointer for the whole run, logged as probe.preserve_player_half=1. The field
+replay retains the old rule only for older immutable recordings lacking that
+marker. New run goes210 ticks beyond entry, with full scene/pixels only near
+the cliff; no further full capture should be needed. This final run is necessary
+to verify the NATURAL tail, rather than claiming the32-frame frozen tail proves it.
+
+New CTest names level5-cliff-entry, level5-cliff-render (full presentation) and
+level5-cliff-pixels. The latter two point at the natural recording, not yet
+published by the active runner. Do not run these until capture/restoration finish.
+All implementation is still uncommitted; do not release until natural comparison
+and final focused gates pass. Upright pedestrian owner report remains unresolved.
+
+## November 21, 2026 - natural unguarded cliff rendering verified
+
+The CANYN level-5 mounted-bike case now matches the working E:/RR original.
+The bike drives through the guardrail-free right opening at sample2003; it is
+still mounted at tick23043 and falls at23044. This is not the earlier wall impact.
+The final capture preserves the actual player-half pointer after detachment,
+so its tail includes natural motion rather than the old isolation freeze.
+
+Strict single-anchor replay: 23218 ticks including RNG identical, zero ignored
+golden state fields. All 22 complete native scene windows match camera,
+geometry, materials and order: 178 prop placements/heights, 6478 generated
+nodes. Original-list raster comparisons for all 22 frames have zero differing
+pixels. Evidence: build/natural-cliff-render-receipt.log and
+build/natural-cliff-other-receipt.log; capture/receipt:
+analysis/oracle/canyn-l5-mounted-cliff-natural-20261121.tsv[.receipt.json].
+The capture ends174 ticks after the fatal drop, before the frontend transition.
+This verifies the measured level-5 cliff sequence, not every course/frame.
+
+Removed the synthetic fall bridge from1.1.35: the original briefly loses the bike
+from view at the fatal drop and then draws the detached rider. Forcing continuous
+on-screen motion produced extra nodes absent from the original. Fixed the actual
+camera lift baseline150, rider-half ground source and result ramp; preserved
+original body/bike tie order. Corrected tunnel shoulder projection. Natural-tail
+verification also exposed missing stamina-regeneration guards: damage wrapping
+was already correct, but regeneration clamped an above-cap wrapped value. Original
+00407ce7/00407d1c skips that operation; both native AI regeneration paths now do too.
+
+The oracle's isolated human replay now uses live scheduling, correct null-callback
+cadence/contacts/removal, police decisions and frozen controller behavior. Frozen
+background state is a declared one-time fixture input; player state is never
+imported or reanchored. The old isolation behavior remains reproducible for older
+recordings without probe.preserve_player_half. The human-function invocation
+counter stops after the fatal transition changes dispatch; the player half remains
+active, with two rider slots and natural motion through the final frame.
+
+Final validation on the same source: level5-cliff-render1/1 PASS
+(build/natural-cliff-render-final.log), remaining level5/bob/view-state9/9 PASS
+(build/natural-cliff-other-final-gates.log). Combined10/10, no skips. The earlier
+9/10 log remains as failure history and is superseded. There are278 explicitly
+nondeterministic audio-RPM notes, zero far-edge slice-load notes. Release game
+build succeeds. All capture processes ended; E:/RR/AWEMAN32.DLL restored to
+ca7f2f65bf6d1550857556a27d65d4f44d7a6ca14c2be89b7c0f9affb6a47022.
+No installer was executed. The separately reported upright pedestrian bug remains
+open; controlled upright checks passing do not dismiss it.

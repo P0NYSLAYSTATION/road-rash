@@ -170,13 +170,16 @@ std::vector<RoadSlice> project_road(const std::vector<RouteSample>& route, uint3
                         {},
                         (logical_width & ~1) * 32768};
         for (int r = 0; r < slice.count; ++r) {
+            // Paths retain source DLSR widths; tunnel sub-slices project
+            // half those shoulder widths, as their wall profile does.
+            const int shoulder_divisor = (sub[r].path->marking_flags & 0x40) ? 2 : 1;
             slice.road[r] = {
                 road[r].x + sub[r].offset - camera_x,
                 int32_t(int64_t(camera.height - road[r].y) * slice.scale + int64_t(view_horizon) * 65536),
                 -sub[r].path->left,
                 sub[r].path->right,
-                -sub[r].path->left - sub[r].path->shoulder_left,
-                sub[r].path->right + sub[r].path->shoulder_right,
+                -sub[r].path->left - sub[r].path->shoulder_left / shoulder_divisor,
+                sub[r].path->right + sub[r].path->shoulder_right / shoulder_divisor,
                 road[r].y,
                 approx_atan2(0x1000000, int32_t(uint32_t(road[r].dx) * 65536u)) * 65536};
             road[r].x += road[r].dx;
